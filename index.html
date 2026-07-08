@@ -2,8 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  />
+
   <title>AutoClarity</title>
+
+  <meta
+    name="description"
+    content="AutoClarity helps drivers understand likely vehicle problems, urgency, repair-cost direction, and what to do next before visiting a repair shop."
+  />
 
   <style>
     * {
@@ -12,7 +22,14 @@
 
     body {
       margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Roboto,
+        Helvetica,
+        Arial,
+        sans-serif;
       background: #f5f7fb;
       color: #111827;
       text-align: center;
@@ -75,7 +92,10 @@
       padding: 15px 28px;
       border-radius: 16px;
       box-shadow: 0 16px 32px rgba(0, 0, 0, 0.22);
-      transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+      transition:
+        transform 0.18s ease,
+        box-shadow 0.18s ease,
+        background 0.18s ease;
       margin-bottom: 34px;
     }
 
@@ -85,9 +105,86 @@
       background: #111;
     }
 
+    .app-store-button:focus-visible {
+      outline: 4px solid rgba(37, 99, 235, 0.3);
+      outline-offset: 4px;
+    }
+
     .apple-logo {
       font-size: 24px;
       line-height: 1;
+    }
+
+    .video-card {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 24px;
+      padding: 30px;
+      box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+      margin: 0 auto 24px;
+    }
+
+    .video-label {
+      display: inline-block;
+      color: #1d4ed8;
+      background: #eff6ff;
+      border: 1px solid #dbeafe;
+      border-radius: 999px;
+      padding: 7px 12px;
+      margin-bottom: 13px;
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+    }
+
+    .video-card h2 {
+      font-size: 27px;
+      line-height: 1.2;
+      margin: 0 0 10px;
+      letter-spacing: -0.6px;
+    }
+
+    .video-description {
+      font-size: 16.5px;
+      line-height: 1.55;
+      color: #4b5563;
+      max-width: 570px;
+      margin: 0 auto 22px;
+    }
+
+    .video-frame {
+      position: relative;
+      width: 100%;
+      max-width: 360px;
+      aspect-ratio: 9 / 16;
+      margin: 0 auto;
+      overflow: hidden;
+      background: #000;
+      border-radius: 20px;
+      box-shadow: 0 18px 38px rgba(15, 23, 42, 0.24);
+    }
+
+    .video-frame iframe {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border: 0;
+    }
+
+    .video-note {
+      font-size: 13.5px;
+      line-height: 1.45;
+      color: #6b7280;
+      margin: 16px auto 0;
+    }
+
+    .video-cta {
+      margin-top: 24px;
+    }
+
+    .video-cta .app-store-button {
+      margin-bottom: 0;
     }
 
     .trust-card {
@@ -120,6 +217,10 @@
       display: flex;
       gap: 10px;
       align-items: flex-start;
+    }
+
+    .benefits li:last-child {
+      margin-bottom: 0;
     }
 
     .check {
@@ -156,6 +257,10 @@
       text-decoration: none;
     }
 
+    .support-card a:hover {
+      text-decoration: underline;
+    }
+
     .footer {
       font-size: 15px;
       color: #6b7280;
@@ -166,6 +271,10 @@
       text-decoration: none;
       font-weight: 700;
       margin: 0 8px;
+    }
+
+    .footer a:hover {
+      text-decoration: underline;
     }
 
     @media (max-width: 520px) {
@@ -195,11 +304,26 @@
         width: 100%;
         max-width: 340px;
         font-size: 17px;
+        padding: 15px 18px;
       }
 
+      .video-card,
       .trust-card,
       .support-card {
         padding: 22px;
+      }
+
+      .video-card h2 {
+        font-size: 24px;
+      }
+
+      .video-description {
+        font-size: 15.5px;
+      }
+
+      .video-frame {
+        max-width: 330px;
+        border-radius: 17px;
       }
     }
   </style>
@@ -209,14 +333,22 @@
   <main class="page">
     <div class="container">
 
-      <img src="icon.png" alt="AutoClarity app icon" class="app-icon" />
+      <img
+        src="icon.png"
+        alt="AutoClarity app icon"
+        class="app-icon"
+      />
 
       <h1>AutoClarity</h1>
 
-      <p class="tagline">Know what’s wrong before you pay a shop.</p>
+      <p class="tagline">
+        Know what’s wrong before you pay a shop.
+      </p>
 
       <p class="description">
-        AutoClarity helps drivers identify likely vehicle problems in minutes using mechanic-style diagnostic logic, repair-cost guidance, and report-style results.
+        AutoClarity helps drivers identify likely vehicle problems in minutes
+        using mechanic-style diagnostic logic, repair-cost guidance, and
+        report-style results.
       </p>
 
       <a
@@ -229,28 +361,122 @@
         <span>Download on the App Store</span>
       </a>
 
+      <section class="video-card">
+        <span class="video-label">
+          Built by a real mechanic
+        </span>
+
+        <h2>
+          See How AutoClarity Works
+        </h2>
+
+        <p class="video-description">
+          In under two minutes, see how AutoClarity helps you understand
+          likely causes, urgency, repair-cost direction, and what to do next
+          before visiting a repair shop.
+        </p>
+
+        <div class="video-frame">
+          <iframe
+            src="https://www.youtube-nocookie.com/embed/UoXXYkiHdJ4?rel=0&playsinline=1"
+            title="AutoClarity explained by a real mechanic"
+            loading="lazy"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            referrerpolicy="strict-origin-when-cross-origin"
+            allowfullscreen
+          ></iframe>
+        </div>
+
+        <p class="video-note">
+          Press Play to watch. The video will not begin automatically.
+        </p>
+
+        <div class="video-cta">
+          <a
+            class="app-store-button"
+            href="https://apps.apple.com/us/app/autoclarity/id6761438602"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <span class="apple-logo"></span>
+            <span>Download AutoClarity</span>
+          </a>
+        </div>
+      </section>
+
       <section class="trust-card">
         <h2>Why drivers use AutoClarity</h2>
+
         <ul class="benefits">
-          <li><span class="check">✓</span><span>Identify likely vehicle problems before going to a repair shop.</span></li>
-          <li><span class="check">✓</span><span>Understand urgency, possible causes, and repair direction.</span></li>
-          <li><span class="check">✓</span><span>Get mechanic-style guidance based on your symptoms.</span></li>
-          <li><span class="check">✓</span><span>Walk into the shop with more confidence and clarity.</span></li>
+          <li>
+            <span class="check">✓</span>
+
+            <span>
+              Identify likely vehicle problems before going to a repair shop.
+            </span>
+          </li>
+
+          <li>
+            <span class="check">✓</span>
+
+            <span>
+              Understand urgency, possible causes, and repair direction.
+            </span>
+          </li>
+
+          <li>
+            <span class="check">✓</span>
+
+            <span>
+              Get mechanic-style guidance based on your symptoms.
+            </span>
+          </li>
+
+          <li>
+            <span class="check">✓</span>
+
+            <span>
+              Walk into the shop with more confidence and clarity.
+            </span>
+          </li>
         </ul>
       </section>
 
       <section class="support-card">
         <h2>Need help?</h2>
-        <p>For support, billing questions, account assistance, or privacy concerns, contact:</p>
-        <p><a href="mailto:support@getautoclarity.com">support@getautoclarity.com</a></p>
-        <p>Typical response time: within 24 hours.</p>
+
+        <p>
+          For support, billing questions, account assistance, or privacy
+          concerns, contact:
+        </p>
+
+        <p>
+          <a href="mailto:support@getautoclarity.com">
+            support@getautoclarity.com
+          </a>
+        </p>
+
+        <p>
+          Typical response time: within 24 hours.
+        </p>
       </section>
 
       <div class="footer">
-        <a href="privacy.html">Privacy Policy</a>
+        <a href="privacy.html">
+          Privacy Policy
+        </a>
+
         |
-        <a href="terms.html">Terms of Use</a>
+
+        <a href="terms.html">
+          Terms of Use
+        </a>
       </div>
+
+    </div>
+  </main>
+</body>
+</html>
 
     </div>
   </main>

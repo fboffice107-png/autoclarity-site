@@ -880,41 +880,35 @@ a { color: var(--blue-bright); }
 }
 
 .video-facade {
-  background:
-    radial-gradient(130% 90% at 50% 0%, rgba(47, 107, 255, 0.35) 0%, rgba(47, 107, 255, 0.05) 60%),
-    radial-gradient(90% 60% at 50% 110%, rgba(86, 178, 255, 0.18) 0%, rgba(86, 178, 255, 0) 70%),
-    linear-gradient(180deg, #0e1a36 0%, #081020 100%);
+  /* fallback while the poster JPEG loads */
+  background: linear-gradient(180deg, #0e1a36 0%, #081020 100%);
+}
+
+.video-poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.video-facade::after {
+  /* scrim for label legibility over the photo */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(4, 8, 18, 0) 58%, rgba(4, 8, 18, 0.72) 100%);
+  pointer-events: none;
+}
+
+.video-play {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 14px;
-}
-
-.video-facade-grid {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(148, 176, 255, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(148, 176, 255, 0.05) 1px, transparent 1px);
-  background-size: 44px 44px;
-  -webkit-mask-image: radial-gradient(ellipse 100% 80% at 50% 40%, black 20%, transparent 78%);
-  mask-image: radial-gradient(ellipse 100% 80% at 50% 40%, black 20%, transparent 78%);
-  pointer-events: none;
-}
-
-.video-facade-icon {
-  position: relative;
-  border-radius: 18px;
-  box-shadow: 0 16px 36px rgba(2, 6, 18, 0.6);
-}
-
-.video-play {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
   background: none;
   border: 0;
   padding: 24px;
@@ -940,9 +934,17 @@ a { color: var(--blue-bright); }
 }
 .video-play-ring svg { width: 34px; height: 34px; margin-left: 4px; }
 
-.video-play-label { font-size: 16px; font-weight: 750; letter-spacing: -0.01em; }
-
-.video-hint { position: relative; font-size: 13px; color: var(--text-3); padding: 0 24px; text-align: center; }
+.video-play-label {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 20px;
+  font-size: 16px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  text-align: center;
+  text-shadow: 0 1px 10px rgba(4, 8, 18, 0.9);
+}
 
 .video-frame iframe { display: block; width: 100%; height: 100%; border: 0; }
 

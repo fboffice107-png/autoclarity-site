@@ -384,14 +384,15 @@
         </header>
 
         <div class="video-shell reveal">
-          <div class="video-facade" id="videoFacade">
-            <img class="video-poster" src="assets/img/video-poster.jpg" alt="Faheb, the mechanic who built AutoClarity, smiling in his shop at the start of the walkthrough video" width="720" height="1280" loading="lazy" decoding="async" />
-            <button class="video-play" id="videoPlayBtn" type="button" aria-label="Play the two-minute AutoClarity walkthrough video">
-              <span class="video-play-ring" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"/></svg>
-              </span>
-              <span class="video-play-label">Watch the 2-minute walkthrough.</span>
-            </button>
+          <div class="video-frame">
+            <iframe
+              src="https://www.youtube-nocookie.com/embed/UoXXYkiHdJ4?rel=0&playsinline=1"
+              title="AutoClarity explained by a real mechanic"
+              loading="lazy"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              referrerpolicy="strict-origin-when-cross-origin"
+              allowfullscreen
+            ></iframe>
           </div>
         </div>
 

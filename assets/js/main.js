@@ -132,32 +132,4 @@
     });
   });
 
-  /* ---------- YouTube facade: build the iframe only on demand ---------- */
-  var facade = document.getElementById("videoFacade");
-  var playBtn = document.getElementById("videoPlayBtn");
-  var VIDEO_ID = "UoXXYkiHdJ4";
-
-  if (facade && playBtn) {
-    playBtn.addEventListener("click", function () {
-      var frameWrap = document.createElement("div");
-      frameWrap.className = "video-frame";
-
-      var iframe = document.createElement("iframe");
-      iframe.src =
-        "https://www.youtube-nocookie.com/embed/" +
-        VIDEO_ID +
-        "?rel=0&playsinline=1&autoplay=1";
-      iframe.title = "AutoClarity explained by a real mechanic";
-      iframe.setAttribute(
-        "allow",
-        "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-      );
-      iframe.setAttribute("referrerpolicy", "strict-origin-when-cross-origin");
-      iframe.setAttribute("allowfullscreen", "");
-
-      frameWrap.appendChild(iframe);
-      facade.replaceWith(frameWrap);
-      iframe.focus();
-    });
-  }
 })();

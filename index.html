@@ -2,483 +2,456 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0"
-  />
+  <title>AutoClarity — Know what’s wrong before you pay a shop</title>
+  <meta name="description" content="AutoClarity is an iPhone app that turns your car’s symptoms into a clear, mechanic-style report — likely causes, urgency guidance, and what to consider doing next. Built by a real mechanic." />
+  <link rel="canonical" href="https://getautoclarity.com/" />
 
-  <title>AutoClarity</title>
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="AutoClarity" />
+  <meta property="og:title" content="AutoClarity — Know what’s wrong before you pay a shop" />
+  <meta property="og:description" content="Answer guided questions about your car’s symptoms and get a mechanic-style report: likely causes, urgency guidance, and next steps. Built by a real mechanic." />
+  <meta property="og:url" content="https://getautoclarity.com/" />
+  <meta property="og:image" content="https://getautoclarity.com/assets/img/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="AutoClarity — Know what’s wrong before you pay a shop" />
+  <meta name="twitter:description" content="Answer guided questions about your car’s symptoms and get a mechanic-style report: likely causes, urgency guidance, and next steps." />
+  <meta name="twitter:image" content="https://getautoclarity.com/assets/img/og-image.png" />
 
-  <meta
-    name="description"
-    content="AutoClarity helps drivers understand likely vehicle problems, urgency, repair-cost direction, and what to do next before visiting a repair shop."
-  />
+  <meta name="theme-color" content="#060b18" />
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/img/favicon-32.png" />
+  <link rel="apple-touch-icon" href="assets/img/icon-180.png" />
 
-  <style>
-    * {
-      box-sizing: border-box;
+  <link rel="stylesheet" href="assets/css/site.css" />
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "AutoClarity",
+    "operatingSystem": "iOS",
+    "applicationCategory": "UtilitiesApplication",
+    "description": "AutoClarity guides you through questions about your vehicle’s symptoms and creates a clear, mechanic-style report — likely causes, urgency guidance, and recommended next steps.",
+    "url": "https://getautoclarity.com/",
+    "installUrl": "https://apps.apple.com/us/app/autoclarity/id6761438602",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
     }
-
-    body {
-      margin: 0;
-      font-family:
-        -apple-system,
-        BlinkMacSystemFont,
-        "Segoe UI",
-        Roboto,
-        Helvetica,
-        Arial,
-        sans-serif;
-      background: #f5f7fb;
-      color: #111827;
-      text-align: center;
-    }
-
-    .page {
-      min-height: 100vh;
-      padding: 48px 20px;
-      display: flex;
-      justify-content: center;
-      align-items: flex-start;
-    }
-
-    .container {
-      width: 100%;
-      max-width: 720px;
-    }
-
-    .app-icon {
-      width: 112px;
-      height: 112px;
-      border-radius: 26px;
-      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.18);
-      margin-bottom: 22px;
-    }
-
-    h1 {
-      font-size: 46px;
-      line-height: 1.05;
-      margin: 0 0 12px;
-      font-weight: 800;
-      letter-spacing: -1.5px;
-    }
-
-    .tagline {
-      font-size: 21px;
-      font-weight: 700;
-      margin: 0 0 18px;
-      color: #1f2937;
-    }
-
-    .description {
-      font-size: 18px;
-      line-height: 1.55;
-      color: #4b5563;
-      max-width: 620px;
-      margin: 0 auto 28px;
-    }
-
-    .app-store-button {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 11px;
-      background: #000;
-      color: #fff;
-      text-decoration: none;
-      font-weight: 700;
-      font-size: 18px;
-      padding: 15px 28px;
-      border-radius: 16px;
-      box-shadow: 0 16px 32px rgba(0, 0, 0, 0.22);
-      transition:
-        transform 0.18s ease,
-        box-shadow 0.18s ease,
-        background 0.18s ease;
-      margin-bottom: 34px;
-    }
-
-    .app-store-button:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 20px 38px rgba(0, 0, 0, 0.28);
-      background: #111;
-    }
-
-    .app-store-button:focus-visible {
-      outline: 4px solid rgba(37, 99, 235, 0.3);
-      outline-offset: 4px;
-    }
-
-    .apple-logo {
-      font-size: 24px;
-      line-height: 1;
-    }
-
-    .video-card {
-      background: #fff;
-      border: 1px solid #e5e7eb;
-      border-radius: 24px;
-      padding: 30px;
-      box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
-      margin: 0 auto 24px;
-    }
-
-    .video-label {
-      display: inline-block;
-      color: #1d4ed8;
-      background: #eff6ff;
-      border: 1px solid #dbeafe;
-      border-radius: 999px;
-      padding: 7px 12px;
-      margin-bottom: 13px;
-      font-size: 13px;
-      font-weight: 800;
-      letter-spacing: 0.3px;
-      text-transform: uppercase;
-    }
-
-    .video-card h2 {
-      font-size: 27px;
-      line-height: 1.2;
-      margin: 0 0 10px;
-      letter-spacing: -0.6px;
-    }
-
-    .video-description {
-      font-size: 16.5px;
-      line-height: 1.55;
-      color: #4b5563;
-      max-width: 570px;
-      margin: 0 auto 22px;
-    }
-
-    .video-frame {
-      position: relative;
-      width: 100%;
-      max-width: 360px;
-      aspect-ratio: 9 / 16;
-      margin: 0 auto;
-      overflow: hidden;
-      background: #000;
-      border-radius: 20px;
-      box-shadow: 0 18px 38px rgba(15, 23, 42, 0.24);
-    }
-
-    .video-frame iframe {
-      display: block;
-      width: 100%;
-      height: 100%;
-      border: 0;
-    }
-
-    .video-note {
-      font-size: 13.5px;
-      line-height: 1.45;
-      color: #6b7280;
-      margin: 16px auto 0;
-    }
-
-    .video-cta {
-      margin-top: 24px;
-    }
-
-    .video-cta .app-store-button {
-      margin-bottom: 0;
-    }
-
-    .trust-card {
-      background: #fff;
-      border: 1px solid #e5e7eb;
-      border-radius: 24px;
-      padding: 30px;
-      text-align: left;
-      box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
-      margin: 0 auto 24px;
-    }
-
-    .trust-card h2 {
-      font-size: 25px;
-      margin: 0 0 16px;
-      letter-spacing: -0.5px;
-    }
-
-    .benefits {
-      list-style: none;
-      padding: 0;
-      margin: 0;
-    }
-
-    .benefits li {
-      font-size: 17px;
-      line-height: 1.45;
-      color: #374151;
-      margin-bottom: 13px;
-      display: flex;
-      gap: 10px;
-      align-items: flex-start;
-    }
-
-    .benefits li:last-child {
-      margin-bottom: 0;
-    }
-
-    .check {
-      color: #2563eb;
-      font-weight: 900;
-      flex-shrink: 0;
-    }
-
-    .support-card {
-      background: #fff;
-      border: 1px solid #e5e7eb;
-      border-radius: 20px;
-      padding: 24px;
-      text-align: left;
-      box-shadow: 0 14px 32px rgba(15, 23, 42, 0.06);
-      margin: 0 auto 24px;
-    }
-
-    .support-card h2 {
-      font-size: 22px;
-      margin: 0 0 10px;
-    }
-
-    .support-card p {
-      font-size: 16px;
-      line-height: 1.5;
-      color: #4b5563;
-      margin: 0 0 10px;
-    }
-
-    .support-card a {
-      color: #2563eb;
-      font-weight: 700;
-      text-decoration: none;
-    }
-
-    .support-card a:hover {
-      text-decoration: underline;
-    }
-
-    .footer {
-      font-size: 15px;
-      color: #6b7280;
-    }
-
-    .footer a {
-      color: #2563eb;
-      text-decoration: none;
-      font-weight: 700;
-      margin: 0 8px;
-    }
-
-    .footer a:hover {
-      text-decoration: underline;
-    }
-
-    @media (max-width: 520px) {
-      .page {
-        padding: 34px 18px;
-      }
-
-      .app-icon {
-        width: 92px;
-        height: 92px;
-        border-radius: 22px;
-      }
-
-      h1 {
-        font-size: 38px;
-      }
-
-      .tagline {
-        font-size: 19px;
-      }
-
-      .description {
-        font-size: 16.5px;
-      }
-
-      .app-store-button {
-        width: 100%;
-        max-width: 340px;
-        font-size: 17px;
-        padding: 15px 18px;
-      }
-
-      .video-card,
-      .trust-card,
-      .support-card {
-        padding: 22px;
-      }
-
-      .video-card h2 {
-        font-size: 24px;
-      }
-
-      .video-description {
-        font-size: 15.5px;
-      }
-
-      .video-frame {
-        max-width: 330px;
-        border-radius: 17px;
-      }
-    }
-  </style>
+  }
+  </script>
 </head>
 
 <body>
-  <main class="page">
-    <div class="container">
+  <a class="skip-link" href="#main">Skip to content</a>
 
-      <img
-        src="icon.png"
-        alt="AutoClarity app icon"
-        class="app-icon"
-      />
-
-      <h1>AutoClarity</h1>
-
-      <p class="tagline">
-        Know what’s wrong before you pay a shop.
-      </p>
-
-      <p class="description">
-        AutoClarity helps drivers identify likely vehicle problems in minutes
-        using mechanic-style diagnostic logic, repair-cost guidance, and
-        report-style results.
-      </p>
-
-      <a
-        class="app-store-button"
-        href="https://apps.apple.com/us/app/autoclarity/id6761438602"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        <span class="apple-logo"></span>
-        <span>Download on the App Store</span>
+  <header class="nav" id="top">
+    <div class="nav-inner">
+      <a class="nav-brand" href="#top" aria-label="AutoClarity — back to top">
+        <img src="assets/img/icon-64.png" alt="" width="32" height="32" />
+        <span>AutoClarity</span>
       </a>
+      <nav class="nav-links" aria-label="Primary">
+        <a href="#how-it-works">How it works</a>
+        <a href="#report">Your report</a>
+        <a href="#video">Watch</a>
+        <a href="#support">Support</a>
+      </nav>
+      <a class="btn btn-primary btn-nav" href="https://apps.apple.com/us/app/autoclarity/id6761438602" target="_blank" rel="noopener noreferrer" aria-label="Download AutoClarity on the App Store">Get the app</a>
+    </div>
+  </header>
 
-      <section class="video-card">
-        <span class="video-label">
-          Built by a real mechanic
-        </span>
+  <main id="main">
 
-        <h2>
-          See How AutoClarity Works
-        </h2>
-
-        <p class="video-description">
-          In under two minutes, see how AutoClarity helps you understand
-          likely causes, urgency, repair-cost direction, and what to do next
-          before visiting a repair shop.
-        </p>
-
-        <div class="video-frame">
-          <iframe
-            src="https://www.youtube-nocookie.com/embed/UoXXYkiHdJ4?rel=0&playsinline=1"
-            title="AutoClarity explained by a real mechanic"
-            loading="lazy"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            referrerpolicy="strict-origin-when-cross-origin"
-            allowfullscreen
-          ></iframe>
-        </div>
-
-        <p class="video-note">
-          Press Play to watch. The video will not begin automatically.
-        </p>
-
-        <div class="video-cta">
-          <a
-            class="app-store-button"
-            href="https://apps.apple.com/us/app/autoclarity/id6761438602"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <span class="apple-logo"></span>
-            <span>Download AutoClarity</span>
-          </a>
-        </div>
-      </section>
-
-      <section class="trust-card">
-        <h2>Why drivers use AutoClarity</h2>
-
-        <ul class="benefits">
-          <li>
-            <span class="check">✓</span>
-
-            <span>
-              Identify likely vehicle problems before going to a repair shop.
-            </span>
-          </li>
-
-          <li>
-            <span class="check">✓</span>
-
-            <span>
-              Understand urgency, possible causes, and repair direction.
-            </span>
-          </li>
-
-          <li>
-            <span class="check">✓</span>
-
-            <span>
-              Get mechanic-style guidance based on your symptoms.
-            </span>
-          </li>
-
-          <li>
-            <span class="check">✓</span>
-
-            <span>
-              Walk into the shop with more confidence and clarity.
-            </span>
-          </li>
-        </ul>
-      </section>
-
-      <section class="support-card">
-        <h2>Need help?</h2>
-
-        <p>
-          For support, billing questions, account assistance, or privacy
-          concerns, contact:
-        </p>
-
-        <p>
-          <a href="mailto:support@getautoclarity.com">
-            support@getautoclarity.com
-          </a>
-        </p>
-
-        <p>
-          Typical response time: within 24 hours.
-        </p>
-      </section>
-
-      <div class="footer">
-        <a href="privacy.html">
-          Privacy Policy
-        </a>
-
-        |
-
-        <a href="terms.html">
-          Terms of Use
-        </a>
+    <!-- ============ HERO ============ -->
+    <section class="hero">
+      <div class="hero-bg" aria-hidden="true">
+        <div class="hero-glow hero-glow-1"></div>
+        <div class="hero-glow hero-glow-2"></div>
+        <div class="hero-grid"></div>
       </div>
 
-    </div>
-  </main>
-</body>
-</html>
+      <div class="hero-inner">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Built by a real mechanic</p>
+          <h1>Know what’s wrong <em>before</em> you pay a shop.</h1>
+          <p class="lede">
+            AutoClarity is an iPhone app that turns your car’s symptoms into a clear,
+            mechanic-style report — likely causes, urgency guidance, and what to
+            consider doing next. No scanner, no jargon.
+          </p>
 
-    </div>
+          <div class="hero-ctas">
+            <a class="btn btn-primary btn-lg" href="https://apps.apple.com/us/app/autoclarity/id6761438602" target="_blank" rel="noopener noreferrer">
+              Download on the App&nbsp;Store
+            </a>
+            <a class="btn btn-ghost btn-lg" href="#how-it-works">See how it works</a>
+          </div>
+          <p class="hero-fineprint">Free to download for iPhone · In-app purchases available</p>
+
+          <ul class="hero-chips" aria-label="Highlights">
+            <li>No scanner or tools required</li>
+            <li>11+ years of shop experience behind it</li>
+            <li>Safety guidance is never paywalled</li>
+          </ul>
+        </div>
+
+        <div class="hero-visual" id="heroVisual">
+          <div class="phone-scene" id="phoneScene">
+            <div class="phone" aria-hidden="false">
+              <div class="phone-notch" aria-hidden="true"></div>
+              <div class="phone-screen" role="img" aria-label="Example AutoClarity diagnostic result screen showing a safety-first card, likely causes, and recommended next steps">
+                <div class="app-topbar">
+                  <span class="app-back" aria-hidden="true">‹</span>
+                  <div class="app-title">
+                    <strong>Diagnostic Result</strong>
+                    <span>Engine · Example</span>
+                  </div>
+                </div>
+
+                <div class="app-safety">
+                  <div class="app-safety-head">
+                    <span class="app-safety-icon" aria-hidden="true">!</span>
+                    <strong>Safety First</strong>
+                  </div>
+                  <p>This issue could affect your vehicle’s safety or drivability.</p>
+                  <p class="app-safety-action"><strong>Recommended:</strong> avoid hard acceleration and have the vehicle inspected soon.</p>
+                </div>
+
+                <div class="app-card">
+                  <span class="app-card-label">What’s the issue?</span>
+                  <strong class="app-issue">Engine misfire detected</strong>
+                  <div class="app-meta">
+                    <span class="app-pill app-pill-amber">Medium severity</span>
+                    <span class="app-pill">Est. cost $40–$180</span>
+                  </div>
+                </div>
+
+                <div class="app-card">
+                  <span class="app-card-label">Likely causes</span>
+                  <ul class="app-list">
+                    <li>Spark plug or ignition coil issue</li>
+                    <li>Fuel injector malfunction</li>
+                    <li>Vacuum leak</li>
+                  </ul>
+                </div>
+
+                <div class="app-card">
+                  <span class="app-card-label">Next steps</span>
+                  <ul class="app-list app-list-num">
+                    <li>Have a trusted shop inspect the engine</li>
+                    <li>Drive gently until it’s resolved</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <div class="float-chip float-chip-1" aria-hidden="true">
+              <span class="float-chip-dot float-dot-green"></span>
+              Safety guidance — always free
+            </div>
+            <div class="float-chip float-chip-2" aria-hidden="true">
+              <span class="float-chip-dot float-dot-blue"></span>
+              Shareable PDF report
+            </div>
+          </div>
+          <p class="visual-note">Example result — screens are illustrative recreations of the current app. Every report depends on your vehicle and answers.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ HOW IT WORKS ============ -->
+    <section class="section" id="how-it-works" aria-labelledby="how-title">
+      <div class="section-inner">
+        <header class="section-head reveal">
+          <p class="kicker">How it works</p>
+          <h2 id="how-title">From “what’s that noise?” to a clear plan</h2>
+          <p class="section-sub">Three steps, a few minutes, no tools. Explore each step below.</p>
+        </header>
+
+        <div class="demo">
+          <div class="demo-steps" role="tablist" aria-label="AutoClarity walkthrough steps">
+            <button class="demo-step is-active" id="step-tab-1" role="tab" aria-selected="true" aria-controls="step-panel-1" data-step="1">
+              <span class="demo-step-num" aria-hidden="true">1</span>
+              <span class="demo-step-body">
+                <strong>Tell it what you notice</strong>
+                <span>Pick the symptom — a warning light, a noise, a leak, hard starting, overheating, or brakes.</span>
+              </span>
+            </button>
+            <button class="demo-step" id="step-tab-2" role="tab" aria-selected="false" aria-controls="step-panel-2" data-step="2" tabindex="-1">
+              <span class="demo-step-num" aria-hidden="true">2</span>
+              <span class="demo-step-body">
+                <strong>Answer guided questions</strong>
+                <span>AutoClarity asks the follow-ups a mechanic would ask to narrow down likely causes.</span>
+              </span>
+            </button>
+            <button class="demo-step" id="step-tab-3" role="tab" aria-selected="false" aria-controls="step-panel-3" data-step="3" tabindex="-1">
+              <span class="demo-step-num" aria-hidden="true">3</span>
+              <span class="demo-step-body">
+                <strong>Get your report</strong>
+                <span>Likely causes, severity, urgency guidance, repair-cost direction, and next steps — as a shareable PDF.</span>
+              </span>
+            </button>
+          </div>
+
+          <div class="demo-phone-wrap reveal">
+            <div class="phone phone-demo">
+              <div class="phone-notch" aria-hidden="true"></div>
+
+              <div class="phone-screen demo-screen is-active" id="step-panel-1" role="tabpanel" aria-labelledby="step-tab-1">
+                <div class="app-topbar app-topbar-center">
+                  <div class="app-title">
+                    <strong>What’s going on with your car?</strong>
+                    <span>Choose the symptom you’re experiencing</span>
+                  </div>
+                </div>
+                <div class="app-grid">
+                  <div class="app-tile"><span class="app-tile-icon" aria-hidden="true">⚠︎</span>Check engine light</div>
+                  <div class="app-tile"><span class="app-tile-icon" aria-hidden="true">〰</span>Unusual noises</div>
+                  <div class="app-tile"><span class="app-tile-icon" aria-hidden="true">💧</span>Fluid leak</div>
+                  <div class="app-tile"><span class="app-tile-icon" aria-hidden="true">⚿</span>Hard to start</div>
+                  <div class="app-tile"><span class="app-tile-icon" aria-hidden="true">♨</span>Overheating</div>
+                  <div class="app-tile"><span class="app-tile-icon" aria-hidden="true">◉</span>Brake concern</div>
+                </div>
+                <p class="app-footnote">Your information is never shared with shops.</p>
+              </div>
+
+              <div class="phone-screen demo-screen" id="step-panel-2" role="tabpanel" aria-labelledby="step-tab-2" hidden>
+                <div class="app-topbar app-topbar-center">
+                  <div class="app-title">
+                    <strong>Guided question</strong>
+                    <span>Question 3 of 6 · Unusual noises</span>
+                  </div>
+                </div>
+                <div class="app-progress" aria-hidden="true"><span style="width:50%"></span></div>
+                <div class="app-question">
+                  <strong>When do you hear the noise?</strong>
+                  <div class="app-answers">
+                    <div class="app-answer is-picked">Only when braking</div>
+                    <div class="app-answer">Over bumps</div>
+                    <div class="app-answer">When turning</div>
+                    <div class="app-answer">All the time</div>
+                  </div>
+                </div>
+                <p class="app-footnote">Plain-English questions — no jargon, no tools.</p>
+              </div>
+
+              <div class="phone-screen demo-screen" id="step-panel-3" role="tabpanel" aria-labelledby="step-tab-3" hidden>
+                <div class="app-topbar app-topbar-center">
+                  <div class="app-title">
+                    <strong>Your report is ready</strong>
+                    <span>Example result</span>
+                  </div>
+                </div>
+                <div class="app-safety app-safety-compact">
+                  <div class="app-safety-head">
+                    <span class="app-safety-icon" aria-hidden="true">!</span>
+                    <strong>Safety First</strong>
+                  </div>
+                  <p>Brake-related symptoms deserve prompt attention. Have them inspected soon.</p>
+                </div>
+                <div class="app-card">
+                  <span class="app-card-label">Likely cause</span>
+                  <strong class="app-issue">Worn brake pads</strong>
+                  <div class="app-meta">
+                    <span class="app-pill app-pill-amber">Medium severity</span>
+                  </div>
+                </div>
+                <div class="app-card">
+                  <span class="app-card-label">Included in your report</span>
+                  <ul class="app-list">
+                    <li>Urgency &amp; repair-cost direction</li>
+                    <li>Recommended next steps</li>
+                    <li>Shareable PDF for the shop</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+            <p class="visual-note">Example screens — illustrative recreations of the current app.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ REPORT CONTENTS ============ -->
+    <section class="section section-alt" id="report" aria-labelledby="report-title">
+      <div class="section-inner">
+        <header class="section-head reveal">
+          <p class="kicker">Your report</p>
+          <h2 id="report-title">Every AutoClarity report includes</h2>
+          <p class="section-sub">Report-style results you can save, print, or show a repair shop.</p>
+        </header>
+
+        <ul class="feature-grid">
+          <li class="feature-card reveal">
+            <span class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            </span>
+            <h3>The most likely cause</h3>
+            <p>A clear, plain-English explanation of what the problem most likely is — and why.</p>
+          </li>
+          <li class="feature-card reveal">
+            <span class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="m9 12 2 2 4-4"/></svg>
+            </span>
+            <h3>Safety-first guidance</h3>
+            <p>Driving-safety guidance on every result — always visible, never paywalled.</p>
+          </li>
+          <li class="feature-card reveal">
+            <span class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M7 12h.01M17 12h.01"/></svg>
+            </span>
+            <h3>Repair-cost direction</h3>
+            <p>An estimated repair-cost range, so a quote doesn’t catch you off guard.</p>
+          </li>
+          <li class="feature-card reveal">
+            <span class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19a9 9 0 1 1 14 0"/><path d="m12 13 3.5-4.5"/><circle cx="12" cy="14" r="1.6"/></svg>
+            </span>
+            <h3>Severity level</h3>
+            <p>How serious the issue looks and whether it may be urgent — at a glance.</p>
+          </li>
+          <li class="feature-card reveal">
+            <span class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m4 6 .01 0M4 12l.01 0M4 18l.01 0" stroke-width="2.6"/></svg>
+            </span>
+            <h3>Recommended next steps</h3>
+            <p>What to consider doing next, in order — including what to ask the shop.</p>
+          </li>
+          <li class="feature-card reveal">
+            <span class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M12 18v-6m-3 3 3 3 3-3"/></svg>
+            </span>
+            <h3>A shareable PDF report</h3>
+            <p>Save it, print it, or show it to the repair shop so everyone starts on the same page.</p>
+          </li>
+        </ul>
+
+        <div class="coverage reveal" aria-labelledby="coverage-title">
+          <h3 id="coverage-title">AutoClarity can help when your vehicle…</h3>
+          <ul class="coverage-list">
+            <li>Won’t start</li>
+            <li>Runs rough or loses power</li>
+            <li>Overheats</li>
+            <li>Makes unusual noises</li>
+            <li>Has braking concerns</li>
+            <li>Shows warning lights</li>
+            <li>Has electrical, steering, or suspension symptoms</li>
+            <li>Has heating or A/C symptoms</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ MECHANIC ============ -->
+    <section class="section" id="mechanic" aria-labelledby="mechanic-title">
+      <div class="section-inner section-narrow">
+        <div class="mechanic-card reveal">
+          <p class="kicker">Why trust it</p>
+          <h2 id="mechanic-title">Built from real mechanic logic</h2>
+          <p class="mechanic-body">
+            AutoClarity was created by a professional automotive technician with over
+            11 years of hands-on experience working on everyday, European, luxury,
+            exotic, and high-performance vehicles.
+          </p>
+          <p class="mechanic-body">
+            The goal is simple: help everyday drivers stop guessing, better understand
+            the likely problem, and walk into the repair shop with more confidence.
+          </p>
+          <ul class="mechanic-chips" aria-label="Product principles">
+            <li>No tools required</li>
+            <li>Plain English</li>
+            <li>Mechanic-style reports</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ VIDEO ============ -->
+    <section class="section section-alt" id="video" aria-labelledby="video-title">
+      <div class="section-inner section-narrow">
+        <header class="section-head reveal">
+          <p class="kicker">Two-minute tour</p>
+          <h2 id="video-title">See AutoClarity in action</h2>
+          <p class="section-sub">
+            A quick walkthrough of how AutoClarity helps you understand likely causes,
+            urgency, repair-cost direction, and what to do next.
+          </p>
+        </header>
+
+        <div class="video-shell reveal">
+          <div class="video-facade" id="videoFacade">
+            <div class="video-facade-grid" aria-hidden="true"></div>
+            <img class="video-facade-icon" src="assets/img/icon-180.png" alt="" width="72" height="72" />
+            <button class="video-play" id="videoPlayBtn" type="button" aria-label="Play the AutoClarity explainer video">
+              <span class="video-play-ring" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"/></svg>
+              </span>
+              <span class="video-play-label">Watch the walkthrough</span>
+            </button>
+            <p class="video-hint">Under two minutes. Nothing plays until you tap.</p>
+          </div>
+        </div>
+
+        <div class="video-cta reveal">
+          <a class="btn btn-primary btn-lg" href="https://apps.apple.com/us/app/autoclarity/id6761438602" target="_blank" rel="noopener noreferrer">
+            Download on the App&nbsp;Store
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ FINAL CTA ============ -->
+    <section class="section final-cta" aria-labelledby="cta-title">
+      <div class="final-cta-bg" aria-hidden="true"></div>
+      <div class="section-inner section-narrow reveal">
+        <img class="final-icon" src="assets/img/icon-180.png" alt="" width="88" height="88" />
+        <h2 id="cta-title">Stop guessing. Start knowing.</h2>
+        <p class="section-sub">
+          Get mechanic-style clarity about your car in minutes — before the shop quotes you.
+        </p>
+        <a class="btn btn-primary btn-xl" href="https://apps.apple.com/us/app/autoclarity/id6761438602" target="_blank" rel="noopener noreferrer">
+          Download on the App&nbsp;Store
+        </a>
+        <p class="hero-fineprint">Free to download for iPhone · In-app purchases available</p>
+      </div>
+    </section>
   </main>
+
+  <!-- ============ FOOTER ============ -->
+  <footer class="footer" id="support">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <img src="assets/img/icon-64.png" alt="" width="28" height="28" />
+        <span>AutoClarity</span>
+      </div>
+
+      <div class="footer-cols">
+        <div class="footer-col">
+          <h3>Support</h3>
+          <p>Questions about the app, billing, or privacy:</p>
+          <p><a href="mailto:support@getautoclarity.com">support@getautoclarity.com</a></p>
+          <p class="footer-muted">Typical response time: within 24 hours.</p>
+        </div>
+        <div class="footer-col">
+          <h3>Legal</h3>
+          <p><a href="privacy.html">Privacy Policy</a></p>
+          <p><a href="terms.html">Terms of Use</a></p>
+        </div>
+      </div>
+
+      <p class="footer-disclaimer">
+        AutoClarity provides informational guidance based on the symptoms and answers
+        you enter. Results are not a substitute for an in-person inspection, testing,
+        or diagnosis by a qualified automotive technician.
+      </p>
+    </div>
+  </footer>
+
+  <script src="assets/js/main.js" defer></script>
 </body>
 </html>

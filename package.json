@@ -1,0 +1,25 @@
+{
+  "name": "autoclarity-site",
+  "private": true,
+  "type": "module",
+  "description": "getautoclarity.com — static marketing site plus the Las Vegas PPI portal (Cloudflare Pages Functions + D1 + R2).",
+  "scripts": {
+    "dev": "wrangler pages dev . --port 8788",
+    "db:migrate:local": "wrangler d1 migrations apply autoclarity_ppi --local",
+    "db:migrate:preview": "wrangler d1 migrations apply autoclarity_ppi --remote",
+    "seed:local": "wrangler d1 execute autoclarity_ppi --local --file=./scripts/seed-preview.sql",
+    "seed:preview": "wrangler d1 execute autoclarity_ppi --remote --file=./scripts/seed-preview.sql",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "typecheck": "tsc --noEmit",
+    "check:links": "node scripts/check-links.mjs",
+    "check:headers": "node scripts/check-headers.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^3.0.0",
+    "wrangler": "^4.0.0"
+  }
+}

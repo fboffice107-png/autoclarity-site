@@ -1,0 +1,436 @@
+// End-to-end HTTP integration: intake → review → quote → slot hold →
+// agreements → checkout (mock Stripe) → webhook confirmation → refund,
+// plus the adversarial cases (bad tokens, replays, double booking, limits).
+import { describe, expect, it } from 'vitest';
+
+const BASE = 'http://127.0.0.1:8799';
+const ADMIN_KEY = 'test-admin-key-0123456789abcdef';
+const WEBHOOK_SECRET = 'whsec_integration_test_secret';
+
+type Json = Record<string, any>;
+
+async function post(path: string, body: Json, headers: Record<string, string> = {}): Promise<{ status: number; body: Json }> {
+  const res = await fetch(BASE + path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, body: (await res.json()) as Json };
+}
+
+async function get(path: string, headers: Record<string, string> = {}): Promise<{ status: number; body: Json }> {
+  const res = await fetch(BASE + path, { headers });
+  return { status: res.status, body: (await res.json()) as Json };
+}
+
+const admin = { authorization: `Bearer ${ADMIN_KEY}` };
+const adminPost = (id: string, body: Json) => post(`/api/admin/requests/${id}`, body, admin);
+
+function intakePayload(overrides: Json = {}): Json {
+  return {
+    turnstileToken: 'XXXX.DUMMY.TOKEN',
+    fullName: 'Integration Tester',
+    email: 'integration@example.com',
+    phone: '702-555-0111',
+    preferredContact: 'email',
+    transactionalConsent: true,
+    marketingConsent: false,
+    year: '2019',
+    make: 'Toyota',
+    model: 'Camry',
+    trim: 'SE',
+    mileage: '48000',
+    vin: '4T1B11HK5KU212399',
+    askingPrice: '18500',
+    expectedPrice: '17800',
+    listingUrl: 'https://example.com/listing/123',
+    modStatus: 'stock',
+    titleStatus: 'clean',
+    startsDrives: 'yes',
+    locStreet: '123 Test St',
+    locCity: 'Las Vegas',
+    locState: 'NV',
+    locZip: '89109',
+    sellerType: 'dealership',
+    permInspection: true,
+    permScan: true,
+    permRoadTest: 'yes',
+    permPhotos: 'yes',
+    permUnderbody: 'unknown',
+    ackAccessDependent: true,
+    decisionTimeline: 'few_days',
+    timeWindow: 'flexible',
+    sameDayPriority: false,
+    ...overrides,
+  };
+}
+
+async function signWebhook(payload: string, timestampSec = Math.floor(Date.now() / 1000)): Promise<string> {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(WEBHOOK_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${timestampSec}.${payload}`));
+  const hex = [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return `t=${timestampSec},v1=${hex}`;
+}
+
+async function sendWebhook(event: Json): Promise<{ status: number; body: Json }> {
+  const payload = JSON.stringify(event);
+  const res = await fetch(BASE + '/api/stripe/webhook', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'stripe-signature': await signWebhook(payload) },
+    body: payload,
+  });
+  return { status: res.status, body: (await res.json()) as Json };
+}
+
+// shared state across sequential tests in this file
+let camryToken = '';
+let camryRef = '';
+let euroId = '';
+let euroToken = '';
+let euroOldToken = '';
+let heldSlotId = '';
+let heldSlotStart = '';
+let sessionId = '';
+let camryFixtureId = '';
+let uploadId = '';
+
+describe('public surface', () => {
+  it('serves runtime config with pricing and no secrets', async () => {
+    const r = await get('/api/ppi/runtime-config');
+    expect(r.status).toBe(200);
+    expect(r.body.mode).toBe('request');
+    expect(r.body.pricing.tiers).toHaveLength(3);
+    expect(r.body.turnstileSiteKey).toBeTruthy();
+    expect(JSON.stringify(r.body)).not.toContain('sk_test');
+    expect(JSON.stringify(r.body)).not.toContain('whsec');
+  });
+
+  it('redirects short routes with 301s', async () => {
+    for (const from of ['/ppi', '/pre-purchase-inspection']) {
+      const res = await fetch(BASE + from, { redirect: 'manual' });
+      expect(res.status).toBe(301);
+      expect(res.headers.get('location')).toContain('/las-vegas-pre-purchase-inspection');
+    }
+  });
+});
+
+describe('admin authorization', () => {
+  it('rejects missing and wrong keys', async () => {
+    expect((await get('/api/admin/overview')).status).toBe(401);
+    expect((await get('/api/admin/overview', { authorization: 'Bearer wrong-key-wrong-key-wrong' })).status).toBe(401);
+  });
+
+  it('accepts the dev key and seeds fixtures', async () => {
+    const overview = await get('/api/admin/overview', admin);
+    expect(overview.status).toBe(200);
+    const seed = await post('/api/admin/seed', {}, admin);
+    expect(seed.status).toBe(200);
+    expect(seed.body.created).toHaveLength(10);
+  });
+});
+
+describe('intake submission', () => {
+  it('accepts a valid request and returns ref + portal token', async () => {
+    const r = await post('/api/ppi/requests', intakePayload());
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(true);
+    expect(r.body.ref).toMatch(/^PPI-/);
+    expect(r.body.portalToken.length).toBeGreaterThan(30);
+    camryToken = r.body.portalToken;
+    camryRef = r.body.ref;
+  });
+
+  it('portal view works with the token', async () => {
+    const r = await get('/api/portal', { authorization: `Bearer ${camryToken}` });
+    expect(r.status).toBe(200);
+    expect(r.body.ref).toBe(camryRef);
+    expect(r.body.status).toBe('submitted');
+    expect(r.body.vehicle.make).toBe('Toyota');
+  });
+
+  it('dampens duplicate submissions (same email + VIN) and rotates the link', async () => {
+    const r = await post('/api/ppi/requests', intakePayload());
+    expect(r.status).toBe(200);
+    expect(r.body.duplicate).toBe(true);
+    expect(r.body.ref).toBe(camryRef);
+    // Rotation revokes the earlier token — the newest link is the valid one.
+    const oldToken = camryToken;
+    camryToken = r.body.portalToken;
+    expect((await get('/api/portal', { authorization: `Bearer ${oldToken}` })).status).toBe(401);
+    expect((await get('/api/portal', { authorization: `Bearer ${camryToken}` })).status).toBe(200);
+  });
+
+  it('rejects invalid email with field errors', async () => {
+    const r = await post('/api/ppi/requests', intakePayload({ email: 'not-an-email', vin: '' }));
+    expect(r.status).toBe(422);
+    expect(r.body.fields.email).toBeTruthy();
+  });
+
+  it('rejects an invalid VIN with guidance', async () => {
+    const r = await post('/api/ppi/requests', intakePayload({ vin: 'INVALIDVIN123' }));
+    expect(r.status).toBe(422);
+    expect(r.body.fields.vin).toContain('17');
+  });
+
+  it('rejects cross-origin submissions', async () => {
+    const r = await post('/api/ppi/requests', intakePayload(), { origin: 'https://evil.example' });
+    expect(r.status).toBe(403);
+    expect(r.body.error.code).toBe('bad_origin');
+  });
+
+  it('rejects garbage portal tokens', async () => {
+    const r = await get('/api/portal', { authorization: 'Bearer aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' });
+    expect(r.status).toBe(401);
+    expect(r.body.error.code).toBe('link_invalid');
+  });
+});
+
+describe('quote → slot → agreements → payment (EUROLX fixture)', () => {
+  it('finds the fixture and issues a portal link', async () => {
+    const list = await get('/api/admin/requests', admin);
+    const euro = list.body.requests.find((r: Json) => r.ref === 'PPI-FIXTURE-EUROLX');
+    const camry = list.body.requests.find((r: Json) => r.ref === 'PPI-FIXTURE-CAMRY');
+    expect(euro).toBeTruthy();
+    euroId = euro.id;
+    camryFixtureId = camry.id;
+
+    const link = await adminPost(euroId, { action: 'reissue_link' });
+    expect(link.status).toBe(200);
+    euroOldToken = new URL(link.body.url).searchParams.get('t')!;
+
+    const view = await get('/api/portal', { authorization: `Bearer ${euroOldToken}` });
+    expect(view.status).toBe(200);
+    expect(view.body.status).toBe('quote_sent');
+    expect(view.body.quote.lines.length).toBeGreaterThan(0);
+    expect(view.body.slots.filter((s: Json) => s.status === 'offered')).toHaveLength(3);
+  });
+
+  it('holds a slot atomically and advances to agreements', async () => {
+    const view = await get('/api/portal', { authorization: `Bearer ${euroOldToken}` });
+    const slot = view.body.slots.find((s: Json) => s.status === 'offered');
+    heldSlotId = slot.id;
+    heldSlotStart = slot.startsAt;
+    const r = await post('/api/portal/action', { action: 'select_slot', slotId: heldSlotId }, { authorization: `Bearer ${euroOldToken}` });
+    expect(r.status).toBe(200);
+    const after = await get('/api/portal', { authorization: `Bearer ${euroOldToken}` });
+    expect(after.body.status).toBe('awaiting_agreement');
+    expect(after.body.slots.find((s: Json) => s.id === heldSlotId).status).toBe('held');
+  });
+
+  it('rejects selecting a second slot once one is held (wrong state)', async () => {
+    const view = await get('/api/portal', { authorization: `Bearer ${euroOldToken}` });
+    const other = view.body.slots.find((s: Json) => s.status === 'offered');
+    const r = await post('/api/portal/action', { action: 'select_slot', slotId: other.id }, { authorization: `Bearer ${euroOldToken}` });
+    expect(r.status).toBe(409);
+  });
+
+  it('prevents offering a conflicting time to another customer (double-booking guard)', async () => {
+    const r = await adminPost(camryFixtureId, { action: 'propose_slots', slots: [heldSlotStart] });
+    expect(r.status).toBe(200);
+    expect(r.body.inserted).toBe(0);
+    expect(r.body.skipped.length).toBe(1);
+  });
+
+  it('requires every agreement document', async () => {
+    const r = await post('/api/portal/action', { action: 'accept_agreements', typedName: 'Integration Tester', versionIds: [] }, { authorization: `Bearer ${euroOldToken}` });
+    expect(r.status).toBe(422);
+  });
+
+  it('records acceptance of all documents and advances to payment', async () => {
+    const view = await get('/api/portal', { authorization: `Bearer ${euroOldToken}` });
+    const ids = view.body.agreements.required.map((d: Json) => d.id);
+    expect(ids.length).toBeGreaterThanOrEqual(9);
+    const r = await post('/api/portal/action', { action: 'accept_agreements', typedName: 'Integration Tester', versionIds: ids }, { authorization: `Bearer ${euroOldToken}` });
+    expect(r.status).toBe(200);
+    const after = await get('/api/portal', { authorization: `Bearer ${euroOldToken}` });
+    expect(after.body.status).toBe('awaiting_payment');
+  });
+
+  it('creates a Stripe checkout session with id-only metadata', async () => {
+    const r = await post('/api/portal/action', { action: 'checkout' }, { authorization: `Bearer ${euroOldToken}` });
+    expect(r.status).toBe(200);
+    expect(r.body.checkoutUrl).toContain('127.0.0.1:8798');
+
+    const detail = await get(`/api/admin/requests/${euroId}`, admin);
+    expect(detail.body.payments).toHaveLength(1);
+    expect(detail.body.payments[0].status).toBe('created');
+    sessionId = detail.body.payments[0].stripe_session_id;
+    expect(sessionId).toMatch(/^cs_mock_/);
+
+    // metadata hygiene: internal ids only, no VIN/address/customer data
+    const lastSession = (await (await fetch('http://127.0.0.1:8798/last-session')).json()) as Json;
+    expect(lastSession['metadata[request_id]']).toBe(euroId);
+    expect(lastSession['metadata[quote_id]']).toBeTruthy();
+    expect(lastSession['metadata[booking_id]']).toBeTruthy();
+    const serialized = JSON.stringify(lastSession);
+    expect(serialized).not.toContain('WBA53BJ05MWX00001');
+    expect(serialized).not.toMatch(/loc_street|Las Vegas|address/i);
+  });
+});
+
+describe('stripe webhook — the source of truth', () => {
+  it('rejects unsigned/garbage-signed events', async () => {
+    const payload = JSON.stringify({ id: 'evt_bad', type: 'checkout.session.completed', data: { object: {} } });
+    const res = await fetch(BASE + '/api/stripe/webhook', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'stripe-signature': 't=1,v1=deadbeef' },
+      body: payload,
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('confirms the booking only via a verified webhook', async () => {
+    const r = await sendWebhook({
+      id: 'evt_int_1',
+      type: 'checkout.session.completed',
+      data: { object: { id: sessionId, payment_status: 'paid', payment_intent: 'pi_mock_1' } },
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.received).toBe(true);
+
+    const detail = await get(`/api/admin/requests/${euroId}`, admin);
+    expect(detail.body.request.status).toBe('confirmed');
+    expect(detail.body.payments[0].status).toBe('succeeded');
+    const slots = detail.body.slots;
+    expect(slots.find((s: Json) => s.id === heldSlotId).status).toBe('confirmed');
+    expect(slots.filter((s: Json) => s.status === 'released').length).toBeGreaterThanOrEqual(2);
+
+    const portal = await get('/api/portal', { authorization: `Bearer ${euroOldToken}` });
+    expect(portal.body.booking.status).toBe('confirmed');
+
+    const ics = await fetch(`${BASE}/api/portal/calendar?t=${encodeURIComponent(euroOldToken)}`);
+    expect(ics.status).toBe(200);
+    expect(await ics.text()).toContain('BEGIN:VCALENDAR');
+  });
+
+  it('acknowledges but never reprocesses replayed events', async () => {
+    const r = await sendWebhook({
+      id: 'evt_int_1',
+      type: 'checkout.session.completed',
+      data: { object: { id: sessionId, payment_status: 'paid', payment_intent: 'pi_mock_1' } },
+    });
+    expect(r.body.replay).toBe(true);
+    const detail = await get(`/api/admin/requests/${euroId}`, admin);
+    expect(detail.body.payments).toHaveLength(1);
+    expect(detail.body.history.filter((h: Json) => h.to_status === 'confirmed')).toHaveLength(1);
+  });
+
+  it('processes admin refund + charge.refunded webhook', async () => {
+    const detail = await get(`/api/admin/requests/${euroId}`, admin);
+    const paymentId = detail.body.payments[0].id;
+    const refund = await adminPost(euroId, { action: 'refund', paymentId });
+    expect(refund.status).toBe(200);
+
+    const amount = detail.body.payments[0].amount_cents;
+    const wh = await sendWebhook({
+      id: 'evt_int_refund',
+      type: 'charge.refunded',
+      data: { object: { payment_intent: 'pi_mock_1', amount_refunded: amount, refunded: true } },
+    });
+    expect(wh.status).toBe(200);
+
+    const after = await get(`/api/admin/requests/${euroId}`, admin);
+    expect(after.body.payments[0].status).toBe('refunded');
+    expect(after.body.request.status).toBe('refunded');
+  });
+});
+
+describe('uploads', () => {
+  const PNG_1PX = Uint8Array.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+    0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+    0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+    0x42, 0x60, 0x82,
+  ]);
+
+  it('accepts a real PNG from the customer', async () => {
+    const fd = new FormData();
+    fd.append('file', new Blob([PNG_1PX], { type: 'image/png' }), 'vin-plate.png');
+    fd.append('kind', 'vin');
+    const res = await fetch(BASE + '/api/portal/upload', { method: 'POST', headers: { authorization: `Bearer ${camryToken}` }, body: fd });
+    const body = (await res.json()) as Json;
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    uploadId = body.id;
+  });
+
+  it('rejects a text file disguised as an image (magic bytes)', async () => {
+    const fd = new FormData();
+    fd.append('file', new Blob([new TextEncoder().encode('#!/bin/sh\necho pwned')], { type: 'image/png' }), 'not-an-image.png');
+    const res = await fetch(BASE + '/api/portal/upload', { method: 'POST', headers: { authorization: `Bearer ${camryToken}` }, body: fd });
+    expect(res.status).toBe(422);
+  });
+
+  it('serves the upload to admin with sandboxing headers, then deletes it', async () => {
+    const res = await fetch(`${BASE}/api/admin/uploads/${uploadId}`, { headers: admin });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/png');
+    expect(res.headers.get('content-security-policy')).toContain('sandbox');
+
+    const list = await get('/api/admin/requests', admin);
+    const camry = list.body.requests.find((r: Json) => r.ref === camryRef);
+    const del = await adminPost(camry.id, { action: 'delete_upload', uploadId });
+    expect(del.status).toBe(200);
+    expect((await fetch(`${BASE}/api/admin/uploads/${uploadId}`, { headers: admin })).status).toBe(404);
+  });
+});
+
+describe('lifecycle controls', () => {
+  it('rotating the magic link revokes the old one', async () => {
+    const link = await adminPost(euroId, { action: 'reissue_link' });
+    euroToken = new URL(link.body.url).searchParams.get('t')!;
+    expect((await get('/api/portal', { authorization: `Bearer ${euroToken}` })).status).toBe(200);
+    const old = await get('/api/portal', { authorization: `Bearer ${euroOldToken}` });
+    expect(old.status).toBe(401);
+    expect(old.body.error.code).toBe('link_revoked');
+  });
+
+  it('rejects invalid status transitions', async () => {
+    const r = await adminPost(camryFixtureId, { action: 'set_status', to: 'confirmed' });
+    expect(r.status).toBe(409);
+  });
+
+  it('applies valid transitions with history + customer email recorded', async () => {
+    const r = await adminPost(camryFixtureId, { action: 'set_status', to: 'needs_info', note: 'Please add the VIN when you have it.' });
+    expect(r.status).toBe(200);
+    const detail = await get(`/api/admin/requests/${camryFixtureId}`, admin);
+    expect(detail.body.request.status).toBe('needs_info');
+    expect(detail.body.history[0].to_status).toBe('needs_info');
+    expect(detail.body.messages.some((m: Json) => m.template === 'needs_info')).toBe(true);
+  });
+
+  it('config: admin can enable the launch promo and the public page reflects it', async () => {
+    const put = await fetch(BASE + '/api/admin/config', {
+      method: 'PUT',
+      headers: { ...admin, 'content-type': 'application/json' },
+      body: JSON.stringify({ pricing: { promo: { enabled: true, priceCents: 14900, endsAt: '2099-01-01' } } }),
+    });
+    expect(put.status).toBe(200);
+    const pub = await get('/api/ppi/runtime-config');
+    expect(pub.body.pricing.promo).toBeTruthy();
+    expect(pub.body.pricing.promo.priceCents).toBe(14900);
+    // turn it back off
+    await fetch(BASE + '/api/admin/config', {
+      method: 'PUT',
+      headers: { ...admin, 'content-type': 'application/json' },
+      body: JSON.stringify({ pricing: { promo: { enabled: false } } }),
+    });
+  });
+
+  it('analytics endpoint accepts allowlisted events only (and never PII fields)', async () => {
+    expect((await post('/api/ppi/events', { event: 'ppi_page_view', step: '', source: 'web' })).status).toBe(200);
+    expect((await post('/api/ppi/events', { event: 'made_up_event' })).status).toBe(200); // silently dropped
+  });
+});
+
+describe('rate limiting', () => {
+  it('caps public submissions per IP', async () => {
+    // Submissions so far in this suite: happy(1) + duplicate(2) + 2 invalid(4).
+    const fifth = await post('/api/ppi/requests', intakePayload({ email: 'fifth@example.com', vin: '', make: 'Honda', model: 'Accord' }));
+    expect(fifth.status).toBe(200);
+    const sixth = await post('/api/ppi/requests', intakePayload({ email: 'sixth@example.com', vin: '', make: 'Mazda', model: '3' }));
+    expect(sixth.status).toBe(429);
+    expect(sixth.body.error.code).toBe('rate_limited');
+  });
+});

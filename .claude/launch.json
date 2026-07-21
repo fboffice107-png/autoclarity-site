@@ -1,0 +1,10 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ppi-attach",
+      "url": "http://localhost:8788",
+      "port": 8788
+    }
+  ]
+}

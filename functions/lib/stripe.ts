@@ -8,6 +8,13 @@ import { modeFlags } from './types.ts';
 
 const STRIPE_API = 'https://api.stripe.com/v1';
 
+/** Real Stripe in production, always. Overridable only outside production so
+ *  integration tests can exercise the full payment path against a mock. */
+function apiBase(env: Env): string {
+  if (env.PPI_ENV !== 'production' && env.STRIPE_API_BASE) return env.STRIPE_API_BASE;
+  return STRIPE_API;
+}
+
 export class StripeConfigError extends Error {}
 
 /**
@@ -32,8 +39,8 @@ export function stripeKey(env: Env): string {
   return key;
 }
 
-async function stripePost(key: string, path: string, params: Record<string, string>): Promise<Record<string, unknown>> {
-  const res = await fetch(`${STRIPE_API}${path}`, {
+async function stripePost(env: Env, key: string, path: string, params: Record<string, string>): Promise<Record<string, unknown>> {
+  const res = await fetch(`${apiBase(env)}${path}`, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${key}`,
@@ -74,7 +81,7 @@ export interface CheckoutSession {
 export async function createCheckoutSession(env: Env, input: CheckoutInput): Promise<CheckoutSession> {
   const key = stripeKey(env);
   const base = input.publicBaseUrl.replace(/\/$/, '');
-  const session = await stripePost(key, '/checkout/sessions', {
+  const session = await stripePost(env, key, '/checkout/sessions', {
     mode: 'payment',
     'line_items[0][quantity]': '1',
     'line_items[0][price_data][currency]': 'usd',
@@ -102,7 +109,7 @@ export async function createRefund(env: Env, paymentIntent: string, amountCents?
   const key = stripeKey(env);
   const params: Record<string, string> = { payment_intent: paymentIntent };
   if (amountCents !== undefined) params['amount'] = String(amountCents);
-  return stripePost(key, '/refunds', params);
+  return stripePost(env, key, '/refunds', params);
 }
 
 // ------------------------------------------------------------------ webhooks

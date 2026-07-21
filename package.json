@@ -7,9 +7,9 @@
     "dev": "wrangler pages dev . --port 8788",
     "db:migrate:local": "wrangler d1 migrations apply autoclarity_ppi --local",
     "db:migrate:preview": "wrangler d1 migrations apply autoclarity_ppi --remote",
-    "test": "vitest run",
-    "test:unit": "vitest run tests/unit",
-    "test:integration": "vitest run tests/integration",
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "vitest run",
+    "test:integration": "vitest run -c vitest.integration.config.ts",
     "typecheck": "tsc --noEmit",
     "check:links": "node scripts/check-links.mjs",
     "check:headers": "node scripts/check-headers.mjs"

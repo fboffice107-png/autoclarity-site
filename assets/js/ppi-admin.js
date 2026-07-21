@@ -33,13 +33,16 @@
     content.innerHTML = "";
   }
 
-  document.getElementById("loginForm").addEventListener("submit", function (e) {
-    e.preventDefault();
+  function doLogin(e) {
+    if (e) e.preventDefault();
     var key = document.getElementById("adminKey").value.trim();
     try { sessionStorage.setItem(KEY_STORE, key); } catch (err) {}
     document.getElementById("loginStatus").textContent = "Checking…";
     boot();
-  });
+  }
+  document.getElementById("loginForm").addEventListener("submit", doLogin);
+  // Some embedded webviews swallow implicit form submission — cover both paths.
+  document.querySelector("#loginForm button[type=submit]").addEventListener("click", doLogin);
 
   nav.querySelectorAll(".tab-btn").forEach(function (btn) {
     btn.addEventListener("click", function () {

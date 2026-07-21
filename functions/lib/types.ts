@@ -19,6 +19,8 @@ export interface Env {
   TURNSTILE_SECRET_KEY?: string;
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
+  /** Test-only Stripe API override; ignored when PPI_ENV=production. */
+  STRIPE_API_BASE?: string;
   RESEND_API_KEY?: string;
   EMAIL_FROM?: string;
   ADMIN_NOTIFY_EMAIL?: string;

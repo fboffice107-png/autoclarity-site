@@ -35,7 +35,7 @@ for (const page of pages) {
     .filter((u) => !u.startsWith('mailto:') && !u.startsWith('data:') && !u.startsWith('javascript:'));
   for (const ref of refs) {
     if (/^https?:\/\//.test(ref)) continue; // external links not fetched in CI
-    const url = base + (ref.startsWith('/') ? ref : page + ref);
+    const url = new URL(ref, base + page).href;
     await check(url, page);
   }
   console.log(`OK   ${page} (${refs.length} refs)`);

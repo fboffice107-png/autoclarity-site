@@ -72,9 +72,14 @@
   }
 
   function esc(s) {
-    var d = document.createElement("div");
-    d.textContent = String(s == null ? "" : s);
-    return d.innerHTML;
+    // Escapes &<> AND quotes, so values interpolated into attributes cannot
+    // break out of them (textContent alone leaves " and ' intact).
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
   function money(cents) { return (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD" }); }
   function when(iso) {

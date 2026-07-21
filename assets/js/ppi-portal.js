@@ -74,9 +74,13 @@
   }
 
   function esc(s) {
-    var d = document.createElement("div");
-    d.textContent = String(s == null ? "" : s);
-    return d.innerHTML;
+    // Escapes &<> AND quotes so attribute interpolation cannot break out.
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   function money(cents) {

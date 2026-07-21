@@ -22,12 +22,20 @@ export function normalizePhone(v: string): string | null {
 }
 
 export function validUrl(v: string): boolean {
-  if (v.length > 2000) return false;
+  return normalizeUrl(v) !== null;
+}
+
+/** Returns a normalized http(s) URL string, or null if invalid. Normalizing
+ *  through the URL parser strips any attribute-breaking characters before the
+ *  value is ever stored or rendered. */
+export function normalizeUrl(v: string): string | null {
+  if (!v || v.length > 2000) return null;
   try {
     const u = new URL(v);
-    return u.protocol === 'http:' || u.protocol === 'https:';
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    return u.href;
   } catch {
-    return false;
+    return null;
   }
 }
 

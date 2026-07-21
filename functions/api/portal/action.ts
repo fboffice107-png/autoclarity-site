@@ -87,6 +87,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
       const slotId = clampStr(body.slotId, 60);
       const holdUntil = new Date(Date.now() + config.scheduling.holdMinutes * 60_000).toISOString();
+
+      // A request may hold only one slot at a time. Release any slot this same
+      // request is already holding before placing the new hold, so two portal
+      // tokens racing on different slots can't leave the request double-held.
+      await db
+        .prepare(`UPDATE appointment_slots SET status = 'offered', hold_expires_at = NULL, updated_at = ? WHERE request_id = ? AND status = 'held'`)
+        .bind(nowIso(), requestId)
+        .run();
+
       try {
         const upd = await db
           .prepare(
@@ -103,11 +112,20 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         return errorJson('slot_taken', 'That time was just taken. Please pick another window.', 409);
       }
 
-      if (status === 'quote_sent') {
-        await applyStatus(db, requestId, 'quote_sent', 'awaiting_time_selection', 'customer', 'Customer opened scheduling', quote.id);
-        await applyStatus(db, requestId, 'awaiting_time_selection', 'awaiting_agreement', 'customer', 'Slot held', slotId);
-      } else {
-        await applyStatus(db, requestId, 'awaiting_time_selection', 'awaiting_agreement', 'customer', 'Slot held', slotId);
+      // Advance the request state, checking each hop. If the compare-and-swap
+      // loses a concurrent race, release the hold we just placed and 409 so we
+      // never leave a held slot attached to a non-scheduling status.
+      const moved =
+        status === 'quote_sent'
+          ? (await applyStatus(db, requestId, 'quote_sent', 'awaiting_time_selection', 'customer', 'Customer opened scheduling', quote.id)) &&
+            (await applyStatus(db, requestId, 'awaiting_time_selection', 'awaiting_agreement', 'customer', 'Slot held', slotId))
+          : await applyStatus(db, requestId, 'awaiting_time_selection', 'awaiting_agreement', 'customer', 'Slot held', slotId);
+      if (!moved) {
+        await db
+          .prepare(`UPDATE appointment_slots SET status = 'offered', hold_expires_at = NULL, updated_at = ? WHERE id = ? AND request_id = ? AND status = 'held'`)
+          .bind(nowIso(), slotId, requestId)
+          .run();
+        return errorJson('conflict', 'This request changed a moment ago — reload the page and pick your time again.', 409);
       }
 
       const slot = await db

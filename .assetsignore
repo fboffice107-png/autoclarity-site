@@ -1,0 +1,23 @@
+# Files that must never be uploaded as static assets by `wrangler pages deploy`.
+# (Defense-in-depth; functions/_middleware.ts also 404s these paths at runtime,
+# and git-integration deploys exclude the gitignored ones outright.)
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+wrangler.toml
+package.json
+package-lock.json
+tsconfig.json
+vitest.config.ts
+vitest.integration.config.ts
+.gitignore
+.assetsignore
+functions
+migrations
+tests
+scripts
+docs
+legal
+node_modules
+.wrangler

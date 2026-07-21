@@ -112,6 +112,36 @@ describe('public surface', () => {
       expect(res.headers.get('location')).toContain('/las-vegas-pre-purchase-inspection');
     }
   });
+
+  it('never serves repository housekeeping files (secrets, source, config)', async () => {
+    for (const p of ['/.dev.vars', '/wrangler.toml', '/package.json', '/migrations/0001_init.sql', '/functions/lib/auth.ts', '/tests/unit/vin.test.ts', '/docs/PPI_SECURITY.md', '/.env.example', '/scripts/cloudflare-setup.sh']) {
+      const res = await fetch(BASE + p);
+      expect(res.status, `${p} must not be served`).toBe(404);
+    }
+  });
+
+  it('normalizes listing URLs so attribute-breaking characters cannot be stored', async () => {
+    const r = await post('/api/ppi/requests', intakePayload({
+      email: 'xss-probe@example.com',
+      vin: '',
+      make: 'Ford',
+      model: 'Focus',
+      listingUrl: 'https://evil.example/a" onmouseover="alert(1)',
+    }));
+    // Either rejected as invalid, or stored normalized without the quote.
+    if (r.status === 200) {
+      const list = await get('/api/admin/requests', admin);
+      const row = list.body.requests.find((x: Json) => x.email === 'xss-probe@example.com');
+      const detail = await get(`/api/admin/requests/${row.id}`, admin);
+      const stored = detail.body.request.listing_url ?? '';
+      // The security property: the quote that would break out of an href
+      // attribute is gone (percent-encoded). Residual path text is inert.
+      expect(stored).not.toContain('"');
+      expect(stored).toContain('%22');
+    } else {
+      expect(r.status).toBe(422);
+    }
+  });
 });
 
 describe('admin authorization', () => {
@@ -425,12 +455,11 @@ describe('lifecycle controls', () => {
 });
 
 describe('rate limiting', () => {
-  it('caps public submissions per IP', async () => {
-    // Submissions so far in this suite: happy(1) + duplicate(2) + 2 invalid(4).
-    const fifth = await post('/api/ppi/requests', intakePayload({ email: 'fifth@example.com', vin: '', make: 'Honda', model: 'Accord' }));
-    expect(fifth.status).toBe(200);
-    const sixth = await post('/api/ppi/requests', intakePayload({ email: 'sixth@example.com', vin: '', make: 'Mazda', model: '3' }));
-    expect(sixth.status).toBe(429);
-    expect(sixth.body.error.code).toBe('rate_limited');
+  it('caps public submissions per IP (limit 5/hour)', async () => {
+    // Earlier tests already made >=5 counted submissions from this IP
+    // (each reaches the limiter before validation), so the next one is blocked.
+    const blocked = await post('/api/ppi/requests', intakePayload({ email: 'ratelimit@example.com', vin: '', make: 'Mazda', model: '3' }));
+    expect(blocked.status).toBe(429);
+    expect(blocked.body.error.code).toBe('rate_limited');
   });
 });

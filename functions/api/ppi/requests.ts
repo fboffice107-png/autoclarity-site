@@ -6,7 +6,7 @@
 import type { Env } from '../../lib/types.ts';
 import { modeFlags } from '../../lib/types.ts';
 import { getConfig } from '../../lib/config.ts';
-import { parseIntake } from '../../lib/validate.ts';
+import { parseIntake, normalizeUrl } from '../../lib/validate.ts';
 import { validateVin } from '../../lib/vin.ts';
 import { suggestTier, estimateTravel } from '../../lib/pricing.ts';
 import { verifyTurnstile } from '../../lib/turnstile.ts';
@@ -152,7 +152,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         vinNormalized,
         toCents(payload.askingPrice),
         toCents(payload.expectedPrice),
-        payload.listingUrl || null,
+        payload.listingUrl ? normalizeUrl(payload.listingUrl) : null,
         payload.modStatus,
         payload.warningLights || null,
         payload.knownIssues || null,

@@ -15,8 +15,12 @@
   client-side is UX only. Enums are allowlisted, lengths clamped, prices parsed
   defensively, URLs restricted to http(s).
 - **SQL**: 100% prepared statements with bound parameters; no string-built SQL.
-- **XSS**: portal/admin render via `textContent`-based escaping (`esc()`);
-  agreement bodies rendered as escaped text, not HTML.
+- **XSS**: portal/admin escape `& < > " '` on every server-derived string
+  before it enters `innerHTML` (`esc()`), so values interpolated into HTML
+  attributes cannot break out; agreement bodies rendered as escaped text. The
+  strict `script-src 'self'` CSP (no `unsafe-inline`) is a second layer, not
+  the only one. Listing URLs are additionally normalized through the URL
+  parser server-side before storage.
 - **Uploads**: private R2 bucket; MIME allowlist + magic-byte sniffing; 8 MB and
   6-file caps; randomized object keys; filenames sanitized to display-only;
   served back only through authenticated endpoints with
@@ -35,6 +39,14 @@
   `.env.example` contains placeholders exclusively. Frontend bundles contain
   only the public Turnstile site key. Logs redact: no VINs, addresses or
   customer names are logged; webhook/API errors log truncated technical detail.
+- **Repo files are never served**: `functions/_middleware.ts` returns 404 for
+  `.dev.vars`, `.env*`, `wrangler.toml`, `package.json`, `tsconfig.json`,
+  `functions/`, `migrations/`, `tests/`, `scripts/`, `docs/`, `legal/`,
+  `node_modules/`, etc. This runs before static-asset serving on both
+  `wrangler pages dev` and hosted Pages, so it holds regardless of deploy
+  method. `.assetsignore` additionally keeps them out of direct uploads.
+  (Do not rely on `_redirects` denylists for this — they are ignored by the
+  dev server.)
 - **Privacy in analytics**: `analytics_events` schema physically has no PII
   columns; event names and step labels are allowlisted server-side.
 - **Magic-link URLs**: tokens are secrets-in-URL by design (standard for

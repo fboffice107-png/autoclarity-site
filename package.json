@@ -7,8 +7,6 @@
     "dev": "wrangler pages dev . --port 8788",
     "db:migrate:local": "wrangler d1 migrations apply autoclarity_ppi --local",
     "db:migrate:preview": "wrangler d1 migrations apply autoclarity_ppi --remote",
-    "seed:local": "wrangler d1 execute autoclarity_ppi --local --file=./scripts/seed-preview.sql",
-    "seed:preview": "wrangler d1 execute autoclarity_ppi --remote --file=./scripts/seed-preview.sql",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",

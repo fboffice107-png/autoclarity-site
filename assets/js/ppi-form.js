@@ -23,7 +23,40 @@
   var turnstileToken = "";
   var turnstileRendered = false;
   var formStarted = false;
+  var staticMode = false; // true when the API is unreachable (static hosting)
   var STORAGE_KEY = "ppi-intake-draft-v1";
+
+  /* ---------- sticky mobile CTA bar ---------- */
+  function buildStickyBar(contact, tel, display) {
+    if (document.getElementById("ppiSticky")) return; // once
+    var bar = document.createElement("div");
+    bar.id = "ppiSticky";
+    bar.className = "ppi-sticky";
+    bar.setAttribute("aria-label", "Quick actions");
+    var html = '<a class="ppi-sticky-primary" href="#request" data-analytics="ppi_cta_click" data-step="sticky">Request Inspection</a>';
+    if (contact && contact.configured && contact.callEnabled) html += '<a class="ppi-sticky-secondary" href="tel:' + tel + '" data-analytics="ppi_call_click" data-step="sticky" aria-label="Call ' + display + '">Call</a>';
+    if (contact && contact.configured && contact.smsEnabled) html += '<a class="ppi-sticky-secondary" href="sms:' + tel + '" data-analytics="ppi_text_click" data-step="sticky">Text</a>';
+    html += '<button type="button" class="ppi-sticky-close" id="ppiStickyClose" aria-label="Dismiss">✕</button>';
+    bar.innerHTML = html;
+    document.body.appendChild(bar);
+    var dismissed = false;
+    try { dismissed = sessionStorage.getItem("ppi-sticky-dismissed") === "1"; } catch (e) {}
+    document.getElementById("ppiStickyClose").addEventListener("click", function () {
+      bar.classList.remove("show");
+      try { sessionStorage.setItem("ppi-sticky-dismissed", "1"); } catch (e) {}
+    });
+    var hero = document.querySelector(".ppi-hero");
+    function onScroll() {
+      if (dismissed) return;
+      var past = hero ? window.scrollY > hero.offsetHeight * 0.7 : window.scrollY > 500;
+      var request = document.getElementById("request");
+      // hide again when the form itself is in view (don't cover form controls)
+      var atForm = request && request.getBoundingClientRect().top < window.innerHeight * 0.9;
+      bar.classList.toggle("show", past && !atForm);
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+  }
 
   /* ---------- analytics (no PII ever) ---------- */
   function track(event, step) {
@@ -49,6 +82,9 @@
     .then(function (cfg) {
       runtime = cfg;
       applyPricing(cfg);
+      applyScanLanguage(cfg);
+      applyContact(cfg);
+      applyReviews(cfg);
       if (cfg.mode === "waitlist") {
         intakeShell.hidden = true;
         waitlistShell.hidden = false;
@@ -59,8 +95,11 @@
       track("ppi_page_view");
     })
     .catch(function () {
-      intakeShell.hidden = true;
-      fallbackShell.hidden = false;
+      // No API reachable (e.g. static hosting): keep the multi-step form usable
+      // and capture leads via a prefilled email on submit.
+      staticMode = true;
+      setupForm();
+      track("ppi_page_view");
     });
 
   function money(cents) { return "$" + Math.round(cents / 100); }
@@ -68,22 +107,64 @@
   function applyPricing(cfg) {
     if (!cfg.pricing) return;
     (cfg.pricing.tiers || []).forEach(function (tier) {
-      var el = document.querySelector('[data-price="' + tier.key + '"]');
-      if (el) el.textContent = money(tier.priceCents);
-    });
-    if (cfg.pricing.promo) {
-      var promoEl = document.querySelector("[data-promo]");
-      var standardEl = document.querySelector('[data-price="standard"]');
-      var standardTier = (cfg.pricing.tiers || []).filter(function (t) { return t.key === "standard"; })[0];
-      if (promoEl && standardEl && standardTier) {
-        standardEl.textContent = money(cfg.pricing.promo.priceCents);
-        promoEl.innerHTML =
-          '<span class="was">' + money(standardTier.priceCents) + "</span> " +
-          escapeHtml(cfg.pricing.promo.label) +
-          (cfg.pricing.promo.endsAt ? " — ends " + new Date(cfg.pricing.promo.endsAt).toLocaleDateString() : "");
-        promoEl.hidden = false;
+      var valEl = document.querySelector('[data-price="' + tier.key + '"]');
+      if (valEl) valEl.textContent = money(tier.priceCents);
+      // Struck-through regular price + launch label, only when a real launch
+      // window is active and a lower price is set for this tier.
+      var wasEl = document.querySelector('[data-was="' + tier.key + '"]');
+      var launchEl = document.querySelector('[data-launch="' + tier.key + '"]');
+      var prefixEl = document.querySelector('[data-prefix="' + tier.key + '"]');
+      if (tier.wasCents && tier.wasCents > tier.priceCents) {
+        if (wasEl) { wasEl.textContent = money(tier.wasCents); wasEl.hidden = false; }
+        if (prefixEl) prefixEl.textContent = tier.startingAt ? "Launch price, starting at" : "Launch price";
+        if (launchEl) { launchEl.textContent = "Introductory Las Vegas launch pricing"; launchEl.hidden = false; }
+      } else if (prefixEl) {
+        prefixEl.textContent = tier.startingAt ? "Starting at" : "Flat rate";
       }
+    });
+  }
+
+  function applyReviews(cfg) {
+    // Only real, owner-configured reviews are shown; the section stays hidden
+    // otherwise. No star ratings are rendered or fabricated.
+    var items = (cfg && cfg.reviews) || [];
+    if (!items.length) return;
+    var grid = document.getElementById("reviewsGrid");
+    var section = document.getElementById("reviews");
+    if (!grid || !section) return;
+    grid.innerHTML = items.map(function (r) {
+      return '<figure class="review-card"><blockquote>' + escapeHtml(r.text) + "</blockquote>" +
+        "<figcaption>" + escapeHtml(r.name) + (r.vehicle ? " · " + escapeHtml(r.vehicle) : "") + "</figcaption></figure>";
+    }).join("");
+    section.hidden = false;
+  }
+
+  function applyScanLanguage(cfg) {
+    // Show scan-on wording only when diagnostic scan is in the confirmed scope.
+    var on = cfg.scanIncluded === true;
+    document.querySelectorAll('[data-scan="on"]').forEach(function (el) { el.hidden = !on; });
+    document.querySelectorAll('[data-scan="off"]').forEach(function (el) { el.hidden = on; });
+  }
+
+  function applyContact(cfg) {
+    var c = cfg.contact;
+    if (!c || !c.configured) return; // never invent a number
+    var tel = String(c.phone).replace(/[^0-9+]/g, "");
+    var display = String(c.phone);
+    var parts = [];
+    if (c.callEnabled) parts.push('<a class="btn btn-ghost btn-lg" href="tel:' + tel + '" data-analytics="ppi_call_click" data-step="hero">Call ' + escapeHtml(display) + "</a>");
+    if (c.smsEnabled) parts.push('<a class="btn btn-ghost btn-lg" href="sms:' + tel + '" data-analytics="ppi_text_click" data-step="hero">Text us</a>');
+    if (c.urgentCtaEnabled && parts.length) {
+      var hero = document.getElementById("heroUrgent");
+      if (hero) { hero.innerHTML = '<p class="urgent-lead">Buying today? Call or text AutoClarity</p>' + parts.join(""); hero.hidden = false; }
     }
+    buildStickyBar(c, tel, display);
+    // (re)bind analytics on freshly injected buttons
+    document.querySelectorAll("[data-analytics]").forEach(function (el) {
+      if (el.dataset.trackBound) return;
+      el.dataset.trackBound = "1";
+      el.addEventListener("click", function () { track(el.getAttribute("data-analytics"), el.getAttribute("data-step") || ""); });
+    });
   }
 
   function escapeHtml(s) {
@@ -149,8 +230,8 @@
 
   /* ---------- multi-step form ---------- */
   var steps, current, backBtn, nextBtn, submitBtn, progressBar, stepLine;
-  var STEP_NAMES = ["", "buyer", "vehicle", "location", "access", "timing", "review"];
-  var STEP_LABELS = ["", "About you", "The vehicle", "Where the vehicle is", "Seller permission", "Timing", "Review & submit"];
+  var STEP_NAMES = ["", "you_and_vehicle", "location", "timing_access", "review"];
+  var STEP_LABELS = ["", "You & the vehicle", "Where is the vehicle?", "Timing & access", "Review & submit"];
 
   function setupForm() {
     steps = Array.prototype.slice.call(form.querySelectorAll(".form-step"));
@@ -178,6 +259,7 @@
     form.addEventListener("submit", onSubmit);
 
     setupVin();
+    buildStickyBar(); // Request-only bar; call/text added by applyContact if configured
   }
 
   function showStep(n, initial) {
@@ -222,13 +304,12 @@
     function fail(name, msg) { fieldError(name, msg); if (ok) focusField(name); ok = false; }
 
     if (n === 1) {
+      // Contact
       if (val("fullName").length < 2) fail("fullName", "Please enter your full name.");
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(val("email"))) fail("email", "Please enter a valid email address.");
       var digits = val("phone").replace(/\D/g, "");
       if (!(digits.length === 10 || (digits.length === 11 && digits.charAt(0) === "1"))) fail("phone", "Please enter a valid US mobile number.");
-      if (!form.elements.transactionalConsent.checked) fail("transactionalConsent", "We need permission to contact you about this request.");
-    }
-    if (n === 2) {
+      // Vehicle
       var year = parseInt(val("year"), 10);
       var maxYear = new Date().getFullYear() + 2;
       if (!(year >= 1920 && year <= maxYear)) fail("year", "Enter a valid model year.");
@@ -240,11 +321,13 @@
       var url = val("listingUrl");
       if (url && !/^https?:\/\//i.test(url)) fail("listingUrl", "Listing link should start with http(s)://");
     }
-    if (n === 3) {
+    if (n === 2) {
       if (!val("locCity")) fail("locCity", "City is required.");
       if (!/^\d{5}$/.test(val("locZip"))) fail("locZip", "Enter a 5-digit ZIP code.");
     }
+    // Step 3 (timing & access) has no required fields.
     if (n === 4) {
+      if (!form.elements.transactionalConsent.checked) fail("transactionalConsent", "We need permission to contact you about this request.");
       if (!form.elements.ackAccessDependent.checked) fail("ackAccessDependent", "Please acknowledge this to continue.");
     }
     return ok;
@@ -399,6 +482,23 @@
   }
 
   /* ---------- review + submit ---------- */
+  // Lightweight client-side tier hint (PRELIMINARY only — the server computes
+  // the real suggestion and the owner confirms the final quote).
+  function preliminaryTier() {
+    var make = val("make").toLowerCase();
+    var model = val("model").toLowerCase();
+    var trim = val("trim").toLowerCase();
+    var mods = val("modStatus");
+    var exotic = /ferrari|lamborghini|mclaren|aston martin|bentley|rolls|maserati|lotus|bugatti|pagani/.test(make);
+    var euro = /bmw|mercedes|audi|porsche|land rover|range rover|jaguar|volvo|volkswagen|mini|tesla|lexus|genesis|maserati/.test(make);
+    var perf = /corvette|gt-r|gtr|supra|nsx|hellcat|demon|trackhawk|raptor|trx|type r|wrx|sti|golf r|gti|911|amg|shelby|mustang|camaro|challenger|charger|m3|m4|m5/.test(model + " " + trim);
+    var year = parseInt(val("year"), 10);
+    var classic = year && (new Date().getFullYear() - year) >= 25;
+    if (exotic || classic || mods === "heavy") return "Exotic, Collector or Heavily Modified";
+    if (euro || perf || mods === "light") return "European, Luxury or Performance";
+    return "Standard Vehicle";
+  }
+
   function buildReview() {
     var card = document.getElementById("reviewCard");
     var rows = [
@@ -412,6 +512,10 @@
     card.innerHTML = rows.map(function (r) {
       return "<div><dt>" + escapeHtml(r[0]) + "</dt><dd>" + escapeHtml(r[1]) + "</dd></div>";
     }).join("");
+    var tierEl = document.getElementById("reviewTier");
+    if (tierEl) {
+      tierEl.innerHTML = "Estimated tier: <strong>" + escapeHtml(preliminaryTier()) + " PPI</strong> — <em>preliminary; your exact price and any travel charge are confirmed after AutoClarity reviews the vehicle.</em>";
+    }
   }
 
   function setStatus(msg) {
@@ -421,9 +525,17 @@
 
   function onSubmit(e) {
     e.preventDefault();
-    for (var i = 1; i <= 4; i++) {
+    for (var i = 1; i <= steps.length; i++) {
       if (!validateStep(i)) { showStep(i); return; }
     }
+
+    // Static hosting (no API): capture the lead via a prefilled email so the
+    // owner is still notified. Turnstile is not required in this path.
+    if (staticMode) {
+      submitToEmail();
+      return;
+    }
+
     if (!turnstileToken) {
       setStatus("Please complete the human-verification check above.");
       return;
@@ -470,10 +582,9 @@
   }
 
   var STEP_OF_FIELD = {
-    fullName: 1, email: 1, phone: 1, transactionalConsent: 1,
-    vin: 2, year: 2, make: 2, model: 2, listingUrl: 2,
-    locCity: 3, locZip: 3, locState: 3,
-    ackAccessDependent: 4
+    fullName: 1, email: 1, phone: 1, year: 1, make: 1, model: 1, vin: 1, listingUrl: 1,
+    locCity: 2, locZip: 2, locState: 2,
+    transactionalConsent: 4, ackAccessDependent: 4
   };
   function earliestStepFor(fields) {
     var min = 0;
@@ -482,6 +593,45 @@
       if (s && (min === 0 || s < min)) min = s;
     });
     return min;
+  }
+
+  /* Static-hosting lead capture: build a prefilled email to support. */
+  function submitToEmail() {
+    var support = (runtime && runtime.supportEmail) || "support@getautoclarity.com";
+    var lines = [];
+    function add(label, name) { var v = val(name); if (v) lines.push(label + ": " + v); }
+    lines.push("LAS VEGAS PPI REQUEST", "");
+    add("Name", "fullName"); add("Email", "email"); add("Phone", "phone");
+    add("Preferred contact", "preferredContact");
+    lines.push("");
+    add("Year", "year"); add("Make", "make"); add("Model", "model"); add("Trim", "trim");
+    add("Mileage", "mileage"); add("VIN", "vin"); add("Listing", "listingUrl");
+    add("Asking price", "askingPrice"); add("Expected price", "expectedPrice"); add("Modifications", "modStatus");
+    lines.push("");
+    lines.push("Location: " + [val("locStreet"), val("locUnit"), val("locCity"), val("locState"), val("locZip")].filter(Boolean).join(", "));
+    add("Seller type", "sellerType"); add("Seller name", "sellerName"); add("Seller phone", "sellerPhone");
+    add("Access notes", "locNotes");
+    lines.push("");
+    add("Decide by", "decisionTimeline"); add("Time of day", "timeWindow"); add("Preferred dates", "preferredDates");
+    add("Warning lights", "warningLights"); add("Known issues", "knownIssues");
+    add("Title", "titleStatus"); add("Starts/drives", "startsDrives"); add("Notes", "customerNotes");
+    var subject = "Las Vegas PPI request — " + [val("year"), val("make"), val("model")].filter(Boolean).join(" ");
+    var href = "mailto:" + support + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(lines.join("\n"));
+    track("ppi_request_submitted");
+    clearDraft();
+    form.hidden = true;
+    document.getElementById("stepLine").hidden = true;
+    var pb = document.querySelector(".form-progress"); if (pb) pb.hidden = true;
+    var panel = document.getElementById("successPanel");
+    panel.hidden = false;
+    document.getElementById("successRef").textContent = "sent by email";
+    var link = document.getElementById("successPortalLink");
+    link.textContent = "Open your email to send the request";
+    link.href = href;
+    var ub = document.getElementById("uploadBlock"); if (ub) ub.hidden = true;
+    // Trigger the email client immediately too.
+    window.location.href = href;
+    panel.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   /* ---------- success + uploads ---------- */

@@ -3,7 +3,7 @@
 // and can override before a quote is sent.
 
 import type { PpiConfig } from './config.ts';
-import { promoActive } from './config.ts';
+import { promoActive, launchActive } from './config.ts';
 import { estimateMilesFromZip } from './zips.ts';
 
 export type Tier = 'standard' | 'euro_luxury_performance' | 'exotic_collector';
@@ -189,6 +189,11 @@ export function computeQuoteTotals(lines: QuoteLineInput[]): QuoteTotals {
 
 export function basePriceForTier(tier: Tier, config: PpiConfig, now = new Date()): { priceCents: number; promoApplied: boolean } {
   const tierCfg = config.pricing.tiers[tier];
+  // Time-boxed introductory launch price applies per tier when configured.
+  if (launchActive(config, now) && typeof tierCfg.launchPriceCents === 'number' && tierCfg.launchPriceCents < tierCfg.priceCents) {
+    return { priceCents: tierCfg.launchPriceCents, promoApplied: true };
+  }
+  // Legacy standard-tier promo (retained for back-compat).
   if (tier === 'standard' && promoActive(config, now) && config.pricing.promo.priceCents < tierCfg.priceCents) {
     return { priceCents: config.pricing.promo.priceCents, promoApplied: true };
   }

@@ -10,7 +10,7 @@ import {
   cancellationOutcome,
   type VehicleFacts,
 } from '../../functions/lib/pricing.ts';
-import { DEFAULT_CONFIG, promoActive, type PpiConfig } from '../../functions/lib/config.ts';
+import { DEFAULT_CONFIG, promoActive, launchActive, tierDisplayPrice, type PpiConfig } from '../../functions/lib/config.ts';
 
 const NOW = new Date('2026-07-21T12:00:00Z');
 
@@ -142,6 +142,49 @@ describe('promo pricing', () => {
     const after = new Date('2026-09-01T00:00:00Z');
     expect(promoActive(promoConfig, after)).toBe(false);
     expect(basePriceForTier('standard', promoConfig, after)).toEqual({ priceCents: 19900, promoApplied: false });
+  });
+});
+
+describe('launch pricing (introductory, time-boxed)', () => {
+  function launchCfg(overrides: Partial<{ enabled: boolean; startsAt: string | null; endsAt: string | null }> = {}): PpiConfig {
+    const c: PpiConfig = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+    c.pricing.launch = { enabled: true, startsAt: null, endsAt: '2026-08-31T00:00:00Z', ...overrides };
+    return c;
+  }
+
+  it('is inactive by default (no permanent fake discount)', () => {
+    expect(launchActive(DEFAULT_CONFIG, NOW)).toBe(false);
+    const disp = tierDisplayPrice(DEFAULT_CONFIG, 'standard', NOW);
+    expect(disp.priceCents).toBe(19900);
+    expect(disp.wasCents).toBeNull();
+  });
+
+  it('applies introductory prices per tier while the window is active', () => {
+    const cfg = launchCfg();
+    expect(launchActive(cfg, NOW)).toBe(true);
+    expect(tierDisplayPrice(cfg, 'standard', NOW)).toEqual({ priceCents: 14900, wasCents: 19900, startingAt: false });
+    expect(tierDisplayPrice(cfg, 'euro_luxury_performance', NOW)).toEqual({ priceCents: 24900, wasCents: 29900, startingAt: false });
+  });
+
+  it('exotic tier has no launch price and stays "starting at"', () => {
+    const disp = tierDisplayPrice(launchCfg(), 'exotic_collector', NOW);
+    expect(disp.priceCents).toBe(39900);
+    expect(disp.wasCents).toBeNull();
+    expect(disp.startingAt).toBe(true);
+  });
+
+  it('respects the start and end of the window', () => {
+    const before = new Date('2026-07-01T00:00:00Z');
+    const after = new Date('2026-09-15T00:00:00Z');
+    const cfg = launchCfg({ startsAt: '2026-07-15T00:00:00Z' });
+    expect(launchActive(cfg, before)).toBe(false);
+    expect(launchActive(cfg, after)).toBe(false);
+    expect(tierDisplayPrice(cfg, 'standard', after).wasCents).toBeNull();
+  });
+
+  it('basePriceForTier uses the launch price when active', () => {
+    expect(basePriceForTier('standard', launchCfg(), NOW)).toEqual({ priceCents: 14900, promoApplied: true });
+    expect(basePriceForTier('euro_luxury_performance', launchCfg(), NOW).priceCents).toBe(24900);
   });
 });
 

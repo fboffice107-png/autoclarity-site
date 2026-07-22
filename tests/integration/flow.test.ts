@@ -101,8 +101,14 @@ describe('public surface', () => {
     expect(r.body.mode).toBe('request');
     expect(r.body.pricing.tiers).toHaveLength(3);
     expect(r.body.turnstileSiteKey).toBeTruthy();
+    // Safe defaults surfaced to the public page.
+    expect(r.body.scanIncluded).toBe(false); // scan off until owner confirms scope
+    expect(r.body.reviews).toEqual([]); // no fabricated reviews
+    expect(r.body.contact.configured).toBe(false); // no invented phone number
+    expect(r.body.launchActive).toBe(false); // no fake permanent discount
     expect(JSON.stringify(r.body)).not.toContain('sk_test');
     expect(JSON.stringify(r.body)).not.toContain('whsec');
+    expect(JSON.stringify(r.body)).not.toContain('businessPhone');
   });
 
   it('redirects short routes with 301s', async () => {
@@ -430,21 +436,40 @@ describe('lifecycle controls', () => {
     expect(detail.body.messages.some((m: Json) => m.template === 'needs_info')).toBe(true);
   });
 
-  it('config: admin can enable the launch promo and the public page reflects it', async () => {
+  it('config: admin can enable time-boxed launch pricing and the public page reflects it', async () => {
     const put = await fetch(BASE + '/api/admin/config', {
       method: 'PUT',
       headers: { ...admin, 'content-type': 'application/json' },
-      body: JSON.stringify({ pricing: { promo: { enabled: true, priceCents: 14900, endsAt: '2099-01-01' } } }),
+      body: JSON.stringify({ pricing: { launch: { enabled: true, startsAt: null, endsAt: '2099-01-01' } } }),
     });
     expect(put.status).toBe(200);
     const pub = await get('/api/ppi/runtime-config');
-    expect(pub.body.pricing.promo).toBeTruthy();
-    expect(pub.body.pricing.promo.priceCents).toBe(14900);
-    // turn it back off
+    expect(pub.body.launchActive).toBe(true);
+    const std = pub.body.pricing.tiers.find((t: Json) => t.key === 'standard');
+    expect(std.priceCents).toBe(14900); // introductory launch price
+    expect(std.wasCents).toBe(19900); // regular price to strike through
+    // turn it back off — no permanent fake discount
     await fetch(BASE + '/api/admin/config', {
       method: 'PUT',
       headers: { ...admin, 'content-type': 'application/json' },
-      body: JSON.stringify({ pricing: { promo: { enabled: false } } }),
+      body: JSON.stringify({ pricing: { launch: { enabled: false } } }),
+    });
+    const off = await get('/api/ppi/runtime-config');
+    expect(off.body.launchActive).toBe(false);
+  });
+
+  it('config: admin can enable diagnostic scan scope', async () => {
+    await fetch(BASE + '/api/admin/config', {
+      method: 'PUT',
+      headers: { ...admin, 'content-type': 'application/json' },
+      body: JSON.stringify({ scan: { included: true } }),
+    });
+    const pub = await get('/api/ppi/runtime-config');
+    expect(pub.body.scanIncluded).toBe(true);
+    await fetch(BASE + '/api/admin/config', {
+      method: 'PUT',
+      headers: { ...admin, 'content-type': 'application/json' },
+      body: JSON.stringify({ scan: { included: false } }),
     });
   });
 

@@ -539,3 +539,182 @@ fieldset.form-step legend {
 @media (prefers-reduced-motion: reduce) {
   .form-progress-bar { transition: none; }
 }
+
+/* ============================================================
+   Founder-led hero, inspector, sample report, launch pricing,
+   sticky CTA bar, form polish (added for the conversion pass).
+   ============================================================ */
+
+/* ---------- Founder hero ---------- */
+.founder-hero {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: clamp(24px, 5vw, 56px);
+  align-items: center;
+  max-width: 1120px;
+}
+.hero-founder { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.founder-photo {
+  margin: 0;
+  width: 100%;
+  max-width: 420px;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-phone);
+  background: var(--bg-elev-1);
+}
+.founder-photo img { display: block; width: 100%; height: auto; object-position: 50% 22%; }
+.founder-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--glass-strong);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 18px 20px;
+  backdrop-filter: blur(8px);
+}
+.founder-name { font-size: 18px; font-weight: 800; letter-spacing: -0.01em; }
+.founder-role { color: var(--blue-soft); font-weight: 650; font-size: 14px; margin-bottom: 10px; }
+.founder-points { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 6px; }
+.founder-points li { position: relative; padding-left: 22px; color: var(--text-2); font-size: 14.5px; }
+.founder-points li::before { content: "✓"; position: absolute; left: 0; color: var(--green); font-weight: 700; }
+.founder-trust { font-size: 13.5px; color: var(--text-3); border-top: 1px solid var(--line-soft); padding-top: 10px; margin: 0; }
+
+.hero-urgent { margin: 18px 0 4px; }
+.hero-urgent .urgent-lead { font-weight: 750; margin-bottom: 8px; }
+.hero-urgent .btn { margin-right: 8px; margin-top: 4px; }
+
+@media (max-width: 900px) {
+  .founder-hero { grid-template-columns: 1fr; }
+  /* Mobile order (per spec): headline → copy → CTA → photo → card. Keep the
+     natural DOM order (copy first, then the founder block). */
+  .hero-founder { margin-top: 8px; }
+  .founder-photo, .founder-card { max-width: 480px; margin-inline: auto; }
+}
+
+/* ---------- Meet your inspector ---------- */
+.inspector-wrap {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: clamp(20px, 4vw, 44px);
+  align-items: center;
+  max-width: 940px;
+  margin-inline: auto;
+}
+.inspector-photo { margin: 0; }
+.inspector-photo picture { display: block; border-radius: var(--r-md); overflow: hidden; border: 1px solid var(--line); }
+.inspector-photo img { display: block; width: 100%; height: auto; object-position: 50% 20%; }
+.inspector-photo figcaption { color: var(--text-3); font-size: 13px; margin-top: 8px; text-align: center; }
+.inspector-copy h2 { margin: 4px 0 12px; }
+.inspector-copy p { color: var(--text-2); margin-bottom: 12px; }
+.inspector-copy .btn { margin-top: 8px; }
+@media (max-width: 720px) {
+  .inspector-wrap { grid-template-columns: 1fr; }
+  .inspector-photo { max-width: 280px; margin-inline: auto; }
+}
+
+/* ---------- Sample report CTA ---------- */
+.sample-cta-card {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: clamp(20px, 4vw, 40px);
+  align-items: center;
+  background: var(--bg-elev-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: clamp(20px, 3vw, 32px);
+  box-shadow: var(--shadow-card);
+}
+.sample-preview {
+  background: linear-gradient(160deg, var(--bg-elev-2), var(--bg-elev-1));
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 18px;
+}
+.sample-preview-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.sample-badge { font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--amber); background: rgba(255,180,84,0.12); border: 1px solid rgba(255,180,84,0.3); padding: 4px 10px; border-radius: 999px; }
+.sample-score { font-size: 14px; font-weight: 700; color: var(--text-2); }
+.sample-verdict { font-size: 15px; margin-bottom: 12px; color: var(--text-2); }
+.sample-verdict strong { color: var(--amber); }
+.sample-lines { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 8px; font-size: 13.5px; color: var(--text-2); }
+.sample-lines li { display: flex; align-items: center; gap: 8px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.dot-red { background: var(--red); } .dot-amber { background: var(--amber); } .dot-green { background: var(--green); }
+.sample-demo-note { font-size: 12px; color: var(--text-3); margin: 0; }
+.sample-copy p { color: var(--text-2); margin-bottom: 16px; }
+.sample-buttons { display: flex; gap: 12px; flex-wrap: wrap; }
+@media (max-width: 720px) { .sample-cta-card { grid-template-columns: 1fr; } }
+
+/* ---------- Launch pricing + app-vs-ppi ---------- */
+.price-was { color: var(--text-3); font-size: 20px; font-weight: 500; margin-left: 4px; }
+.price-launch { color: var(--green); font-weight: 700; font-size: 13.5px; margin-top: 2px; }
+.app-vs-ppi {
+  max-width: 720px;
+  margin: 20px auto 0;
+  padding: 16px 20px;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-md);
+  background: var(--glass);
+  color: var(--text-2);
+  font-size: 14.5px;
+  text-align: center;
+}
+.app-vs-ppi strong { color: var(--text); }
+
+/* ---------- Form polish ---------- */
+.form-divider { border: none; border-top: 1px solid var(--line-soft); margin: 20px 0; }
+.review-tier {
+  background: var(--glass);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+  padding: 12px 14px;
+  font-size: 14px;
+  color: var(--text-2);
+  margin-bottom: 16px;
+}
+.review-tier strong { color: var(--blue-soft); }
+
+/* ---------- Sticky mobile CTA bar ---------- */
+.ppi-sticky {
+  position: fixed;
+  left: 12px; right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  z-index: 60;
+  display: none;
+  gap: 8px;
+  align-items: stretch;
+  padding: 8px;
+  border-radius: 16px;
+  background: rgba(10, 18, 38, 0.92);
+  border: 1px solid var(--line);
+  box-shadow: 0 12px 40px rgba(2,6,18,0.6);
+  backdrop-filter: blur(10px);
+}
+.ppi-sticky.show { display: flex; }
+.ppi-sticky-primary {
+  flex: 1;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(180deg, #4079ff, #2456d8);
+  color: #fff; font-weight: 750; font-size: 15px;
+  border-radius: 11px; text-decoration: none; padding: 12px 14px;
+}
+.ppi-sticky-secondary {
+  display: flex; align-items: center; justify-content: center;
+  min-width: 64px; padding: 12px 14px;
+  background: var(--glass-strong); border: 1px solid var(--line);
+  color: var(--text); font-weight: 700; font-size: 15px;
+  border-radius: 11px; text-decoration: none;
+}
+.ppi-sticky-close {
+  background: none; border: none; color: var(--text-3);
+  font-size: 16px; padding: 0 6px; cursor: pointer;
+}
+/* Desktop: rely on hero/nav CTAs, not the bar. */
+@media (min-width: 780px) { .ppi-sticky { display: none !important; } }
+
+/* ---------- Reviews (shown only when real reviews are configured) ---------- */
+.reviews-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.review-card { margin: 0; background: var(--glass); border: 1px solid var(--line-soft); border-radius: var(--r-md); padding: 20px; }
+.review-card blockquote { margin: 0 0 12px; color: var(--text); font-size: 15px; line-height: 1.6; }
+.review-card figcaption { color: var(--text-3); font-size: 13.5px; font-weight: 600; }

@@ -23,6 +23,8 @@ const BLOCKED_EXACT = new Set([
   '/vitest.integration.config.ts',
   '/.env.example',
   '/.gitignore',
+  '/_config.yml',
+  '/.assetsignore',
 ]);
 const BLOCKED_PREFIXES = ['/functions/', '/migrations/', '/tests/', '/scripts/', '/docs/', '/legal/', '/.wrangler/', '/node_modules/'];
 

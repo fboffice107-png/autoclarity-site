@@ -8,6 +8,10 @@ import { clientIp, json, newId, nowIso } from '../../lib/util.ts';
 const ALLOWED_EVENTS = new Set([
   'ppi_page_view',
   'ppi_cta_click',
+  'ppi_founder_cta_click',
+  'ppi_sample_report_view',
+  'ppi_call_click',
+  'ppi_text_click',
   'ppi_form_started',
   'ppi_form_step_completed',
   'ppi_request_submitted',

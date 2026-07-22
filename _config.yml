@@ -1,0 +1,30 @@
+# GitHub Pages (legacy Jekyll) configuration.
+#
+# getautoclarity.com is served from the `main` branch root by GitHub Pages.
+# This file prevents repository scaffolding (backend source, config, tests,
+# docs, tooling) from being published as static files. Only the website's
+# own assets are served. On Cloudflare Pages these are additionally 404'd by
+# functions/_middleware.ts; this covers the static GitHub Pages host.
+exclude:
+  - functions
+  - migrations
+  - tests
+  - scripts
+  - docs
+  - legal
+  - node_modules
+  - wrangler.toml
+  - package.json
+  - package-lock.json
+  - tsconfig.json
+  - vitest.config.ts
+  - vitest.integration.config.ts
+  - .env.example
+  - .assetsignore
+  - README.md
+  - Gemfile
+  - Gemfile.lock
+
+# Do not process page content through Liquid/Markdown transforms; the site is
+# hand-authored HTML/CSS/JS served verbatim.
+plugins: []

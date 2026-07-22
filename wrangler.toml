@@ -1,0 +1,52 @@
+# Cloudflare Pages configuration for the AutoClarity PPI portal.
+#
+# Production today is GitHub Pages (static only). This file makes the same
+# repository deployable to Cloudflare Pages, which adds the server side of the
+# PPI portal (Pages Functions + D1 + R2). Nothing here affects GitHub Pages.
+#
+# The database_id below is a placeholder. Local dev does not need a real one
+# (`wrangler pages dev` uses a local SQLite database). Before the first hosted
+# preview deploy, run scripts/cloudflare-setup.sh which creates the real
+# resources and patches this file. See docs/PPI_CLOUDFLARE_SETUP.md.
+
+name = "autoclarity-site"
+pages_build_output_dir = "."
+compatibility_date = "2026-07-01"
+
+[vars]
+# preview | production — controls fail-closed behavior (admin auth, seeds, robots)
+PPI_ENV = "preview"
+# waitlist | request | live
+PPI_MODE = "request"
+PAYMENTS_ENABLED = "false"
+STRIPE_ENV = "test"
+BOOKING_ENABLED = "true"
+UPLOADS_ENABLED = "true"
+# Public site key only — never the secret. This is Cloudflare's always-passing
+# visible test key; replace with the real site key via the Pages dashboard.
+TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
+# Absolute origin used to build magic links, success/cancel URLs and emails.
+PUBLIC_BASE_URL = "http://127.0.0.1:8788"
+SUPPORT_EMAIL = "support@getautoclarity.com"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "autoclarity_ppi"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "UPLOADS"
+bucket_name = "autoclarity-ppi-uploads"
+
+# Secrets (set via `wrangler pages secret put NAME` or the dashboard — never in
+# this file, never committed):
+#   TURNSTILE_SECRET_KEY   — Turnstile server secret (test: 1x0000000000000000000000000000000AA)
+#   STRIPE_SECRET_KEY      — sk_test_... in preview. NEVER sk_live_ until owner approval.
+#   STRIPE_WEBHOOK_SECRET  — whsec_... for the configured webhook endpoint
+#   RESEND_API_KEY         — optional; without it emails are recorded but not sent
+#   EMAIL_FROM             — verified sender, e.g. "AutoClarity <notify@getautoclarity.com>"
+#   ADMIN_NOTIFY_EMAIL     — where owner notifications go
+#   ADMIN_DEV_KEY          — preview-only admin bearer key (ignored in production)
+#   CF_ACCESS_TEAM_DOMAIN  — e.g. "yourteam.cloudflareaccess.com" (enables Access JWT checks)
+#   CF_ACCESS_AUD          — Access application AUD tag

@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+# Customer portal and admin are private, non-indexable app surfaces.
+Disallow: /ppi/portal/
+Disallow: /ppi/admin/
+Disallow: /api/
+
+Sitemap: https://getautoclarity.com/sitemap.xml

@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Sample Pre-Purchase Inspection Report | AutoClarity</title>
+  <meta name="description" content="A sample AutoClarity pre-purchase inspection report (demonstration only) showing exactly what a Las Vegas PPI customer receives — condition score, findings, photos, and a clear recommendation." />
+  <link rel="canonical" href="https://getautoclarity.com/las-vegas-pre-purchase-inspection/sample-report/" />
+  <meta name="robots" content="index, follow" />
+  <meta name="theme-color" content="#060b18" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/img/favicon-32.png" />
+  <link rel="stylesheet" href="/assets/css/site.css" />
+  <link rel="stylesheet" href="/assets/css/ppi.css" />
+  <style>
+    .report-wrap { max-width: 860px; margin: 0 auto; padding: calc(84px + env(safe-area-inset-top)) 18px 60px; }
+    .report-banner { background: rgba(255,180,84,0.12); border: 1px solid rgba(255,180,84,0.4); color: var(--amber); font-weight: 750; text-align: center; padding: 12px 16px; border-radius: var(--r-md); margin-bottom: 22px; letter-spacing: 0.02em; }
+    .report-doc { background: var(--bg-elev-1); border: 1px solid var(--line); border-radius: var(--r-lg); padding: clamp(20px, 4vw, 40px); box-shadow: var(--shadow-card); }
+    .report-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 18px; margin-bottom: 22px; }
+    .report-head .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 20px; }
+    .report-head .brand img { width: 34px; height: 34px; }
+    .report-meta { text-align: right; color: var(--text-3); font-size: 13px; line-height: 1.5; }
+    .verdict-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: rgba(255,180,84,0.1); border: 1px solid rgba(255,180,84,0.35); border-radius: var(--r-md); padding: 18px 22px; margin-bottom: 24px; }
+    .verdict-banner .score { font-size: 40px; font-weight: 800; letter-spacing: -0.03em; }
+    .verdict-banner .score span { font-size: 18px; color: var(--text-3); font-weight: 600; }
+    .verdict-banner .rec { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); }
+    .verdict-banner .rec strong { display: block; font-size: 22px; letter-spacing: -0.01em; text-transform: none; color: var(--amber); margin-top: 2px; }
+    .report-section { margin-bottom: 24px; }
+    .report-section h2 { font-size: 17px; color: var(--blue-soft); margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line-soft); }
+    .kv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px 20px; font-size: 14.5px; }
+    .kv-grid div { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px dotted var(--line-soft); padding: 4px 0; }
+    .kv-grid dt { color: var(--text-3); } .kv-grid dd { margin: 0; color: var(--text); font-weight: 600; text-align: right; }
+    .finding { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line-soft); }
+    .finding:last-child { border-bottom: none; }
+    .finding .sev { flex: none; width: 92px; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; padding-top: 2px; }
+    .sev-red { color: var(--red); } .sev-amber { color: var(--amber); } .sev-green { color: var(--green); } .sev-info { color: var(--blue-soft); }
+    .finding .body { flex: 1; }
+    .finding .body .t { font-weight: 650; margin-bottom: 2px; }
+    .finding .body .d { color: var(--text-2); font-size: 14px; }
+    .finding .cost { flex: none; color: var(--text-2); font-size: 13.5px; text-align: right; min-width: 92px; font-variant-numeric: tabular-nums; }
+    .photo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+    .photo-ph { aspect-ratio: 4/3; border-radius: 10px; background: linear-gradient(160deg, var(--bg-elev-2), var(--bg-elev-1)); border: 1px dashed var(--line); display: flex; align-items: center; justify-content: center; color: var(--text-3); font-size: 12px; text-align: center; padding: 8px; }
+    .report-limits { font-size: 13px; color: var(--text-3); background: var(--glass); border-radius: var(--r-sm); padding: 14px 16px; }
+    .report-actions { display: flex; gap: 12px; flex-wrap: wrap; margin: 0 0 22px; }
+    @media print { .no-print { display: none !important; } body { background: #fff; } }
+  </style>
+</head>
+<body>
+  <header class="nav no-print">
+    <div class="nav-inner">
+      <a class="nav-brand" href="/las-vegas-pre-purchase-inspection/" aria-label="AutoClarity PPI">
+        <img src="/assets/img/icon-64.png" alt="" width="32" height="32" /><span>AutoClarity</span>
+      </a>
+      <a class="btn btn-primary btn-nav" href="/las-vegas-pre-purchase-inspection/#request">Request an inspection</a>
+    </div>
+  </header>
+
+  <main class="report-wrap">
+    <div class="report-banner">SAMPLE REPORT — DEMONSTRATION ONLY · Not a real customer vehicle</div>
+
+    <div class="report-actions no-print">
+      <a class="btn btn-primary" href="autoclarity-sample-ppi-report.pdf" data-analytics="ppi_sample_report_view" data-step="pdf">Download Sample PDF</a>
+      <button class="btn btn-ghost" type="button" onclick="window.print()">Print this page</button>
+      <a class="btn btn-ghost" href="/las-vegas-pre-purchase-inspection/#request">Request your inspection</a>
+    </div>
+
+    <article class="report-doc">
+      <div class="report-head">
+        <div class="brand"><img src="/assets/img/icon-64.png" alt="" />AutoClarity</div>
+        <div class="report-meta">
+          Comprehensive Multi-Point<br />Pre-Purchase Inspection<br />
+          Report #: SAMPLE-0000 (demo)<br />Inspector: Faheb Brown
+        </div>
+      </div>
+
+      <div class="verdict-banner">
+        <div class="score">6.5<span>/10</span></div>
+        <div class="rec">Overall recommendation<strong>Negotiate / Repair First</strong></div>
+      </div>
+
+      <div class="report-section">
+        <h2>Inspection overview</h2>
+        <p style="color:var(--text-2);font-size:14.5px;">A sound, well-optioned example that presents well and shows no evidence of prior collision repair. Two items should factor into your offer: rear tires near their wear limit and a minor valve-cover oil seepage. Nothing observed indicates an immediate safety hazard. Addressing the noted items and negotiating accordingly is reasonable.</p>
+      </div>
+
+      <div class="report-section">
+        <h2>Vehicle details</h2>
+        <dl class="kv-grid">
+          <div><dt>Year / Make / Model</dt><dd>2019 Chevrolet Corvette</dd></div>
+          <div><dt>Trim</dt><dd>Stingray (demo)</dd></div>
+          <div><dt>VIN</dt><dd>1G1YY0000K0000000 (fictional)</dd></div>
+          <div><dt>Odometer</dt><dd>28,450 mi (demo)</dd></div>
+          <div><dt>Location type</dt><dd>Private seller</dd></div>
+          <div><dt>Inspection date</dt><dd>Demonstration</dd></div>
+        </dl>
+      </div>
+
+      <div class="report-section">
+        <h2>Immediate safety concerns</h2>
+        <p style="color:var(--green);font-size:14.5px;font-weight:600;">None observed at the time of inspection.</p>
+      </div>
+
+      <div class="report-section">
+        <h2>Major findings</h2>
+        <div class="finding"><div class="sev sev-red">Priority</div><div class="body"><div class="t">Rear tires near wear limit</div><div class="d">Both rear tires measured ~3/32". Serviceable now but replacement should be budgeted soon; date codes indicate ~5-year-old tires.</div></div><div class="cost">$500–$900</div></div>
+      </div>
+
+      <div class="report-section">
+        <h2>Moderate findings</h2>
+        <div class="finding"><div class="sev sev-amber">Moderate</div><div class="body"><div class="t">Valve-cover oil seepage (driver side)</div><div class="d">Light seepage observed; no active dripping or low-oil condition. Monitor; reseal if it progresses.</div></div><div class="cost">$250–$600</div></div>
+        <div class="finding"><div class="sev sev-amber">Moderate</div><div class="body"><div class="t">Front bumper stone chips &amp; light curb rash on one wheel</div><div class="d">Cosmetic only; noted for negotiation. No structural concern.</div></div><div class="cost">$150–$400</div></div>
+      </div>
+
+      <div class="report-section">
+        <h2>Maintenance observations</h2>
+        <div class="finding"><div class="sev sev-info">Note</div><div class="body"><div class="t">Brake fluid slightly dark</div><div class="d">Due for a flush based on appearance; inexpensive routine service.</div></div><div class="cost">$100–$180</div></div>
+        <div class="finding"><div class="sev sev-info">Note</div><div class="body"><div class="t">Cabin air filter dirty</div><div class="d">Minor; owner-serviceable item.</div></div><div class="cost">$20–$60</div></div>
+      </div>
+
+      <div class="report-section">
+        <h2>Tire &amp; brake measurements</h2>
+        <dl class="kv-grid">
+          <div><dt>Front tires</dt><dd>6/32" &amp; 6/32"</dd></div>
+          <div><dt>Rear tires</dt><dd>3/32" &amp; 3/32"</dd></div>
+          <div><dt>Front brakes (pad)</dt><dd>~7 mm</dd></div>
+          <div><dt>Rear brakes (pad)</dt><dd>~6 mm</dd></div>
+          <div><dt>Rotors</dt><dd>Within service limits</dd></div>
+          <div><dt>Tire age (approx.)</dt><dd>~5 years</dd></div>
+        </dl>
+      </div>
+
+      <div class="report-section">
+        <h2>Visible leaks &amp; fluids</h2>
+        <div class="finding"><div class="sev sev-amber">Moderate</div><div class="body"><div class="t">Minor valve-cover seepage</div><div class="d">As noted above. Coolant, transmission and power-steering: no visible leaks; fluid levels and condition acceptable.</div></div><div class="cost"></div></div>
+      </div>
+
+      <div class="report-section">
+        <h2>Body &amp; paint observations</h2>
+        <p style="color:var(--text-2);font-size:14.5px;">Paint-depth spot checks were consistent across panels; no evidence of prior collision repair or repaint observed. Panel gaps uniform. Glass free of cracks; minor rock chip on windshield outside the driver’s line of sight.</p>
+      </div>
+
+      <div class="report-section">
+        <h2>Road-test observations</h2>
+        <p style="color:var(--text-2);font-size:14.5px;">Cold start normal. Idle steady. Transmission shifted cleanly through the range under light and moderate load. No abnormal noises, vibration, or pulling. Brakes firm and straight. Climate control functioned in all modes. <em>(Road test performed with seller permission in this demonstration.)</em></p>
+      </div>
+
+      <div class="report-section">
+        <h2>Underbody review &amp; limitations</h2>
+        <p style="color:var(--text-2);font-size:14.5px;">Underbody inspected to the extent safely and physically possible at the location. A full lift inspection was not performed. Undercarriage visible areas showed no structural damage, active leaks, or crash residue. A partner-facility lift can be arranged for a deeper underbody inspection at additional charge.</p>
+      </div>
+
+      <div class="report-section">
+        <h2>Photographic findings</h2>
+        <div class="photo-grid">
+          <div class="photo-ph">Rear tire tread depth</div>
+          <div class="photo-ph">Valve-cover seepage</div>
+          <div class="photo-ph">Front bumper chips</div>
+          <div class="photo-ph">Wheel curb rash</div>
+          <div class="photo-ph">Odometer</div>
+          <div class="photo-ph">VIN plate</div>
+        </div>
+        <p style="color:var(--text-3);font-size:12px;margin-top:8px;">Your real report includes clear photographs of every meaningful finding.</p>
+      </div>
+
+      <div class="report-section">
+        <h2>Estimated repair-cost ranges &amp; negotiation considerations</h2>
+        <p style="color:var(--text-2);font-size:14.5px;">Priority + moderate items total roughly <strong>$900–$1,900</strong> in the near term (rear tires being the main driver). These are reasonable, documented points to raise with the seller. None are deal-breakers on their own for a vehicle that otherwise presents well.</p>
+      </div>
+
+      <div class="report-section">
+        <h2>Inspection limitations</h2>
+        <p class="report-limits">
+          This inspection is a professional opinion of the vehicle’s observable condition at the time of inspection. It is visual and non-invasive unless expressly stated; components are not disassembled. Hidden, intermittent, or future failures may not be detectable. Seller access and location can limit what is possible. A pre-purchase inspection is not a warranty or guarantee, and the buyer retains the final purchasing decision.
+        </p>
+      </div>
+
+      <div class="report-section" style="margin-bottom:0;">
+        <h2>Inspector</h2>
+        <p style="color:var(--text-2);font-size:14.5px;">Faheb Brown — Founder &amp; Lead Technician, AutoClarity. 11+ years of hands-on automotive experience. Every Las Vegas inspection currently performed personally by the founder.</p>
+      </div>
+    </article>
+
+    <div class="report-actions no-print" style="margin-top:22px;">
+      <a class="btn btn-primary btn-lg" href="/las-vegas-pre-purchase-inspection/#request">Request Your Inspection</a>
+      <a class="btn btn-ghost" href="autoclarity-sample-ppi-report.pdf">Download Sample PDF</a>
+    </div>
+  </main>
+
+  <script src="/assets/js/main.js" defer></script>
+</body>
+</html>

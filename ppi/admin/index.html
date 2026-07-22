@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>PPI Admin — AutoClarity</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="theme-color" content="#060b18" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/img/favicon-32.png" />
+  <link rel="stylesheet" href="/assets/css/site.css" />
+  <link rel="stylesheet" href="/assets/css/ppi.css" />
+</head>
+<body>
+  <main class="admin-wrap">
+    <div class="portal-topbar">
+      <h1 style="display:flex;align-items:center;gap:10px;">
+        <img src="/assets/img/icon-64.png" alt="" width="30" height="30" /> PPI Admin
+      </h1>
+      <nav class="tab-row" id="adminNav" hidden>
+        <button class="tab-btn active" data-view="overview">Overview</button>
+        <button class="tab-btn" data-view="requests">Requests</button>
+        <button class="tab-btn" data-view="config">Configuration</button>
+      </nav>
+    </div>
+
+    <!-- Preview-only dev-key login. In production this page sits behind
+         Cloudflare Access and this panel never appears. -->
+    <div class="portal-card" id="loginPanel" hidden>
+      <h2>Admin key required</h2>
+      <p style="color:var(--text-2);font-size:14.5px;margin-bottom:14px;">
+        This is the preview environment. Enter the ADMIN_DEV_KEY configured for this deployment.
+        In production, this dashboard is protected by Cloudflare Access instead.
+      </p>
+      <form id="loginForm">
+        <div class="field">
+          <label for="adminKey">Admin key</label>
+          <input id="adminKey" type="password" autocomplete="off" />
+        </div>
+        <button class="btn btn-primary" type="submit">Unlock</button>
+        <p class="form-status" id="loginStatus" role="status"></p>
+      </form>
+    </div>
+
+    <div id="adminContent"></div>
+  </main>
+
+  <script src="/assets/js/ppi-admin.js" defer></script>
+</body>
+</html>

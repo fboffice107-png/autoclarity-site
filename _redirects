@@ -1,0 +1,12 @@
+# Cloudflare Pages redirects (inert on GitHub Pages; HTML stub pages cover it there).
+/pre-purchase-inspection /las-vegas-pre-purchase-inspection/ 301
+/pre-purchase-inspection/ /las-vegas-pre-purchase-inspection/ 301
+/ppi /las-vegas-pre-purchase-inspection/ 301
+/ppi/ /las-vegas-pre-purchase-inspection/ 301
+
+# Repo housekeeping directories are not part of the website. Serve 404 instead.
+/docs/* /404.html 404
+/migrations/* /404.html 404
+/tests/* /404.html 404
+/scripts/* /404.html 404
+/legal/* /404.html 404

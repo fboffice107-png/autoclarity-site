@@ -21,23 +21,31 @@ PPI_MODE = "request"
 PAYMENTS_ENABLED = "false"
 STRIPE_ENV = "test"
 BOOKING_ENABLED = "true"
-UPLOADS_ENABLED = "true"
+# Uploads OFF until R2 is enabled on the account + the [[r2_buckets]] binding
+# below is restored. The rest of the flow does not use R2.
+UPLOADS_ENABLED = "false"
 # Public site key only — never the secret. This is Cloudflare's always-passing
 # visible test key; replace with the real site key via the Pages dashboard.
 TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
 # Absolute origin used to build magic links, success/cancel URLs and emails.
-PUBLIC_BASE_URL = "http://127.0.0.1:8788"
+# Set per-environment as a Pages secret/var (preview: the *.pages.dev URL;
+# production: https://getautoclarity.com). Unset → code falls back to the
+# request origin, which is correct for local `wrangler pages dev`.
 SUPPORT_EMAIL = "support@getautoclarity.com"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "autoclarity_ppi"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "0ae44d57-1a4c-4fd9-96e9-629b1570af26"
 migrations_dir = "migrations"
 
-[[r2_buckets]]
-binding = "UPLOADS"
-bucket_name = "autoclarity-ppi-uploads"
+# R2 binding — TEMPORARILY DISABLED for the initial preview because R2 is not
+# yet enabled on the account (Dashboard → R2 → Enable). Uploads run with
+# UPLOADS_ENABLED=false until then. Re-enable this block and create the bucket
+# (`wrangler r2 bucket create autoclarity-ppi-uploads`) to turn on photo uploads.
+# [[r2_buckets]]
+# binding = "UPLOADS"
+# bucket_name = "autoclarity-ppi-uploads"
 
 # Secrets (set via `wrangler pages secret put NAME` or the dashboard — never in
 # this file, never committed):

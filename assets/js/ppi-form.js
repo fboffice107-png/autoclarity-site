@@ -34,7 +34,7 @@
     bar.className = "ppi-sticky";
     bar.setAttribute("aria-label", "Quick actions");
     var html = '<a class="ppi-sticky-primary" href="#request" data-analytics="ppi_cta_click" data-step="sticky">Request Inspection</a>';
-    if (contact && contact.configured && contact.callEnabled) html += '<a class="ppi-sticky-secondary" href="tel:' + tel + '" data-analytics="ppi_call_click" data-step="sticky" aria-label="Call ' + display + '">Call</a>';
+    if (contact && contact.configured && contact.callEnabled) html += '<a class="ppi-sticky-secondary" href="tel:' + tel + '" data-analytics="ppi_call_click" data-step="sticky" aria-label="Call ' + escapeHtml(display) + '">Call</a>';
     if (contact && contact.configured && contact.smsEnabled) html += '<a class="ppi-sticky-secondary" href="sms:' + tel + '" data-analytics="ppi_text_click" data-step="sticky">Text</a>';
     html += '<button type="button" class="ppi-sticky-close" id="ppiStickyClose" aria-label="Dismiss">✕</button>';
     bar.innerHTML = html;
@@ -473,7 +473,7 @@
         if (el.type === "checkbox") el.checked = Boolean(data[name]);
         else el.value = data[name];
       });
-      if (data._step >= 1 && data._step <= 6) current = data._step;
+      if (data._step >= 1 && data._step <= 4) current = data._step;
     } catch (e) { /* corrupt draft — start clean */ }
   }
 

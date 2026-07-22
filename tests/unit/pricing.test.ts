@@ -159,6 +159,12 @@ describe('launch pricing (introductory, time-boxed)', () => {
     expect(disp.wasCents).toBeNull();
   });
 
+  it('never activates without a real end date (permanent-sale guard)', () => {
+    expect(launchActive(launchCfg({ endsAt: null }), NOW)).toBe(false);
+    expect(launchActive(launchCfg({ endsAt: 'not-a-date' }), NOW)).toBe(false);
+    expect(tierDisplayPrice(launchCfg({ endsAt: null }), 'standard', NOW).wasCents).toBeNull();
+  });
+
   it('applies introductory prices per tier while the window is active', () => {
     const cfg = launchCfg();
     expect(launchActive(cfg, NOW)).toBe(true);

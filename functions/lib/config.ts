@@ -252,17 +252,21 @@ export function promoActive(config: PpiConfig, now = new Date()): boolean {
   return true;
 }
 
-/** Is the time-boxed introductory launch window currently active? */
+/**
+ * Is the time-boxed introductory launch window currently active?
+ * A real, future `endsAt` is REQUIRED — a launch with no end date never
+ * activates, so a struck-through "was" price can never become a permanent
+ * fake discount (enforces the guarantee documented on `pricing.launch`).
+ */
 export function launchActive(config: PpiConfig, now = new Date()): boolean {
   const l = config.pricing.launch;
   if (!l.enabled) return false;
+  if (!l.endsAt) return false; // no end date → not a valid time-boxed launch
+  const ends = new Date(l.endsAt);
+  if (Number.isNaN(ends.getTime()) || now > ends) return false; // invalid or past
   if (l.startsAt) {
     const starts = new Date(l.startsAt);
-    if (!Number.isNaN(starts.getTime()) && now < starts) return false;
-  }
-  if (l.endsAt) {
-    const ends = new Date(l.endsAt);
-    if (!Number.isNaN(ends.getTime()) && now > ends) return false;
+    if (!Number.isNaN(starts.getTime()) && now < starts) return false; // not started
   }
   return true;
 }

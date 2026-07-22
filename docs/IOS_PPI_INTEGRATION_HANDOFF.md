@@ -29,7 +29,7 @@ and never embed the payment pages in an insecure custom web view.
 ## Rules (App Review + billing separation)
 
 - The physical PPI is a real-world service (Apple guideline 3.1.3) — it must
-  **not** be sold via Apple IAP, and the app must not imply the $9.99
+  **not** be sold via Apple IAP, and the app must not imply the app
   subscription includes it.
 - RevenueCat stays limited to the digital subscription (`premium`,
   `autoclarity_single_report`, `autoclarity_pro` offering).
@@ -85,7 +85,7 @@ home screen. Requirements:
    https://getautoclarity.com/ppi?utm_source=ios_app&utm_medium=owned&utm_campaign=ppi_launch
 
 4. Billing separation: do NOT route this through RevenueCat/IAP. Do not imply the
-   $9.99 subscription includes the inspection. Keep RevenueCat limited to the
+   app subscription includes the inspection. Keep RevenueCat limited to the
    digital subscription. The app must stay fully usable without this card.
 
 5. Analytics (reuse the app's existing analytics, no PII): log

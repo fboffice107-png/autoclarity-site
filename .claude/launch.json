@@ -2,6 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "ppi-dev",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "pages", "dev", ".", "--port", "8788"],
+      "port": 8788
+    },
+    {
       "name": "ppi-attach",
       "url": "http://localhost:8788",
       "port": 8788

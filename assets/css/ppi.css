@@ -17,9 +17,17 @@
 
 /* ---------- Nav ---------- */
 
-.btn-nav { white-space: nowrap; }
 @media (max-width: 480px) {
   .btn-nav { font-size: 13.5px; padding: 8px 12px; }
+}
+
+/* Pages without main.js (portal, admin) never get .is-scrolled, so their
+   fixed header needs a permanent background or content bleeds through it. */
+.nav-solid {
+  background: rgba(7, 12, 26, 0.92);
+  -webkit-backdrop-filter: saturate(150%) blur(16px);
+  backdrop-filter: saturate(150%) blur(16px);
+  box-shadow: 0 1px 0 var(--line-soft);
 }
 
 /* ---------- Hero ---------- */
@@ -46,6 +54,12 @@
 .verdict-green { color: var(--green); border-color: rgba(61, 214, 140, 0.35); }
 .verdict-amber { color: var(--amber); border-color: rgba(255, 180, 84, 0.35); }
 .verdict-red { color: var(--red); border-color: rgba(255, 107, 112, 0.35); }
+
+/* Match the centered hero below the 2-column breakpoint. */
+@media (max-width: 940px) {
+  .verdict-strip { justify-content: center; }
+  .ppi-fineprint { margin-inline: auto; }
+}
 
 /* ---------- Steps ---------- */
 

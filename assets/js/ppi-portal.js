@@ -138,10 +138,10 @@
       inspection_in_progress: "Your inspection is underway.",
       report_in_progress: "The inspection is done — your written results are being prepared.",
       completed: "Your inspection is complete. Your results are in the messages below.",
-      customer_cancelled: "This request was cancelled.",
-      admin_cancelled: "This request was cancelled by AutoClarity.",
+      customer_cancelled: "This request was cancelled. If you still need an inspection, you can submit a new request any time.",
+      admin_cancelled: "This request was cancelled by AutoClarity. If anything is unclear, reply below or email support.",
       expired: "This request expired. Submit a new one whenever you’re ready.",
-      refunded: "This request was refunded.",
+      refunded: "This request was refunded. Refunds typically appear on your statement within 5–10 business days, depending on your bank.",
       disputed: "This payment is under dispute review."
     };
     if (guidance[v.status]) {

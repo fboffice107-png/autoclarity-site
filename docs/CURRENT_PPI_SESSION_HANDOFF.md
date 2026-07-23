@@ -43,6 +43,37 @@ notifications not delivered.)
 - **Mobile fix:** single-column intake form on phones (`assets/css/ppi.css`), homepage secondary-path styles (`assets/css/site.css`).
 - **Stripe key guard** (prior in-session): `stripeKey()` accepts test/sandbox/restricted secret keys, still refuses live keys in test mode + `pk_` keys.
 
+## Final mobile & conversion pass (2026-07-23, second session)
+
+Full write-up + PNG evidence: `docs/mobile-audit-2026-07-23/REPORT.md` (+ `screenshots/`).
+Front-end/copy only — no payment, webhook, auth, schema, secret, DNS or deploy-infra change.
+
+1. **FIXED conversion bug — all 3 form-nav buttons visible on every step.**
+   Author CSS (`.btn{display:inline-flex}`) overrode the UA `[hidden]` rule, so
+   "Back" and "Submit request" showed on step 1. Global guard added:
+   `[hidden]{display:none !important}` (`assets/css/site.css`). Step flow re-verified.
+2. **FIXED portal transparent sticky header** (portal doesn't load `main.js`):
+   new `.nav-solid` class (`assets/css/ppi.css`) applied in `ppi/portal/index.html`.
+3. **FIXED nav collisions at tiny widths**: brand wordmark hidden ≤374px;
+   `.btn-nav` no-wrap moved global (homepage "Get the app" wrapped at 320).
+4. **Verdict strip centered ≤940px** to match the centered hero.
+5. **Status labels** (`functions/lib/status.ts`, copy only): `Cancelled by You` /
+   `Cancelled by AutoClarity`. **Portal guidance** (`assets/js/ppi-portal.js`):
+   refunded state states the 5–10 business-day bank timing; cancelled states
+   say what to do next.
+6. **Terminology**: last bare public "PPI" removed (hero fineprint, app-vs-inspection
+   note, fallback mailto subject, sample-report meta/aria); "pre-purchase
+   inspection (PPI)" defined once in the guarantee FAQ.
+7. **A11y**: `aria-label` on the success-panel file input; structural checks
+   (labels/alt/headings/skip links/tap sizes) pass on homepage, landing, portal.
+8. Verified: **100 tests** (66 unit + 34 integration), `tsc --noEmit` clean,
+   20 internal links OK, all header checks pass, no horizontal overflow at
+   320–1440 on all customer pages, admin table scrolls within its card on phones.
+
+Capture tooling note: use puppeteer-core against the local dev server for
+screenshots — plain `chrome --headless=new --screenshot` enforces a 500px
+minimum viewport and silently clips mobile captures.
+
 ## Mobile test matrix (measured on https://autoclarity-site.pages.dev)
 
 | Width | Homepage | Landing | Intake form | Portal |

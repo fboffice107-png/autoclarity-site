@@ -47,6 +47,10 @@
 
 * { box-sizing: border-box; }
 
+/* The hidden attribute must always win — author display rules (e.g. .btn's
+   inline-flex) otherwise override the UA's [hidden] { display: none }. */
+[hidden] { display: none !important; }
+
 html {
   scroll-behavior: smooth;
   scroll-padding-top: 84px;
@@ -137,7 +141,7 @@ a { color: var(--blue-bright); }
 
 .btn-lg { padding: 16px 30px; font-size: 17px; border-radius: 16px; }
 .btn-xl { padding: 18px 38px; font-size: 18px; border-radius: 18px; }
-.btn-nav { padding: 9px 18px; font-size: 15px; border-radius: 12px; }
+.btn-nav { padding: 9px 18px; font-size: 15px; border-radius: 12px; white-space: nowrap; }
 
 /* ---------- Nav ---------- */
 
@@ -198,6 +202,12 @@ a { color: var(--blue-bright); }
 @media (max-width: 780px) {
   .nav-links { display: none; }
   .nav-inner { justify-content: space-between; }
+}
+
+/* Very narrow phones: the wordmark and the nav CTA can't share the row —
+   keep the icon, drop the text so neither overlaps the button. */
+@media (max-width: 374px) {
+  .nav-brand span { display: none; }
 }
 
 /* ---------- Hero ---------- */

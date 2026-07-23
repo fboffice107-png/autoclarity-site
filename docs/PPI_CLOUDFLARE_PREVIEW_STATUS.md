@@ -26,6 +26,27 @@ getautoclarity.com is UNCHANGED (still GitHub Pages). Nothing below touches DNS.
 - Admin API: 401 without the key, 200 with `ADMIN_DEV_KEY`; fixtures seed.
 - Security: `.dev.vars`, `wrangler.toml`, `functions/*`, `migrations/*`, `docs/*`, `_config.yml`, `package.json` all **404**; Stripe webhook **rejects unsigned** (400); every page `noindex`.
 
+## Stripe sandbox test — verified on the hosted preview (2026-07-23)
+
+Ran against `https://autoclarity-site.pages.dev` with the owner's Stripe
+**sandbox/test** keys, `STRIPE_ENV=test`, real-money payments never enabled.
+
+1. ✅ Real Stripe Checkout session created (`checkout.stripe.com`, `cs_test_…`).
+2. ✅ Completed checkout with test card `4242 4242 4242 4242` (Sandbox badge shown, $199.00, correct ref/email).
+3. ✅ Signed webhook received and verified (`STRIPE_WEBHOOK_SECRET`).
+4. ✅ Appointment → **Confirmed only after the webhook** — history shows `awaiting_payment → confirmed | system:stripe-webhook`; the browser success page did **not** confirm it. Payment `succeeded`, `pi_3TwAZh2MY…`.
+5. ◻ Duplicate-webhook idempotency: proven by the integration suite's replay-guard test (same `event_id` twice → `{received:true, replay:true}`, one payment row, one confirm) and by the observed single-confirm/single-payment on the live run. A live duplicate requires Stripe's dashboard **Resend** (owner) — optional.
+6. ✅ Two customers cannot hold the same slot time — second got `slot_taken` (DB partial-unique index).
+7. ✅ Cancellation + slot release — `customer_cancelled`, slot `released`, freed time re-bookable.
+8. ✅ Refund workflow — admin refund → `charge.refunded` webhook → `refunded` (async, not the admin action directly).
+
+Afterwards: diagnostics reverted, `PAYMENTS_ENABLED=false` restored, redeployed clean. The `stripeKey` guard was improved to accept Stripe test/sandbox/restricted secret keys while still refusing live keys in test mode.
+
+> Note on env vars: `wrangler pages secret put` and `--branch main` target the
+> Cloudflare **Production** environment (served at `autoclarity-site.pages.dev`,
+> still not the customer domain). The CLI has no preview-env flag; set
+> preview-env values in the dashboard if you use branch-alias previews.
+
 ## Remaining owner actions
 
 ### 1. Enable R2 (for customer photo uploads) — dashboard, ~1 min

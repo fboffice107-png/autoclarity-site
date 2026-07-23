@@ -718,3 +718,10 @@ fieldset.form-step legend {
 .review-card { margin: 0; background: var(--glass); border: 1px solid var(--line-soft); border-radius: var(--r-md); padding: 20px; }
 .review-card blockquote { margin: 0 0 12px; color: var(--text); font-size: 15px; line-height: 1.6; }
 .review-card figcaption { color: var(--text-3); font-size: 13.5px; font-weight: 600; }
+
+/* ---------- Phone: intake form as a clean single column ---------- */
+@media (max-width: 560px) {
+  .field-row { flex-direction: column; gap: 0; }
+  .field-row .field { min-width: 0; }
+  .field-narrow { max-width: none; min-width: 0 !important; }
+}

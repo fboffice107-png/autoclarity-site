@@ -996,3 +996,21 @@ a { color: var(--blue-bright); }
     transition: none;
   }
 }
+
+/* ---------- Homepage: Las Vegas Pre-Purchase Inspection secondary path ---------- */
+.home-ppi-strip {
+  margin-top: 26px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--glass);
+  max-width: 560px;
+}
+.home-ppi-kicker {
+  font-size: 12px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--green); margin-bottom: 8px;
+}
+.home-ppi-lead { color: var(--text-2); font-size: 15px; line-height: 1.55; margin-bottom: 14px; }
+.home-ppi-strip .btn { width: 100%; max-width: 340px; }
+.home-ppi-note { color: var(--text-3); font-size: 13px; margin-top: 10px; }
+@media (max-width: 480px) { .home-ppi-strip { padding: 16px; } .home-ppi-strip .btn { max-width: none; } }

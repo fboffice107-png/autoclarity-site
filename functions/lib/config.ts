@@ -92,21 +92,21 @@ export const DEFAULT_CONFIG: PpiConfig = {
     tiers: {
       standard: {
         key: 'standard',
-        label: 'Standard Vehicle PPI',
+        label: 'Standard Vehicle Inspection',
         priceCents: 19900, // regular/target
         launchPriceCents: 14900, // introductory
         blurb: 'Common unmodified domestic, Japanese and Korean passenger vehicles and light trucks.',
       },
       euro_luxury_performance: {
         key: 'euro_luxury_performance',
-        label: 'European, Luxury or Performance PPI',
+        label: 'European, Luxury or Performance Inspection',
         priceCents: 29900,
         launchPriceCents: 24900,
         blurb: 'Examples include Corvette, BMW, Mercedes-Benz, Audi, Land Rover, Porsche, and modified or higher-complexity vehicles.',
       },
       exotic_collector: {
         key: 'exotic_collector',
-        label: 'Exotic, Collector or Heavily Modified PPI',
+        label: 'Exotic, Collector or Heavily Modified Inspection',
         priceCents: 39900, // "starting at"; final quote after review
         startingAt: true,
         blurb: 'Final quote required after reviewing the exact vehicle, location and inspection scope.',
@@ -122,7 +122,7 @@ export const DEFAULT_CONFIG: PpiConfig = {
     promo: {
       enabled: false,
       priceCents: 14900,
-      label: 'Las Vegas launch price — Standard Vehicle PPI',
+      label: 'Las Vegas launch price — Standard Vehicle Inspection',
       endsAt: null,
     },
   },

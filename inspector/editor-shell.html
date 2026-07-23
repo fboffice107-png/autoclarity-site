@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Inspection Report — AutoClarity Inspector</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="theme-color" content="#060b18" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/img/favicon-32.png" />
+  <link rel="stylesheet" href="/assets/css/site.css" />
+  <link rel="stylesheet" href="/assets/css/ppi.css" />
+  <link rel="stylesheet" href="/assets/css/inspector.css" />
+</head>
+<body>
+  <header class="nav nav-solid">
+    <div class="nav-inner">
+      <a class="nav-brand" href="/inspector/" aria-label="Inspector workspace home">
+        <img src="/assets/img/icon-64.png" alt="" width="32" height="32" />
+        <span>AutoClarity</span>
+      </a>
+      <span class="footer-muted" style="font-size:14px;" id="headRef">Report editor</span>
+    </div>
+  </header>
+
+  <main class="insp-wrap">
+    <div class="savebar" id="savebar" hidden>
+      <span class="save-state" id="saveState" data-state="saved" role="status">Saved</span>
+      <span class="save-progress" id="saveProgress"></span>
+      <label class="sr-only" for="jumpSelect">Jump to section</label>
+      <select id="jumpSelect" aria-label="Jump to section"></select>
+    </div>
+
+    <div id="app"><div class="portal-card"><p>Loading report…</p></div></div>
+  </main>
+
+  <div class="insp-bottom" id="bottomBar" hidden>
+    <div class="grow" id="bottomState"></div>
+    <div style="display:flex;gap:10px;">
+      <button class="btn btn-ghost" id="stateBtn" type="button" hidden></button>
+      <a class="btn btn-primary" id="previewBtn" href="#">Preview</a>
+    </div>
+  </div>
+
+  <script src="/assets/js/inspector-common.js" defer></script>
+  <script src="/assets/js/inspector-report.js" defer></script>
+</body>
+</html>

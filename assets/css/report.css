@@ -1,0 +1,72 @@
+/* AutoClarity — customer inspection report document styles.
+   Shared by the customer report page (/ppi/portal/report/) and the inspector
+   preview. Mirrors the premium look of the public sample report. */
+
+.report-wrap { max-width: 860px; margin: 0 auto; padding: calc(84px + env(safe-area-inset-top)) 16px 60px; }
+.report-doc { background: var(--bg-elev-1); border: 1px solid var(--line); border-radius: var(--r-lg); padding: clamp(18px, 4vw, 40px); box-shadow: var(--shadow-card); }
+.report-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 18px; margin-bottom: 22px; }
+.report-head .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 20px; }
+.report-head .brand img { width: 34px; height: 34px; }
+.report-meta { text-align: right; color: var(--text-3); font-size: 13px; line-height: 1.5; }
+
+.verdict-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; border-radius: var(--r-md); padding: 18px 22px; margin-bottom: 24px; border: 1px solid var(--line); background: var(--glass); }
+.verdict-banner[data-verdict="proceed"] { background: rgba(38,190,120,0.1); border-color: rgba(38,190,120,0.4); }
+.verdict-banner[data-verdict="negotiate_repair_first"] { background: rgba(255,180,84,0.1); border-color: rgba(255,180,84,0.35); }
+.verdict-banner[data-verdict="do_not_proceed"] { background: rgba(232,90,96,0.1); border-color: rgba(232,90,96,0.4); }
+.verdict-banner .score { font-size: 40px; font-weight: 800; letter-spacing: -0.03em; }
+.verdict-banner .score span { font-size: 18px; color: var(--text-3); font-weight: 600; }
+.verdict-banner .rec { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); }
+.verdict-banner .rec strong { display: block; font-size: 22px; letter-spacing: -0.01em; text-transform: none; margin-top: 2px; }
+.verdict-banner[data-verdict="proceed"] .rec strong { color: var(--green); }
+.verdict-banner[data-verdict="negotiate_repair_first"] .rec strong { color: var(--amber); }
+.verdict-banner[data-verdict="do_not_proceed"] .rec strong { color: var(--red); }
+
+.amend-note { background: rgba(255,180,84,0.1); border: 1px solid rgba(255,180,84,0.35); color: var(--amber); font-size: 13.5px; font-weight: 650; border-radius: var(--r-sm); padding: 10px 14px; margin-bottom: 18px; }
+
+.report-section { margin-bottom: 24px; }
+.report-section h2 { font-size: 17px; color: var(--blue-soft); margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line-soft); }
+.report-section h3 { font-size: 14.5px; margin: 14px 0 6px; }
+.report-section p { color: var(--text-2); font-size: 14.5px; }
+
+.kv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px 20px; font-size: 14.5px; }
+.kv-grid > div { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px dotted var(--line-soft); padding: 4px 0; }
+.kv-grid dt { color: var(--text-3); }
+.kv-grid dd { margin: 0; color: var(--text); font-weight: 600; text-align: right; word-break: break-word; }
+
+.glance { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
+.glance .g { text-align: center; background: var(--glass); border: 1px solid var(--line-soft); border-radius: var(--r-sm); padding: 10px 6px; }
+.glance .g b { display: block; font-size: 22px; font-weight: 800; }
+.glance .g span { font-size: 11.5px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; }
+.glance .g[data-k="pass"] b { color: var(--green); }
+.glance .g[data-k="attention"] b { color: var(--amber); }
+.glance .g[data-k="fail"] b { color: var(--red); }
+
+.finding { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line-soft); }
+.finding:last-child { border-bottom: none; }
+.finding .sev { flex: none; width: 92px; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; padding-top: 2px; }
+.sev-red { color: var(--red); } .sev-amber { color: var(--amber); } .sev-green { color: var(--green); } .sev-info { color: var(--blue-soft); } .sev-grey { color: var(--text-3); }
+.finding .body { flex: 1; min-width: 0; }
+.finding .body .t { font-weight: 650; margin-bottom: 2px; font-size: 14.5px; }
+.finding .body .d { color: var(--text-2); font-size: 14px; }
+.finding .cost { flex: none; color: var(--text-2); font-size: 13.5px; text-align: right; min-width: 84px; font-variant-numeric: tabular-nums; }
+@media (max-width: 480px) {
+  .finding { flex-wrap: wrap; gap: 4px 12px; }
+  .finding .sev { width: auto; }
+  .finding .body { flex-basis: 100%; order: 3; }
+  .finding .cost { margin-left: auto; }
+}
+
+.sec-note { font-size: 13px; color: var(--text-3); font-style: italic; margin: 4px 0 8px; }
+
+.rphoto-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 8px; }
+.rphoto-grid figure { margin: 0; }
+.rphoto-grid img { width: 100%; border-radius: 10px; border: 1px solid var(--line); display: block; }
+.rphoto-grid figcaption { font-size: 12px; color: var(--text-3); margin-top: 4px; }
+
+.report-limits { font-size: 13px; color: var(--text-3); background: var(--glass); border-radius: var(--r-sm); padding: 14px 16px; }
+.report-actions { display: flex; gap: 12px; flex-wrap: wrap; margin: 0 0 22px; }
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: #fff; }
+}

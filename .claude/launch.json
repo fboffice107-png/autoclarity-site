@@ -11,6 +11,20 @@
       "name": "ppi-attach",
       "url": "http://localhost:8788",
       "port": 8788
+    },
+    {
+      "name": "ppi-ui-test",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "wrangler", "pages", "dev", ".", "--port", "8790",
+        "--binding", "ADMIN_DEV_KEY=test-admin-key-0123456789abcdef",
+        "--binding", "PPI_ENV=preview",
+        "--binding", "UPLOADS_ENABLED=true",
+        "--binding", "PUBLIC_BASE_URL=http://localhost:8790",
+        "--binding", "TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA",
+        "--r2", "UPLOADS"
+      ],
+      "port": 8790
     }
   ]
 }

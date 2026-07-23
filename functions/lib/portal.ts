@@ -64,6 +64,8 @@ export interface PortalView {
   };
   payment: null | { status: string; amountCents: number };
   booking: null | { status: string; startsAt: string | null; endsAt: string | null };
+  /** Published inspection report (drafts are never exposed here). */
+  report: null | { version: number; kind: string; publishedAt: string; amended: boolean };
   uploads: Array<{ id: string; name: string; kind: string }>;
   messages: Array<{ direction: string; body: string; createdAt: string }>;
   supportEmail: string;
@@ -143,6 +145,15 @@ export async function loadPortalView(env: Env, config: PpiConfig, requestId: str
     .bind(requestId)
     .all<{ id: string; original_name: string; kind: string }>();
 
+  // Only PUBLISHED report versions are ever visible to the customer.
+  const reportVersion = await db
+    .prepare(
+      `SELECT version, kind, published_at FROM report_versions
+       WHERE request_id = ? AND status = 'published' ORDER BY version DESC LIMIT 1`,
+    )
+    .bind(requestId)
+    .first<{ version: number; kind: string; published_at: string }>();
+
   const messages = await db
     .prepare(
       `SELECT direction, body_text, created_at FROM messages
@@ -185,6 +196,9 @@ export async function loadPortalView(env: Env, config: PpiConfig, requestId: str
     },
     payment: paymentRow ? { status: paymentRow.status, amountCents: paymentRow.amount_cents } : null,
     booking: bookingRow ? { status: bookingRow.status, startsAt: bookingRow.starts_at, endsAt: bookingRow.ends_at } : null,
+    report: reportVersion
+      ? { version: reportVersion.version, kind: reportVersion.kind, publishedAt: reportVersion.published_at, amended: reportVersion.version > 1 }
+      : null,
     uploads: (uploads.results ?? []).map((u) => ({ id: u.id, name: u.original_name, kind: u.kind })),
     messages: (messages.results ?? []).map((m) => ({ direction: m.direction, body: m.body_text, createdAt: m.created_at })),
     supportEmail: config.supportEmail,

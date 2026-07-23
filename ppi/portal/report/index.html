@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Your inspection report — AutoClarity</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="theme-color" content="#060b18" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/img/favicon-32.png" />
+  <link rel="stylesheet" href="/assets/css/site.css" />
+  <link rel="stylesheet" href="/assets/css/ppi.css" />
+  <link rel="stylesheet" href="/assets/css/report.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="nav nav-solid no-print">
+    <div class="nav-inner">
+      <a class="nav-brand" href="/" aria-label="AutoClarity home">
+        <img src="/assets/img/icon-64.png" alt="" width="32" height="32" />
+        <span>AutoClarity</span>
+      </a>
+      <span class="footer-muted" style="font-size:14px;">Your inspection report</span>
+    </div>
+  </header>
+
+  <main id="main" class="report-wrap">
+    <div id="reportLoading" class="portal-card"><p>Loading your report…</p></div>
+
+    <div id="reportError" class="portal-card" hidden>
+      <h2>We couldn’t open this report</h2>
+      <p id="reportErrorMsg" style="color:var(--text-2);"></p>
+      <p style="margin-top:14px;color:var(--text-2);">
+        Need help? Email <a href="mailto:support@getautoclarity.com">support@getautoclarity.com</a>
+        with your request reference.
+      </p>
+    </div>
+
+    <div id="reportContent" hidden>
+      <div class="report-actions no-print">
+        <a class="btn btn-primary" id="pdfLink" href="#">Download PDF</a>
+        <button class="btn btn-ghost" type="button" onclick="window.print()">Print</button>
+        <a class="btn btn-ghost" id="portalLink" href="#">← Back to your request</a>
+      </div>
+      <div id="reportDoc"></div>
+      <section class="portal-card no-print" id="historyCard" style="margin-top:20px;" hidden>
+        <h2>Report versions</h2>
+        <div id="historyBody"></div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="footer no-print">
+    <div class="footer-inner">
+      <p class="footer-disclaimer">
+        This report is unique to your inspection request. Don’t share the link —
+        anyone with it can view your report.
+        Questions: <a href="mailto:support@getautoclarity.com">support@getautoclarity.com</a>
+      </p>
+    </div>
+  </footer>
+
+  <script src="/assets/js/report-render.js" defer></script>
+  <script src="/assets/js/ppi-portal-report.js" defer></script>
+</body>
+</html>

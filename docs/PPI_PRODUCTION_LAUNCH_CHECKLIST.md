@@ -51,8 +51,9 @@ date + Las Vegas time, and a safe portal link — no secret admin links, no unne
 
 ## D. Infrastructure & security
 
-11. **Cloudflare Access** protecting `/ppi/admin*` **and** `/api/admin*` (Zero Trust → Access → self-hosted app, allow owner email). Copy the app AUD + team domain into production env `CF_ACCESS_AUD` + `CF_ACCESS_TEAM_DOMAIN`. With `PPI_ENV=production` the dev key is refused and admin fails closed without Access.
-12. Enable R2 (optional, for uploads): dashboard → R2 → Enable; `npx wrangler r2 bucket create autoclarity-ppi-uploads`; uncomment `[[r2_buckets]]` in `wrangler.toml`; set `UPLOADS_ENABLED=true`.
+11. **Cloudflare Access** protecting **all four** private surfaces: `/ppi/admin*`, `/api/admin*`, `/inspector*`, `/api/inspector*` (Zero Trust → Access → self-hosted app, allow owner email; exact steps in `docs/PPI_INSPECTOR_GUIDE.md`). Copy the app AUD + team domain into production env `CF_ACCESS_AUD` + `CF_ACCESS_TEAM_DOMAIN`. With `PPI_ENV=production` the dev key is refused and admin/inspector fail closed without Access.
+12. Enable R2 (optional — inspection-report photos + stored PDFs, and customer intake uploads): follow `docs/PPI_R2_SETUP.md`. Reports work fully without it (PDFs render on demand).
+12b. **Report notifications**: `report_ready` / `report_amended` emails are recorded idempotently at publish time and start sending automatically once §B's provider is configured — verify one publish → one email on a controlled test after that.
 13. Production env vars: `PPI_ENV=production`, `PUBLIC_BASE_URL=https://getautoclarity.com`, `PPI_MODE=live` (only after B + C), `PAYMENTS_ENABLED=true` (only after C), `STRIPE_ENV=live`.
 14. Turnstile: real site + secret keys (replace the always-pass test keys).
 

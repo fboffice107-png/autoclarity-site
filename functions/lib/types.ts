@@ -3,6 +3,8 @@
 export interface Env {
   DB: D1Database;
   UPLOADS: R2Bucket;
+  /** Pages static-asset binding — used to serve HTML shells at dynamic routes. */
+  ASSETS: Fetcher;
 
   // Mode switches (plain vars)
   PPI_ENV?: string; // 'preview' | 'production'

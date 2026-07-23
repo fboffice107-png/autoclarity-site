@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Reports — Inspector Workspace</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="theme-color" content="#060b18" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/img/favicon-32.png" />
+  <link rel="stylesheet" href="/assets/css/site.css" />
+  <link rel="stylesheet" href="/assets/css/ppi.css" />
+  <link rel="stylesheet" href="/assets/css/inspector.css" />
+</head>
+<body data-page="inspections">
+  <header class="nav nav-solid">
+    <div class="nav-inner">
+      <a class="nav-brand" href="/inspector/" aria-label="Inspector workspace home">
+        <img src="/assets/img/icon-64.png" alt="" width="32" height="32" />
+        <span>AutoClarity</span>
+      </a>
+      <span class="footer-muted" style="font-size:14px;">Inspector workspace</span>
+    </div>
+  </header>
+
+  <main class="insp-wrap">
+    <div class="insp-topbar">
+      <div>
+        <h1>Inspection reports</h1>
+        <p class="insp-sub">Drafts, reviews and published versions.</p>
+      </div>
+      <nav class="insp-nav" aria-label="Workspace">
+        <a href="/inspector/">Dashboard</a>
+        <a href="/inspector/requests/">Requests</a>
+        <a href="/inspector/inspections/" class="active">Reports</a>
+        <a href="/ppi/admin/">Admin</a>
+      </nav>
+    </div>
+    <div id="app"><div class="portal-card"><p>Loading…</p></div></div>
+  </main>
+
+  <script src="/assets/js/inspector-common.js" defer></script>
+  <script src="/assets/js/inspector-app.js" defer></script>
+</body>
+</html>

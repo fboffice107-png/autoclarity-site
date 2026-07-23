@@ -137,7 +137,7 @@
       confirmed: "You’re booked. The technician will meet the vehicle at the scheduled time.",
       inspection_in_progress: "Your inspection is underway.",
       report_in_progress: "The inspection is done — your written results are being prepared.",
-      completed: "Your inspection is complete. Your results are in the messages below.",
+      completed: "Your inspection is complete. Your written report appears on this page the moment it is published.",
       customer_cancelled: "This request was cancelled. If you still need an inspection, you can submit a new request any time.",
       admin_cancelled: "This request was cancelled by AutoClarity. If anything is unclear, reply below or email support.",
       expired: "This request expired. Submit a new one whenever you’re ready.",
@@ -146,6 +146,18 @@
     };
     if (guidance[v.status]) {
       html += '<div class="notice info">' + esc(guidance[v.status]) + "</div>";
+    }
+
+    // ---------- published inspection report ----------
+    if (v.report) {
+      html += '<section class="portal-card"><h2>Your inspection report</h2>' +
+        '<p style="color:var(--text-2);font-size:14.5px;margin-bottom:12px;">Your written report' +
+        (v.report.amended ? " (updated — version " + esc(v.report.version) + ")" : "") +
+        " was published " + esc(fmtWhen(v.report.publishedAt)) + ".</p>" +
+        '<div style="display:flex;gap:10px;flex-wrap:wrap;">' +
+        '<a class="btn btn-primary" href="/ppi/portal/report/?t=' + encodeURIComponent(token) + '">View your report</a>' +
+        '<a class="btn btn-ghost" href="/api/portal/report-pdf?t=' + encodeURIComponent(token) + '">Download PDF</a>' +
+        "</div></section>";
     }
 
     // ---------- quote ----------

@@ -11,9 +11,11 @@ export interface OutboundEmail {
   subject: string;
   text: string;
   replyTo?: string;
+  /** Idempotency key: the same dedupe_key can only ever be recorded/sent once. */
+  dedupeKey?: string;
 }
 
-export type EmailStatus = 'recorded' | 'sent' | 'failed';
+export type EmailStatus = 'recorded' | 'sent' | 'failed' | 'duplicate';
 
 export async function sendEmail(
   env: Env,
@@ -23,13 +25,19 @@ export async function sendEmail(
   msg: OutboundEmail,
 ): Promise<{ id: string; status: EmailStatus }> {
   const id = newId('msg');
-  await db
-    .prepare(
-      `INSERT INTO messages (id, request_id, direction, channel, template, to_email, subject, body_text, status, created_at)
-       VALUES (?, ?, 'outbound', 'email', ?, ?, ?, ?, 'recorded', ?)`,
-    )
-    .bind(id, requestId, template, msg.to, msg.subject, msg.text, nowIso())
-    .run();
+  try {
+    await db
+      .prepare(
+        `INSERT INTO messages (id, request_id, direction, channel, template, to_email, subject, body_text, status, dedupe_key, created_at)
+         VALUES (?, ?, 'outbound', 'email', ?, ?, ?, ?, 'recorded', ?, ?)`,
+      )
+      .bind(id, requestId, template, msg.to, msg.subject, msg.text, msg.dedupeKey ?? null, nowIso())
+      .run();
+  } catch (e) {
+    // Unique dedupe_key violation → this event was already recorded/sent.
+    if (msg.dedupeKey && /UNIQUE|constraint/i.test(String(e))) return { id, status: 'duplicate' };
+    throw e;
+  }
 
   if (!env.RESEND_API_KEY || !env.EMAIL_FROM) {
     return { id, status: 'recorded' }; // no provider configured — recorded only
@@ -209,11 +217,22 @@ export const EMAIL_TEMPLATES = {
     ].join('\n'),
   }),
   report_ready: (ctx: TemplateCtx) => ({
-    subject: `AutoClarity — your inspection results are ready (${ctx.ref})`,
+    subject: `AutoClarity — your inspection report is ready (${ctx.ref})`,
     text: [
-      'Your written inspection results and recommendation are ready.',
+      'Your written inspection report and recommendation are ready.',
       '',
-      `View them securely here:`,
+      'View it securely (and download the PDF) here:',
+      ctx.portalUrl ?? '',
+      footer(ctx),
+    ].join('\n'),
+  }),
+  report_amended: (ctx: TemplateCtx) => ({
+    subject: `AutoClarity — your inspection report was updated (${ctx.ref})`,
+    text: [
+      `An updated version of your inspection report has been published (version ${ctx.extra?.['version'] ?? ''}).`,
+      'It replaces the earlier version.',
+      '',
+      'View the updated report securely here:',
       ctx.portalUrl ?? '',
       footer(ctx),
     ].join('\n'),
@@ -240,7 +259,8 @@ export async function sendTemplate(
   to: string,
   ctx: TemplateCtx,
   replyTo?: string,
+  dedupeKey?: string,
 ): Promise<{ id: string; status: EmailStatus }> {
   const { subject, text } = EMAIL_TEMPLATES[template](ctx);
-  return sendEmail(env, db, requestId, template, { to, subject, text, replyTo });
+  return sendEmail(env, db, requestId, template, { to, subject, text, replyTo, dedupeKey });
 }

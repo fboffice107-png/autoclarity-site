@@ -43,8 +43,10 @@ export const onRequest: PagesFunction<Env>[] = [
       return new Response('Not found', { status: 404, headers: { 'x-robots-tag': 'noindex, nofollow', 'content-type': 'text/plain' } });
     }
 
-    // In production, the admin UI itself is never served without authorization.
-    if (isProduction && url.pathname.startsWith('/ppi/admin')) {
+    // In production, the admin and inspector UIs are never served without
+    // authorization (primary control: Cloudflare Access in front of
+    // /ppi/admin*, /inspector* and /api/admin*, /api/inspector*).
+    if (isProduction && (url.pathname.startsWith('/ppi/admin') || url.pathname.startsWith('/inspector'))) {
       const auth = await requireAdmin(context.request, context.env);
       if (!auth.ok) return auth.response;
     }

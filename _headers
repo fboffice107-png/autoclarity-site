@@ -22,3 +22,9 @@
 /ppi/*
   Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests
   X-Robots-Tag: noindex, nofollow
+
+# Private inspector report workspace — first-party only, never indexed.
+/inspector/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests
+  X-Robots-Tag: noindex, nofollow
+  Permissions-Policy: geolocation=(), microphone=(), payment=(), usb=(), interest-cohort=(), camera=(self)

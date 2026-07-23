@@ -56,6 +56,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const reqs = await db.prepare(`SELECT id, vehicle_id FROM ppi_requests WHERE customer_id = ?`).bind(c.id).all<{ id: string; vehicle_id: string }>();
     for (const r of reqs.results ?? []) {
       await db.batch([
+        db.prepare(`DELETE FROM report_audit WHERE request_id = ?`).bind(r.id),
+        db.prepare(`DELETE FROM report_versions WHERE request_id = ?`).bind(r.id),
+        db.prepare(`DELETE FROM report_photos WHERE report_id IN (SELECT id FROM inspection_reports WHERE request_id = ?)`).bind(r.id),
+        db.prepare(`DELETE FROM report_items WHERE report_id IN (SELECT id FROM inspection_reports WHERE request_id = ?)`).bind(r.id),
+        db.prepare(`DELETE FROM report_sections WHERE report_id IN (SELECT id FROM inspection_reports WHERE request_id = ?)`).bind(r.id),
+        db.prepare(`DELETE FROM inspection_reports WHERE request_id = ?`).bind(r.id),
         db.prepare(`DELETE FROM status_history WHERE request_id = ?`).bind(r.id),
         db.prepare(`DELETE FROM magic_links WHERE request_id = ?`).bind(r.id),
         db.prepare(`DELETE FROM messages WHERE request_id = ?`).bind(r.id),

@@ -30,7 +30,11 @@ simply ignores `functions/`, `wrangler.toml`, `_headers` and `_redirects`.
 |---|---|
 | `las-vegas-pre-purchase-inspection/` | Public landing page + multi-step intake form |
 | `ppi/portal/` | Magic-link customer portal (no passwords) |
+| `ppi/portal/report/` | Customer inspection report (published versions only) + PDF download |
 | `ppi/admin/` | Owner dashboard (Cloudflare Access / preview dev key) |
+| `inspector/` + `functions/inspector/` | Private Inspector Report Workspace (dashboard/editor/preview; same auth as admin) |
+| `functions/api/inspector/*` | Report authoring API: start, autosave, states, photos, preview, publish, amend |
+| `functions/lib/report*.ts`, `pdf.ts` | Checklist template, report domain logic, dependency-free PDF writer |
 | `pre-purchase-inspection/`, `ppi/index.html` | Redirect stubs (static hosting); real 301s in `_redirects` |
 | `functions/lib/` | Shared TypeScript modules (not served as assets) |
 | `functions/api/ppi/*` | Public API: submit, VIN decode, waitlist, analytics |

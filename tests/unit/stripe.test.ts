@@ -60,6 +60,18 @@ describe('stripeKey safety rails', () => {
 
   it('refuses live keys in test env', () => {
     expect(() => stripeKey({ ...baseEnv, STRIPE_SECRET_KEY: 'sk_live_x' } as Env)).toThrow(StripeConfigError);
+    expect(() => stripeKey({ ...baseEnv, STRIPE_SECRET_KEY: 'rk_live_x' } as Env)).toThrow(StripeConfigError);
+  });
+
+  it('refuses a publishable key in test env', () => {
+    expect(() => stripeKey({ ...baseEnv, STRIPE_SECRET_KEY: 'pk_test_x' } as Env)).toThrow(StripeConfigError);
+  });
+
+  it('accepts test/sandbox/restricted secret key formats', () => {
+    expect(stripeKey({ ...baseEnv, STRIPE_SECRET_KEY: 'sk_test_ok' } as Env)).toBe('sk_test_ok');
+    expect(stripeKey({ ...baseEnv, STRIPE_SECRET_KEY: 'rk_test_ok' } as Env)).toBe('rk_test_ok');
+    // trims incidental whitespace from the stored secret
+    expect(stripeKey({ ...baseEnv, STRIPE_SECRET_KEY: '  sk_test_trimmed \n' } as Env)).toBe('sk_test_trimmed');
   });
 
   it('refuses live keys outside production live mode', () => {

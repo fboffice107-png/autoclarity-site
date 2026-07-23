@@ -23,15 +23,25 @@ export class StripeConfigError extends Error {}
  * - test env requires sk_test_; a live key is refused unless STRIPE_ENV=live
  *   AND PPI_ENV=production AND PPI_MODE=live (owner-approved launch state).
  */
+/** A Stripe LIVE secret/restricted key (sk_live_… / rk_live_…). */
+function isLiveKey(key: string): boolean {
+  return key.startsWith('sk_live_') || key.startsWith('rk_live_');
+}
+
 export function stripeKey(env: Env): string {
   const flags = modeFlags(env);
   if (!flags.paymentsEnabled) throw new StripeConfigError('Payments are not enabled in this environment.');
-  const key = env.STRIPE_SECRET_KEY;
+  const key = (env.STRIPE_SECRET_KEY ?? '').trim();
   if (!key) throw new StripeConfigError('STRIPE_SECRET_KEY is not configured.');
+  // The safety goal: a test environment must NEVER use a live key, and a live
+  // environment must use a live key only in production live mode. We do not
+  // pin the exact test-key prefix (Stripe test/sandbox/restricted keys vary:
+  // sk_test_, rk_test_, sandbox variants), we only reject the dangerous case.
   if (flags.stripeEnv === 'test') {
-    if (!key.startsWith('sk_test_')) throw new StripeConfigError('STRIPE_ENV=test requires an sk_test_ key.');
+    if (isLiveKey(key)) throw new StripeConfigError('STRIPE_ENV=test refuses a live Stripe key.');
+    if (key.startsWith('pk_')) throw new StripeConfigError('That looks like a publishable key (pk_…); use the SECRET key.');
   } else {
-    if (!key.startsWith('sk_live_')) throw new StripeConfigError('STRIPE_ENV=live requires an sk_live_ key.');
+    if (!isLiveKey(key)) throw new StripeConfigError('STRIPE_ENV=live requires a live secret key (sk_live_… / rk_live_…).');
     if (flags.env !== 'production' || flags.mode !== 'live') {
       throw new StripeConfigError('Live Stripe keys are refused outside production live mode.');
     }

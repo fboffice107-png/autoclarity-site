@@ -68,6 +68,11 @@ export default async function setup() {
   };
   const args = ['wrangler', 'pages', 'dev', '.', '--port', '8799'];
   for (const [k, v] of Object.entries(bindings)) args.push('--binding', `${k}=${v}`);
+  // Provide a local R2 bucket for the UPLOADS binding directly, so the test
+  // does not depend on the [[r2_buckets]] entry in wrangler.toml (which is
+  // commented out while R2 is not yet enabled on the Cloudflare account).
+  // The D1 binding still comes from wrangler.toml [[d1_databases]] (not commented).
+  args.push('--r2', 'UPLOADS');
 
   wranglerProc = spawn('npx', args, { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
   let bootLog = '';

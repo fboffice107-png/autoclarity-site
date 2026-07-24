@@ -104,74 +104,184 @@
     });
   }
 
-  /* ---------- Gentle pointer-following glow ----------
-     Desktop (fine pointer, wide viewport): follows the mouse continuously.
-     Touch devices (coarse primary pointer): follows the finger while
-     touching, fades ~650ms after lift, never runs between touches.
-     Shared rules: motion allowed, single fixed composited layer behind
-     content, and the glow hides while any form control has focus so
-     nothing moves during form completion. */
-  var glowSupport =
+  /* ---------- Energized grid + ambient bloom (pointer/touch) ----------
+     Two decorative fixed layers behind content, pointer-events: none:
+       .cursor-glow — restrained atmospheric bloom following the pointer.
+       .neon-grid  — bright copy of the technical grid, revealed through a
+                     mask of the current position plus a short fading trail,
+                     so the grid lines themselves light up. Created only on
+                     pages that opt in via <body data-fx-full> (homepage +
+                     inspection landing); other main.js pages keep bloom only.
+     Device gates are capability-based, never viewport-width based:
+       desktop = (hover: hover) and (pointer: fine) — any laptop qualifies;
+       touch   = (pointer: coarse) — follows the finger while touching,
+                 fades after lift, never runs between touches.
+     Shared rules: nothing is created under prefers-reduced-motion, both
+     layers hide while a form control has focus, all updates go through one
+     requestAnimationFrame loop that stops when the trail has drained. */
+  var fxMode =
     !reducedMotion.matches &&
-    (window.matchMedia("(pointer: fine)").matches && window.matchMedia("(min-width: 941px)").matches
+    (window.matchMedia("(hover: hover) and (pointer: fine)").matches
       ? "desktop"
       : window.matchMedia("(pointer: coarse)").matches
         ? "touch"
         : null);
-  if (glowSupport) {
+  if (fxMode) {
+    var isTouchFx = fxMode === "touch";
     var glow = document.createElement("div");
-    glow.className = "cursor-glow" + (glowSupport === "touch" ? " is-touch" : "");
+    glow.className = "cursor-glow" + (isTouchFx ? " is-touch" : "");
     glow.setAttribute("aria-hidden", "true");
     document.body.appendChild(glow);
 
+    var neon = null;
+    if (document.body.hasAttribute("data-fx-full")) {
+      neon = document.createElement("div");
+      neon.className = "neon-grid" + (isTouchFx ? " is-touch" : "");
+      neon.setAttribute("aria-hidden", "true");
+      document.body.appendChild(neon);
+    }
+
+    var HEAD_R = isTouchFx ? 150 : 190;     // reveal radius around the pointer
+    var TRAIL_MS = isTouchFx ? 620 : 550;   // how long a trail point lives
+    var SAMPLE_DIST = 26;                   // px between stored trail points
+    var MAX_TRAIL = 6;
+    var LERP = isTouchFx ? 0.3 : 0.16;      // finger tracks tighter than mouse
+    var IDLE_MS = 1700;
+
     var gx = window.innerWidth / 2, gy = window.innerHeight / 3;
     var tx = gx, ty = gy;
-    var glowRaf = null;
+    var trail = [];                          // {x, y, born}, newest last
+    var lastSampleX = gx, lastSampleY = gy;
+    var fxRaf = null;
     var formFocused = false;
+    var idleTimer = null;
 
-    function glowTick() {
-      gx += (tx - gx) * 0.09;
-      gy += (ty - gy) * 0.09;
+    function setOn(on) {
+      glow.classList.toggle("is-on", on);
+      if (neon) neon.classList.toggle("is-on", on);
+    }
+
+    function renderMask(now) {
+      if (!neon) return;
+      var parts = [
+        "radial-gradient(circle " + HEAD_R + "px at " + gx.toFixed(1) + "px " + gy.toFixed(1) +
+          "px, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.5) 52%, rgba(0,0,0,0) 76%)"
+      ];
+      for (var i = trail.length - 1; i >= 0; i--) {
+        var age = (now - trail[i].born) / TRAIL_MS; // 0 fresh → 1 expired
+        if (age >= 1) continue;
+        var r = HEAD_R * (0.82 - 0.52 * age);
+        var a = 0.5 * (1 - age);
+        parts.push(
+          "radial-gradient(circle " + r.toFixed(0) + "px at " + trail[i].x.toFixed(1) + "px " +
+            trail[i].y.toFixed(1) + "px, rgba(0,0,0," + a.toFixed(3) + ") 0%, rgba(0,0,0,0) 70%)"
+        );
+      }
+      var mask = parts.join(",");
+      neon.style.webkitMaskImage = mask;
+      neon.style.maskImage = mask;
+    }
+
+    function fxTick() {
+      var now = performance.now();
+      gx += (tx - gx) * LERP;
+      gy += (ty - gy) * LERP;
       glow.style.transform = "translate3d(" + gx.toFixed(1) + "px, " + gy.toFixed(1) + "px, 0)";
-      if (Math.abs(tx - gx) > 0.5 || Math.abs(ty - gy) > 0.5) {
-        glowRaf = requestAnimationFrame(glowTick);
+
+      while (trail.length && now - trail[0].born >= TRAIL_MS) trail.shift();
+      var dx = gx - lastSampleX, dy = gy - lastSampleY;
+      if (dx * dx + dy * dy >= SAMPLE_DIST * SAMPLE_DIST) {
+        trail.push({ x: gx, y: gy, born: now });
+        if (trail.length > MAX_TRAIL) trail.shift();
+        lastSampleX = gx;
+        lastSampleY = gy;
+      }
+      renderMask(now);
+
+      /* Keep animating while converging on the target or draining the trail;
+         otherwise stop completely — no background work while parked. */
+      if (Math.abs(tx - gx) > 0.5 || Math.abs(ty - gy) > 0.5 || trail.length) {
+        fxRaf = requestAnimationFrame(fxTick);
       } else {
-        glowRaf = null;
+        fxRaf = null;
       }
     }
-    function glowTarget(x, y) {
+
+    function fxTarget(x, y) {
       if (formFocused) return;
       tx = x;
       ty = y;
-      glow.classList.add("is-on");
-      if (!glowRaf) glowRaf = requestAnimationFrame(glowTick);
+      setOn(true);
+      if (neon) {
+        neon.classList.remove("is-idle");
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(function () { neon.classList.add("is-idle"); }, IDLE_MS);
+      }
+      if (!fxRaf) fxRaf = requestAnimationFrame(fxTick);
     }
 
-    if (glowSupport === "desktop") {
-      window.addEventListener("pointermove", function (e) { glowTarget(e.clientX, e.clientY); }, { passive: true });
-      document.addEventListener("pointerleave", function () { glow.classList.remove("is-on"); });
+    if (fxMode === "desktop") {
+      window.addEventListener(
+        "pointermove",
+        function (e) {
+          /* A touchscreen laptop still matches (pointer: fine); ignore the
+             synthetic/touch pointer stream so touching the screen does not
+             drive the desktop effect. */
+          if (e.pointerType && e.pointerType !== "mouse" && e.pointerType !== "pen") return;
+          fxTarget(e.clientX, e.clientY);
+        },
+        { passive: true }
+      );
+      document.addEventListener("pointerleave", function () { setOn(false); });
+      document.addEventListener("pointerenter", function (e) {
+        if (e.pointerType && e.pointerType !== "mouse" && e.pointerType !== "pen") return;
+        /* Re-enter: snap to the entry point so the reveal doesn't sweep in
+           from a stale position. */
+        gx = tx = e.clientX;
+        gy = ty = e.clientY;
+        trail.length = 0;
+        fxTarget(e.clientX, e.clientY);
+      });
     } else {
       /* Passive only — scrolling stays native; no preventDefault, no layout
-         reads (clientX/Y are event properties). rAF-throttled via glowTick. */
-      function onTouch(e) {
+         reads (clientX/Y are event properties). rAF-throttled via fxTick.
+         Touch mode listens to touch events exclusively, so the synthetic
+         mouse events browsers fire after a tap can never re-trigger it. */
+      function onTouchStart(e) {
         var t = e.touches && e.touches[0];
-        if (t) glowTarget(t.clientX, t.clientY);
+        if (!t) return;
+        gx = tx = t.clientX;                 // appear under the finger, no sweep
+        gy = ty = t.clientY;
+        trail.length = 0;
+        lastSampleX = gx;
+        lastSampleY = gy;
+        fxTarget(t.clientX, t.clientY);
+      }
+      function onTouchMove(e) {
+        var t = e.touches && e.touches[0];
+        if (t) fxTarget(t.clientX, t.clientY);
       }
       function onTouchEnd() {
-        glow.classList.remove("is-on"); // CSS fades it over ~650ms
+        setOn(false); // CSS fades both layers; the rAF loop drains the trail then stops
       }
-      window.addEventListener("touchstart", onTouch, { passive: true });
-      window.addEventListener("touchmove", onTouch, { passive: true });
+      window.addEventListener("touchstart", onTouchStart, { passive: true });
+      window.addEventListener("touchmove", onTouchMove, { passive: true });
       window.addEventListener("touchend", onTouchEnd, { passive: true });
       window.addEventListener("touchcancel", onTouchEnd, { passive: true });
     }
 
+    window.addEventListener("resize", function () {
+      /* Orientation change / window resize: stale viewport coordinates make
+         no sense — drop the trail; the next input rebuilds it. */
+      trail.length = 0;
+    });
+
     document.addEventListener("focusin", function (e) {
       var el = e.target;
       if (!el || !el.matches) return;
-      if (el.matches("input, select, textarea, [contenteditable=\"true\"]") || (el.closest && el.closest("form"))) {
+      if (el.matches("input, select, textarea, [contenteditable], [contenteditable=\"true\"]") || (el.closest && el.closest("form"))) {
         formFocused = true;
-        glow.classList.remove("is-on");
+        setOn(false);
       }
     });
     document.addEventListener("focusout", function () { formFocused = false; });

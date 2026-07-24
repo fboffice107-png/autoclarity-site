@@ -10,6 +10,7 @@
 import type { Env } from './lib/types.ts';
 import { requireAdmin } from './lib/auth.ts';
 import { corsHeaders, corsPreflight } from './lib/cors.ts';
+import { canonicalHostRedirect, isNonCanonicalProductionHost } from './lib/canonical.ts';
 
 // Anything matching these is repo scaffolding, never website content. This
 // middleware runs before static-asset serving on both `wrangler pages dev`
@@ -47,6 +48,9 @@ export const onRequest: PagesFunction<Env>[] = [
     const url = new URL(context.request.url);
     const isProduction = context.env.PPI_ENV === 'production';
 
+    const hostRedirect = canonicalHostRedirect(url);
+    if (hostRedirect) return hostRedirect;
+
     if (isBlockedPath(url.pathname)) {
       return new Response('Not found', { status: 404, headers: { 'x-robots-tag': 'noindex, nofollow', 'content-type': 'text/plain' } });
     }
@@ -83,7 +87,9 @@ export const onRequest: PagesFunction<Env>[] = [
       }
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
     }
-    if (!isProduction) {
+    if (!isProduction || isNonCanonicalProductionHost(url.hostname)) {
+      // Preview mode, local dev, *.pages.dev and deployment aliases: never
+      // indexable. Only production on the canonical domain skips this.
       const headers = new Headers(response.headers);
       headers.set('x-robots-tag', 'noindex, nofollow');
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });

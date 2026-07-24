@@ -104,16 +104,23 @@
     });
   }
 
-  /* ---------- Gentle cursor-following glow (desktop only) ----------
-     Fine pointers + motion allowed + wide viewport. Fades out while any
-     form field has focus so nothing moves during form completion. */
-  if (
+  /* ---------- Gentle pointer-following glow ----------
+     Desktop (fine pointer, wide viewport): follows the mouse continuously.
+     Touch devices (coarse primary pointer): follows the finger while
+     touching, fades ~650ms after lift, never runs between touches.
+     Shared rules: motion allowed, single fixed composited layer behind
+     content, and the glow hides while any form control has focus so
+     nothing moves during form completion. */
+  var glowSupport =
     !reducedMotion.matches &&
-    window.matchMedia("(pointer: fine)").matches &&
-    window.matchMedia("(min-width: 941px)").matches
-  ) {
+    (window.matchMedia("(pointer: fine)").matches && window.matchMedia("(min-width: 941px)").matches
+      ? "desktop"
+      : window.matchMedia("(pointer: coarse)").matches
+        ? "touch"
+        : null);
+  if (glowSupport) {
     var glow = document.createElement("div");
-    glow.className = "cursor-glow";
+    glow.className = "cursor-glow" + (glowSupport === "touch" ? " is-touch" : "");
     glow.setAttribute("aria-hidden", "true");
     document.body.appendChild(glow);
 
@@ -132,25 +139,42 @@
         glowRaf = null;
       }
     }
-    window.addEventListener(
-      "pointermove",
-      function (e) {
-        if (formFocused) return;
-        tx = e.clientX;
-        ty = e.clientY;
-        glow.classList.add("is-on");
-        if (!glowRaf) glowRaf = requestAnimationFrame(glowTick);
-      },
-      { passive: true }
-    );
+    function glowTarget(x, y) {
+      if (formFocused) return;
+      tx = x;
+      ty = y;
+      glow.classList.add("is-on");
+      if (!glowRaf) glowRaf = requestAnimationFrame(glowTick);
+    }
+
+    if (glowSupport === "desktop") {
+      window.addEventListener("pointermove", function (e) { glowTarget(e.clientX, e.clientY); }, { passive: true });
+      document.addEventListener("pointerleave", function () { glow.classList.remove("is-on"); });
+    } else {
+      /* Passive only — scrolling stays native; no preventDefault, no layout
+         reads (clientX/Y are event properties). rAF-throttled via glowTick. */
+      function onTouch(e) {
+        var t = e.touches && e.touches[0];
+        if (t) glowTarget(t.clientX, t.clientY);
+      }
+      function onTouchEnd() {
+        glow.classList.remove("is-on"); // CSS fades it over ~650ms
+      }
+      window.addEventListener("touchstart", onTouch, { passive: true });
+      window.addEventListener("touchmove", onTouch, { passive: true });
+      window.addEventListener("touchend", onTouchEnd, { passive: true });
+      window.addEventListener("touchcancel", onTouchEnd, { passive: true });
+    }
+
     document.addEventListener("focusin", function (e) {
-      if (e.target.matches && e.target.matches("input, select, textarea")) {
+      var el = e.target;
+      if (!el || !el.matches) return;
+      if (el.matches("input, select, textarea, [contenteditable=\"true\"]") || (el.closest && el.closest("form"))) {
         formFocused = true;
         glow.classList.remove("is-on");
       }
     });
     document.addEventListener("focusout", function () { formFocused = false; });
-    document.addEventListener("pointerleave", function () { glow.classList.remove("is-on"); });
   }
 
   /* ---------- How-it-works stepper (accessible tabs) ---------- */

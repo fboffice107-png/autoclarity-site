@@ -46,6 +46,25 @@ node scripts/capture-screens.mjs docs/visual-polish-2026-07-23/screenshots <pref
 (Requires `npm i --no-save puppeteer-core` and desktop Chrome; plain
 `chrome --headless --screenshot` clips below 500px width — don't use it.)
 
+## Addendum — mobile touch glow (same day, follow-up commit)
+
+Touch devices (coarse primary pointer) on the two public pages now get a
+finger-following variant of the ambient glow: `.cursor-glow.is-touch`
+(420px, 7% alpha, same fixed composited layer) driven by **passive**
+touchstart/touchmove listeners (never preventDefault — scrolling stays
+native), rAF-lerped exactly like the desktop path, and faded out by CSS over
+~650ms on touchend/touchcancel — it never runs between touches. The shared
+form-focus guard now also covers `[contenteditable]` and anything inside a
+`<form>`. Desktop behavior unchanged (fine-pointer branch untouched;
+verified). Never created under prefers-reduced-motion; never exists on
+portal/report/inspector/admin/legal (they don't load main.js).
+
+Verified via emulated touch at 320/360/375/390/393/414/430/768: glow follows
+the finger, swipe scroll still scrolls, 62fps during a touchmove storm,
+opacity 0 within 800ms of lift, off while a field is focused and resumes on
+blur, no overflow. Evidence: `screenshots/touch-glow-{before-idle,during-touch,after-fade}-390.png`
++ `touch-glow-interaction-390.webm`.
+
 ## Deliberately NOT done
 
 No particles, no animated gradients, no neon saturation, no flashing, no

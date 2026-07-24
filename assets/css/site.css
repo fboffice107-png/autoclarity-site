@@ -266,9 +266,12 @@ a { color: var(--blue-bright); }
   .nav-brand span { display: none; }
 }
 
-/* ---------- Cursor-following ambient glow (desktop, fine pointers only;
-   created by main.js, which also disables it near forms and honors
-   prefers-reduced-motion — phones never get the element at all) ---------- */
+/* ---------- Pointer-following ambient glow (created by main.js on the two
+   public pages only). Desktop: follows the mouse. Touch devices: follows the
+   finger while touching and fades ~650ms after lift. Both variants are
+   disabled while a form control is focused and never exist under
+   prefers-reduced-motion. Single fixed composited layer, pointer-events
+   none, behind content. ---------- */
 
 .cursor-glow {
   position: fixed;
@@ -286,6 +289,16 @@ a { color: var(--blue-bright); }
   will-change: transform;
 }
 .cursor-glow.is-on { opacity: 1; }
+
+/* Touch variant: slightly smaller and a touch brighter (small screens show
+   less of the falloff), with the post-lift fade in the 500–800ms window. */
+.cursor-glow.is-touch {
+  width: 420px;
+  height: 420px;
+  margin: -210px 0 0 -210px;
+  background: radial-gradient(circle, rgba(47, 107, 255, 0.07) 0%, rgba(47, 107, 255, 0) 62%);
+  transition: opacity 0.65s ease;
+}
 
 /* ---------- Hero ---------- */
 

@@ -1,5 +1,10 @@
 # Cloudflare Access — production admin/inspector protection (owner setup)
 
+> **2026-07-23 (third pass):** re-verified — the Access secrets are still not
+> set and the CLI still has no Zero Trust scope, so the custom-domain cutover
+> was stopped on this gate. This document is OWNER STEP 1 of
+> `docs/domain-cutover-2026-07-23/CUTOVER_RUNBOOK.md`.
+
 The production control for every private surface is **Cloudflare Access**
 (Zero Trust). The dev key works only while `PPI_ENV=preview` and is refused
 outright in production — the code fails closed (503) until Access is

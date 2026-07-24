@@ -47,6 +47,20 @@ Afterwards: diagnostics reverted, `PAYMENTS_ENABLED=false` restored, redeployed 
 > still not the customer domain). The CLI has no preview-env flag; set
 > preview-env values in the dashboard if you use branch-alias previews.
 
+## 2026-07-23 (third pass — neon grid + cutover prep) — hosted preview state
+
+- Deployed the neon energized-grid build + canonicalization middleware
+  (commit `b6656ba` at deploy time). Verified hosted: asset hashes match
+  local, neon grid live (screenshots in `docs/neon-grid-2026-07-23/`),
+  noindex intact, 301s intact, blocked paths 404, admin 401 without key,
+  fresh cross-origin intake stored (`PPI-260724-35MR`, duplicate-safe,
+  in admin). `www.getautoclarity.com` requests hitting the app now 301 to
+  the apex with path+query preserved (Host-header verified locally; full
+  proof possible only after the domain attach).
+- **Custom domain still NOT attached** — stopped at the Cloudflare Access
+  gate (secrets absent; CLI has no Zero Trust scope). Owner runbook:
+  `docs/domain-cutover-2026-07-23/CUTOVER_RUNBOOK.md`.
+
 ## 2026-07-23 (pre-launch infrastructure pass) — what changed on the hosted preview
 
 - **Cross-origin form support deployed and verified**: `/api/ppi/*` +

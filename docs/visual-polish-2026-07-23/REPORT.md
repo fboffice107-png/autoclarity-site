@@ -65,6 +65,15 @@ opacity 0 within 800ms of lift, off while a field is focused and resumes on
 blur, no overflow. Evidence: `screenshots/touch-glow-{before-idle,during-touch,after-fade}-390.png`
 + `touch-glow-interaction-390.webm`.
 
+## Superseded (same day, later session)
+
+The cursor/touch ambient glow described above was upgraded to the **neon
+energized-grid effect** — the grid lines themselves now illuminate around the
+pointer/finger with a fading trail. Root cause of the faintness, new
+architecture, measurements and evidence: `docs/neon-grid-2026-07-23/REPORT.md`.
+The guardrails in this report (reduced motion, form-focus suppression, no
+overflow, page tiers) all still hold and were re-verified there.
+
 ## Deliberately NOT done
 
 No particles, no animated gradients, no neon saturation, no flashing, no

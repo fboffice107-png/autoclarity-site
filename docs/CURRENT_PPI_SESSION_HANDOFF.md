@@ -1,9 +1,10 @@
 # AutoClarity Pre-Purchase Inspection Portal — Session Handoff
 
-_Last updated: 2026-07-23 (final pre-launch infrastructure + visual pass).
+_Last updated: 2026-07-23 (neon energized-grid + single-domain cutover prep).
 Read this plus `docs/PPI_CLOUDFLARE_PREVIEW_STATUS.md`,
 `docs/PPI_PRODUCTION_LAUNCH_CHECKLIST.md`, `docs/PPI_ACCESS_SETUP.md`,
-`docs/PPI_INSPECTOR_GUIDE.md` before making any production change._
+`docs/domain-cutover-2026-07-23/CUTOVER_RUNBOOK.md` before making any
+production change._
 
 ## Snapshot
 
@@ -20,10 +21,58 @@ Read this plus `docs/PPI_CLOUDFLARE_PREVIEW_STATUS.md`,
 | Stripe | test/sandbox only; `STRIPE_ENV=test`, `PAYMENTS_ENABLED=false` |
 | Email | **Adapter complete + proven vs mock provider (tests)**; hosted = `recorded` until owner connects Resend — exact steps in launch checklist §B. `ADMIN_NOTIFY_EMAIL` set on hosted preview this session. |
 | Admin/inspector security | Preview: `ADMIN_DEV_KEY`. Production: Cloudflare Access required — full owner walkthrough + test + rollback in `docs/PPI_ACCESS_SETUP.md`; fail-closed matrix covered by `tests/unit/auth.test.ts` |
-| Tests | **178 pass** — 106 unit + 72 integration; `tsc` clean; 20 links OK; header checks pass |
+| Tests | **186 pass** — 114 unit + 72 integration; `tsc` clean; 20 links OK; header checks pass |
 | Rollback tags | `pre-ppi-production` → `15a121c` (GitHub Pages prod); `ppi-preview-verified-2026-07-23` |
 
-## THIS SESSION (2026-07-23, second pass)
+## THIS SESSION (2026-07-23, third pass — neon grid + cutover prep)
+
+### 1. Neon energized-grid pointer effect SHIPPED
+The faint cursor blob (5.5%-alpha radial, never touching the grid) was
+replaced: a second copy of the 64px technical grid in vivid electric blue
+(`.neon-grid`) is revealed through a per-frame mask of the pointer position
+plus a ≤6-point fading trail (550–620ms), so the actual grid lines
+illuminate and trail behind the pointer. Capability gates (`hover+fine` /
+`coarse` — **no viewport-width rule**), touch follows the finger with passive
+listeners and fades ~700ms after lift, form focus fades everything to 0,
+idle dims to 0.3 and stops all rAF work, reduced-motion never creates the
+elements. Full effect only on `<body data-fx-full>` (homepage + LV landing);
+sample report keeps bloom only; portal/report/inspector/admin/legal
+untouched. 60–61fps in storms; native scroll proven. Full root-cause,
+implementation, measurements + 70-file before/after evidence (screenshots at
+1024–1920 + 7 touch widths, 2 webm recordings, hosted pages.dev proof):
+`docs/neon-grid-2026-07-23/REPORT.md`.
+
+### 2. Single-domain canonicalization implemented IN the app
+`functions/lib/canonical.ts` + middleware: any request on
+`www.getautoclarity.com` → **301 to the apex preserving path + query**
+(unit-tested incl. portal tokens/UTM; verified live via Host header), and
+**pages.dev/aliases stay noindex even in production** — no zone Redirect
+Rules or extra DNS records needed at cutover.
+
+### 3. Custom-domain cutover PREPARED but STOPPED at the Access gate
+Verified live: `CF_ACCESS_AUD`/`CF_ACCESS_TEAM_DOMAIN` secrets absent and
+the CLI token has no Zero Trust scope → production authentication for the
+four private surfaces cannot be verified from here → per the session's stop
+conditions the domain was **not** attached. getautoclarity.com still serves
+GitHub Pages (`main` = `a907ebf`); www still 301s to apex via GitHub. A full
+pre-change checkpoint (authoritative DNS table incl. the Email-Routing
+MX/SPF records that must never move, GitHub Pages config, exact rollback)
+and the click-by-click owner cutover runbook are in
+`docs/domain-cutover-2026-07-23/`. Cache behavior after cutover is already
+solved: Pages serves HTML **and** assets `max-age=0, must-revalidate` + ETag
+(GitHub's `max-age=600` staleness disappears).
+
+### 4. Hosted redeploy + re-proof (pages.dev)
+Deployed the branch (`--branch main` direct upload). Verified on the hosted
+stack: asset hashes match local, neon grid works (hosted screenshots), noindex
+intact, `/ppi`+`/pre-purchase-inspection` 301s, blocked paths 404, admin 401
+without key, and a fresh cross-origin intake stored durably
+(`PPI-260724-35MR`, duplicate-safe, visible in admin). Stripe untouched:
+`STRIPE_ENV=test`, `PAYMENTS_ENABLED=false`, no live keys. Email unchanged:
+messages record (`recorded`); **no delivery is claimed** — Resend connection
+remains owner checklist §B.
+
+## PREVIOUS SESSION (2026-07-23, second pass)
 
 ### 1. Phase 1 — inspector system re-verified, untouched
 Hosted preview matched commit `62f5d79` (asset hashes), auth gates held
@@ -90,11 +139,14 @@ field is focused**, reduced-motion + mobile static fallbacks. No overflow at
 320–1440 (8 widths, asserted). 33 before/after screenshots + full report:
 `docs/visual-polish-2026-07-23/`. Legal pages (light theme) unaffected.
 
-## Known blockers before live customers (unchanged list, updated status)
+## Known blockers before live customers (updated 2026-07-23 third pass)
 
-1. **Email provider connection** — owner: launch checklist §B (~15 min).
-2. **Live form fix on getautoclarity.com** — owner: publish `main` (§B2).
-3. **Cloudflare Access** — owner: `docs/PPI_ACCESS_SETUP.md` (~10 min).
+1. **Cloudflare Access** — owner: `docs/PPI_ACCESS_SETUP.md` (~10 min).
+   **This is now the ONLY blocker for the custom-domain cutover** — runbook:
+   `docs/domain-cutover-2026-07-23/CUTOVER_RUNBOOK.md`.
+2. **Email provider connection** — owner: launch checklist §B (~15 min).
+3. **Live form fix on getautoclarity.com** — owner: publish `main` (§B2), or
+   skip straight to the cutover (which supersedes it — same code, same fix).
 4. **Business/legal + live Stripe** — owner + counsel (checklist §A/§C).
 5. **R2** (optional, photos) — owner dashboard enable (`docs/PPI_R2_SETUP.md`).
 
@@ -104,7 +156,7 @@ field is focused**, reduced-motion + mobile static fallbacks. No overflow at
 cd "/Volumes/Super Storage/autoclarity-site"
 npx wrangler whoami
 git log --oneline -3
-npm test                                 # 106 unit + 72 integration
+npm test                                 # 114 unit + 72 integration
 npx wrangler pages deploy . --project-name autoclarity-site --branch main --commit-dirty=true
 ```
 

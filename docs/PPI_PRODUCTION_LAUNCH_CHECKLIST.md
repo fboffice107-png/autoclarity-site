@@ -118,7 +118,14 @@ custom domain only:
 
 ## F. Custom-domain cutover (last step)
 
-14. Migrate the domain **only after all hosted tests pass**: Cloudflare Pages project → Custom domains → add `getautoclarity.com` + `www` (DNS is already on Cloudflare → this repoints records to Pages; SSL auto-issues). This is the actual cutover.
+> **2026-07-23:** full click-by-click runbook + pre-change DNS snapshot +
+> rollback: `docs/domain-cutover-2026-07-23/` — the cutover was prepared and
+> then STOPPED at the Access gate (§D-11 not done; secrets absent, verified).
+> `www → apex` 301 (path+query preserved) and production noindex for
+> pages.dev are now built into the app (`functions/lib/canonical.ts`) — no
+> zone Redirect Rules needed.
+
+14. Migrate the domain **only after all hosted tests pass AND §D-11 (Access) is verified**: Cloudflare Pages project → Custom domains → add `getautoclarity.com` + `www` (DNS is already on Cloudflare → this repoints records to Pages; SSL auto-issues). This is the actual cutover.
 15. Smoke test: root, `www`, `/ppi`, long inspection URL, `privacy.html`, `terms.html`, support email link, App Store links.
 16. Enable indexing on the final custom domain only.
 17. **Preserve the GitHub Pages rollback** (do not delete it).

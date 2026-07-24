@@ -15,7 +15,10 @@ compatibility_date = "2026-07-01"
 
 [vars]
 # preview | production — controls fail-closed behavior (admin auth, seeds, robots)
-PPI_ENV = "preview"
+# production since the 2026-07-24 custom-domain cutover: dev key refused,
+# admin/inspector require Cloudflare Access, fixtures never seed, indexing
+# allowed ONLY on the canonical host (pages.dev stays noindex via host check).
+PPI_ENV = "production"
 # waitlist | request | live
 PPI_MODE = "request"
 PAYMENTS_ENABLED = "false"

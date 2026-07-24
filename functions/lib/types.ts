@@ -15,6 +15,9 @@ export interface Env {
   UPLOADS_ENABLED?: string;
   TURNSTILE_SITE_KEY?: string;
   PUBLIC_BASE_URL?: string;
+  /** Comma-separated origins allowed to call the public form APIs cross-origin
+   *  (the static marketing site while it is hosted on GitHub Pages). */
+  PUBLIC_FORM_ORIGINS?: string;
   SUPPORT_EMAIL?: string;
 
   // Secrets
@@ -24,6 +27,8 @@ export interface Env {
   /** Test-only Stripe API override; ignored when PPI_ENV=production. */
   STRIPE_API_BASE?: string;
   RESEND_API_KEY?: string;
+  /** Test-only Resend endpoint override; ignored when PPI_ENV=production. */
+  RESEND_API_BASE?: string;
   EMAIL_FROM?: string;
   ADMIN_NOTIFY_EMAIL?: string;
   ADMIN_DEV_KEY?: string;

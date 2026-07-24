@@ -1,6 +1,10 @@
 /* AutoClarity — Las Vegas PPI intake form.
-   Progressive enhancement: without the API (e.g. static-only hosting) the page
-   still renders and shows an email fallback instead of the form. */
+   Every submission goes to the AutoClarity API and is stored server-side
+   before any success message is shown. While the marketing site is static
+   hosting (GitHub Pages), the API lives on the Cloudflare deployment — the
+   form falls back to that origin automatically (the API allows it via a CORS
+   allowlist). There is no email-app path: if the API is unreachable the form
+   says so honestly and keeps the customer's answers saved on their device. */
 (function () {
   "use strict";
 
@@ -13,6 +17,12 @@
     upload: "/api/portal/upload"
   };
 
+  // Same-origin first (Cloudflare hosting), then the hosted API (static hosting).
+  var FALLBACK_API_ORIGIN = "https://autoclarity-site.pages.dev";
+  var apiOrigin = ""; // resolved by resolveConfig()
+
+  function api(path) { return apiOrigin + path; }
+
   var intakeShell = document.getElementById("intakeShell");
   var waitlistShell = document.getElementById("waitlistShell");
   var fallbackShell = document.getElementById("fallbackShell");
@@ -23,7 +33,6 @@
   var turnstileToken = "";
   var turnstileRendered = false;
   var formStarted = false;
-  var staticMode = false; // true when the API is unreachable (static hosting)
   var STORAGE_KEY = "ppi-intake-draft-v1";
 
   /* ---------- sticky mobile CTA bar ---------- */
@@ -63,9 +72,9 @@
     try {
       var body = JSON.stringify({ event: event, step: step || "", source: "web" });
       if (navigator.sendBeacon) {
-        navigator.sendBeacon(API.events, new Blob([body], { type: "application/json" }));
+        navigator.sendBeacon(api(API.events), new Blob([body], { type: "application/json" }));
       } else {
-        fetch(API.events, { method: "POST", headers: { "content-type": "application/json" }, body: body, keepalive: true }).catch(function () {});
+        fetch(api(API.events), { method: "POST", headers: { "content-type": "application/json" }, body: body, keepalive: true }).catch(function () {});
       }
     } catch (e) { /* analytics must never break the form */ }
   }
@@ -76,30 +85,47 @@
     });
   });
 
-  /* ---------- runtime config ---------- */
-  fetch(API.config, { headers: { accept: "application/json" } })
-    .then(function (res) { if (!res.ok) throw new Error("config " + res.status); return res.json(); })
+  /* ---------- runtime config (same-origin, then hosted API) ---------- */
+  function fetchConfig(origin) {
+    return fetch(origin + API.config, { headers: { accept: "application/json" } })
+      .then(function (res) { if (!res.ok) throw new Error("config " + res.status); return res.json(); })
+      .then(function (cfg) { apiOrigin = origin; return cfg; });
+  }
+
+  function resolveConfig() {
+    return fetchConfig("").catch(function () {
+      if (window.location.origin === FALLBACK_API_ORIGIN) throw new Error("api unreachable");
+      return fetchConfig(FALLBACK_API_ORIGIN);
+    });
+  }
+
+  var formReady = false;
+  function applyConfig(cfg) {
+    runtime = cfg;
+    applyPricing(cfg);
+    applyScanLanguage(cfg);
+    applyContact(cfg);
+    applyReviews(cfg);
+    if (cfg.mode === "waitlist") {
+      intakeShell.hidden = true;
+      waitlistShell.hidden = false;
+      setupWaitlist();
+    } else if (!formReady) {
+      formReady = true;
+      setupForm();
+    }
+  }
+
+  resolveConfig()
     .then(function (cfg) {
-      runtime = cfg;
-      applyPricing(cfg);
-      applyScanLanguage(cfg);
-      applyContact(cfg);
-      applyReviews(cfg);
-      if (cfg.mode === "waitlist") {
-        intakeShell.hidden = true;
-        waitlistShell.hidden = false;
-        setupWaitlist();
-      } else {
-        setupForm();
-      }
+      applyConfig(cfg);
       track("ppi_page_view");
     })
     .catch(function () {
-      // No API reachable (e.g. static hosting): keep the multi-step form usable
-      // and capture leads via a prefilled email on submit.
-      staticMode = true;
+      // API unreachable right now. Keep the form usable (answers save to this
+      // device); submission retries the API and reports honestly if it fails.
+      formReady = true;
       setupForm();
-      track("ppi_page_view");
     });
 
   function money(cents) { return "$" + Math.round(cents / 100); }
@@ -205,7 +231,7 @@
       e.preventDefault();
       var status = wlForm.querySelector(".form-status");
       status.textContent = "Joining…";
-      fetch(API.waitlist, {
+      fetch(api(API.waitlist), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -352,7 +378,7 @@
       var vin = vinInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
       if (vin.length !== 17) return;
       hint.textContent = "Checking VIN…";
-      fetch(API.vin, {
+      fetch(api(API.vin), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ vin: vin })
@@ -529,10 +555,23 @@
       if (!validateStep(i)) { showStep(i); return; }
     }
 
-    // Static hosting (no API): capture the lead via a prefilled email so the
-    // owner is still notified. Turnstile is not required in this path.
-    if (staticMode) {
-      submitToEmail();
+    // The API wasn't reachable when the page loaded — try to connect now.
+    // Nothing is ever claimed as "received" unless the API stored it.
+    if (!runtime) {
+      setStatus("Connecting to the booking system…");
+      submitBtn.disabled = true;
+      resolveConfig()
+        .then(function (cfg) {
+          submitBtn.disabled = false;
+          applyConfig(cfg);
+          var slot = intakeShell.querySelector("[data-turnstile]");
+          loadTurnstile(function () { renderTurnstile(slot); });
+          setStatus("Connected. Please complete the human-verification check above, then press Submit again.");
+        })
+        .catch(function () {
+          submitBtn.disabled = false;
+          showSubmitUnavailable();
+        });
       return;
     }
 
@@ -550,7 +589,7 @@
       payload[name] = el.type === "checkbox" ? el.checked : el.value;
     });
 
-    fetch(API.submit, {
+    fetch(api(API.submit), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload)
@@ -577,8 +616,17 @@
       })
       .catch(function () {
         submitBtn.disabled = false;
-        setStatus("Network problem — your answers are saved on this device. Please try again.");
+        showSubmitUnavailable();
       });
+  }
+
+  /* Honest failure state: the request was NOT submitted. The form stays on
+     screen with everything saved locally; other ways to reach AutoClarity are
+     offered — never a success claim, never a forced email app. */
+  function showSubmitUnavailable() {
+    setStatus("We couldn't reach the booking system, so your request has NOT been submitted. " +
+      "Your answers are saved on this device — please try again in a minute.");
+    if (fallbackShell) fallbackShell.hidden = false;
   }
 
   var STEP_OF_FIELD = {
@@ -595,55 +643,20 @@
     return min;
   }
 
-  /* Static-hosting lead capture: build a prefilled email to support. */
-  function submitToEmail() {
-    var support = (runtime && runtime.supportEmail) || "support@getautoclarity.com";
-    var lines = [];
-    function add(label, name) { var v = val(name); if (v) lines.push(label + ": " + v); }
-    lines.push("LAS VEGAS PPI REQUEST", "");
-    add("Name", "fullName"); add("Email", "email"); add("Phone", "phone");
-    add("Preferred contact", "preferredContact");
-    lines.push("");
-    add("Year", "year"); add("Make", "make"); add("Model", "model"); add("Trim", "trim");
-    add("Mileage", "mileage"); add("VIN", "vin"); add("Listing", "listingUrl");
-    add("Asking price", "askingPrice"); add("Expected price", "expectedPrice"); add("Modifications", "modStatus");
-    lines.push("");
-    lines.push("Location: " + [val("locStreet"), val("locUnit"), val("locCity"), val("locState"), val("locZip")].filter(Boolean).join(", "));
-    add("Seller type", "sellerType"); add("Seller name", "sellerName"); add("Seller phone", "sellerPhone");
-    add("Access notes", "locNotes");
-    lines.push("");
-    add("Decide by", "decisionTimeline"); add("Time of day", "timeWindow"); add("Preferred dates", "preferredDates");
-    add("Warning lights", "warningLights"); add("Known issues", "knownIssues");
-    add("Title", "titleStatus"); add("Starts/drives", "startsDrives"); add("Notes", "customerNotes");
-    var subject = "Las Vegas PPI request — " + [val("year"), val("make"), val("model")].filter(Boolean).join(" ");
-    var href = "mailto:" + support + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(lines.join("\n"));
-    track("ppi_request_submitted");
-    clearDraft();
-    form.hidden = true;
-    document.getElementById("stepLine").hidden = true;
-    var pb = document.querySelector(".form-progress"); if (pb) pb.hidden = true;
-    var panel = document.getElementById("successPanel");
-    panel.hidden = false;
-    document.getElementById("successRef").textContent = "sent by email";
-    var link = document.getElementById("successPortalLink");
-    link.textContent = "Open your email to send the request";
-    link.href = href;
-    var ub = document.getElementById("uploadBlock"); if (ub) ub.hidden = true;
-    // Trigger the email client immediately too.
-    window.location.href = href;
-    panel.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-
   /* ---------- success + uploads ---------- */
   function showSuccess(result) {
     form.hidden = true;
     document.getElementById("stepLine").hidden = true;
     document.querySelector(".form-progress").hidden = true;
+    if (fallbackShell) fallbackShell.hidden = true;
     var panel = document.getElementById("successPanel");
     panel.hidden = false;
     document.getElementById("successRef").textContent = result.ref;
+    var dupNote = document.getElementById("successDuplicateNote");
+    if (dupNote) dupNote.hidden = !result.duplicate;
     var link = document.getElementById("successPortalLink");
-    link.href = "/ppi/portal/?t=" + encodeURIComponent(result.portalToken);
+    // The portal lives on the API origin (absolute while the marketing site is static hosting).
+    link.href = api("/ppi/portal/?t=" + encodeURIComponent(result.portalToken));
 
     var uploadBlock = document.getElementById("uploadBlock");
     if (!runtime || runtime.uploadsEnabled === false) {
@@ -672,7 +685,7 @@
         var fd = new FormData();
         fd.append("file", file);
         fd.append("kind", "other");
-        fetch(API.upload, { method: "POST", headers: { authorization: "Bearer " + token }, body: fd })
+        fetch(api(API.upload), { method: "POST", headers: { authorization: "Bearer " + token }, body: fd })
           .then(function (res) { return res.json().then(function (b) { return { ok: res.ok, body: b }; }); })
           .then(function (r) {
             if (r.ok) { done++; li.textContent = file.name; li.className = "ok"; }

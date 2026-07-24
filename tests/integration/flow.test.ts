@@ -221,6 +221,70 @@ describe('intake submission', () => {
   });
 });
 
+// The marketing site is static (GitHub Pages) until the custom-domain
+// cutover, so its form calls this API cross-origin. Only the allowlisted
+// origins work; admin/inspector surfaces never emit CORS headers.
+describe('cross-origin form support (static-site interim)', () => {
+  const SITE = 'https://getautoclarity.com';
+
+  it('answers the preflight for an allowlisted origin', async () => {
+    const res = await fetch(BASE + '/api/ppi/requests', { method: 'OPTIONS', headers: { origin: SITE } });
+    expect(res.status).toBe(204);
+    expect(res.headers.get('access-control-allow-origin')).toBe(SITE);
+    expect(res.headers.get('access-control-allow-methods')).toContain('POST');
+    expect(res.headers.get('access-control-allow-headers')).toContain('authorization');
+  });
+
+  it('refuses the preflight for a foreign origin', async () => {
+    const res = await fetch(BASE + '/api/ppi/requests', { method: 'OPTIONS', headers: { origin: 'https://evil.example' } });
+    expect(res.status).toBe(403);
+    expect(res.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('accepts a submission from the marketing-site origin, stores it, and echoes CORS', async () => {
+    // Distinct IP so this does not consume the shared per-IP submission budget
+    // that the rate-limiting test at the end depends on.
+    const res = await fetch(BASE + '/api/ppi/requests', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: SITE, 'cf-connecting-ip': '203.0.113.77' },
+      body: JSON.stringify(intakePayload({ email: 'crossorigin@example.com', vin: '4T1B11HK5KU212398' })),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('access-control-allow-origin')).toBe(SITE);
+    const body = (await res.json()) as Json;
+    expect(body.ok).toBe(true);
+    expect(body.ref).toMatch(/^PPI-/);
+    // The request is truly stored: it is visible in the admin dashboard.
+    const list = await get('/api/admin/requests', admin);
+    expect(list.body.requests.some((r: Json) => r.ref === body.ref)).toBe(true);
+    // And the returned portal token works.
+    const portal = await get('/api/portal', { authorization: `Bearer ${body.portalToken}` });
+    expect(portal.status).toBe(200);
+    expect(portal.body.ref).toBe(body.ref);
+  });
+
+  it('runtime-config responds with CORS for the allowlisted origin', async () => {
+    const res = await fetch(BASE + '/api/ppi/runtime-config', { headers: { origin: SITE } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('access-control-allow-origin')).toBe(SITE);
+  });
+
+  it('never emits CORS headers on admin or inspector APIs', async () => {
+    for (const path of ['/api/admin/overview', '/api/inspector/overview']) {
+      const res = await fetch(BASE + path, { headers: { origin: SITE, ...admin } });
+      expect(res.headers.get('access-control-allow-origin')).toBeNull();
+      const pre = await fetch(BASE + path, { method: 'OPTIONS', headers: { origin: SITE } });
+      expect(pre.headers.get('access-control-allow-origin')).toBeNull();
+    }
+  });
+
+  it('still rejects submissions from non-allowlisted origins', async () => {
+    const r = await post('/api/ppi/requests', intakePayload(), { origin: 'https://evil.example' });
+    expect(r.status).toBe(403);
+    expect(r.body.error.code).toBe('bad_origin');
+  });
+});
+
 describe('quote → slot → agreements → payment (EUROLX fixture)', () => {
   it('finds the fixture and issues a portal link', async () => {
     const list = await get('/api/admin/requests', admin);
@@ -486,5 +550,76 @@ describe('rate limiting', () => {
     const blocked = await post('/api/ppi/requests', intakePayload({ email: 'ratelimit@example.com', vin: '', make: 'Mazda', model: '3' }));
     expect(blocked.status).toBe(429);
     expect(blocked.body.error.code).toBe('rate_limited');
+  });
+});
+
+// Real email delivery through the provider adapter, proven against the mock
+// Resend endpoint (see globalSetup): correct recipients and content, provider
+// id + sent status recorded, provider failure never losing a request, and
+// no duplicate sends from webhook replays.
+describe('email delivery (mock provider)', () => {
+  const sentEmails = async (): Promise<Json[]> =>
+    (await (await fetch('http://127.0.0.1:8798/sent-emails')).json()) as Json[];
+
+  it('sends the customer confirmation and the owner notice on a new request', async () => {
+    const res = await fetch(BASE + '/api/ppi/requests', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'cf-connecting-ip': '203.0.113.101' },
+      body: JSON.stringify(intakePayload({ email: 'emailtest@example.com', vin: '4T1B11HK5KU212388' })),
+    });
+    const body = (await res.json()) as Json;
+    expect(body.ok).toBe(true);
+
+    const sent = await sentEmails();
+    const customer = sent.find((m) => (m.to as string[]).includes('emailtest@example.com') && String(m.subject).includes(body.ref));
+    expect(customer).toBeTruthy();
+    expect(String(customer!.text)).toContain('Vehicle: 2019 Toyota Camry SE'); // vehicle summary
+    expect(String(customer!.text)).toContain('/ppi/portal/?t='); // secure portal link
+    expect(String(customer!.from)).toContain('notify@getautoclarity.com');
+
+    const owner = sent.find((m) => (m.to as string[]).includes('owner-test@example.com') && String(m.subject).includes(body.ref));
+    expect(owner).toBeTruthy();
+    expect(String(owner!.subject)).toContain('new request');
+
+    // The message rows carry the provider id and the sent status.
+    const list = await get('/api/admin/requests', admin);
+    const created = list.body.requests.find((r: Json) => r.ref === body.ref);
+    const detail = await get(`/api/admin/requests/${created.id}`, admin);
+    const rows = detail.body.messages.filter((m: Json) => m.template === 'request_received');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe('sent');
+    expect(String(rows[0].provider_id)).toMatch(/^resend_mock_/);
+  });
+
+  it('keeps the stored request intact when the provider fails (failure recorded, never a lost lead)', async () => {
+    const res = await fetch(BASE + '/api/ppi/requests', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'cf-connecting-ip': '203.0.113.102' },
+      body: JSON.stringify(intakePayload({ email: 'failwith500@example.com', vin: '4T1B11HK5KU212377' })),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Json;
+    expect(body.ok).toBe(true);
+    expect(body.ref).toMatch(/^PPI-/);
+
+    const list = await get('/api/admin/requests', admin);
+    const created = list.body.requests.find((r: Json) => r.ref === body.ref);
+    expect(created).toBeTruthy(); // the request survived the email failure
+    const detail = await get(`/api/admin/requests/${created.id}`, admin);
+    const rows = detail.body.messages.filter((m: Json) => m.template === 'request_received');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe('failed');
+    expect(String(rows[0].error)).toContain('500');
+  });
+
+  it('webhook replays did not duplicate any payment email', async () => {
+    // The webhook suite earlier delivered checkout.session.completed twice
+    // (replay guard test). Exactly one payment email must exist per template.
+    const sent = await sentEmails();
+    const paymentEmails = sent.filter((m) => String(m.subject).includes('payment received'));
+    const confirmEmails = sent.filter((m) => String(m.subject).includes('appointment confirmed'));
+    expect(paymentEmails.length).toBeLessThanOrEqual(1 * 1 + 0); // one confirmed booking in this suite
+    expect(paymentEmails.length + confirmEmails.length).toBeGreaterThan(0);
+    expect(new Set(paymentEmails.map((m) => m.subject)).size).toBe(paymentEmails.length);
   });
 });

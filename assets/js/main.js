@@ -78,6 +78,81 @@
     });
   }
 
+  /* ---------- Nav underline: mark the section currently in view ---------- */
+  var navAnchors = Array.prototype.slice.call(
+    document.querySelectorAll('.nav-links a[href^="#"], .nav-links a[href*="#"]')
+  ).filter(function (a) {
+    var hash = a.getAttribute("href").split("#")[1];
+    return hash && document.getElementById(hash);
+  });
+  if (navAnchors.length && "IntersectionObserver" in window) {
+    var currentByHash = {};
+    var spy = new IntersectionObserver(
+      function (entries) {
+        entries.forEach(function (entry) { currentByHash[entry.target.id] = entry.isIntersecting; });
+        var active = null;
+        navAnchors.forEach(function (a) {
+          var hash = a.getAttribute("href").split("#")[1];
+          if (!active && currentByHash[hash]) active = a;
+        });
+        navAnchors.forEach(function (a) { a.classList.toggle("is-current", a === active); });
+      },
+      { rootMargin: "-35% 0px -55% 0px" }
+    );
+    navAnchors.forEach(function (a) {
+      spy.observe(document.getElementById(a.getAttribute("href").split("#")[1]));
+    });
+  }
+
+  /* ---------- Gentle cursor-following glow (desktop only) ----------
+     Fine pointers + motion allowed + wide viewport. Fades out while any
+     form field has focus so nothing moves during form completion. */
+  if (
+    !reducedMotion.matches &&
+    window.matchMedia("(pointer: fine)").matches &&
+    window.matchMedia("(min-width: 941px)").matches
+  ) {
+    var glow = document.createElement("div");
+    glow.className = "cursor-glow";
+    glow.setAttribute("aria-hidden", "true");
+    document.body.appendChild(glow);
+
+    var gx = window.innerWidth / 2, gy = window.innerHeight / 3;
+    var tx = gx, ty = gy;
+    var glowRaf = null;
+    var formFocused = false;
+
+    function glowTick() {
+      gx += (tx - gx) * 0.09;
+      gy += (ty - gy) * 0.09;
+      glow.style.transform = "translate3d(" + gx.toFixed(1) + "px, " + gy.toFixed(1) + "px, 0)";
+      if (Math.abs(tx - gx) > 0.5 || Math.abs(ty - gy) > 0.5) {
+        glowRaf = requestAnimationFrame(glowTick);
+      } else {
+        glowRaf = null;
+      }
+    }
+    window.addEventListener(
+      "pointermove",
+      function (e) {
+        if (formFocused) return;
+        tx = e.clientX;
+        ty = e.clientY;
+        glow.classList.add("is-on");
+        if (!glowRaf) glowRaf = requestAnimationFrame(glowTick);
+      },
+      { passive: true }
+    );
+    document.addEventListener("focusin", function (e) {
+      if (e.target.matches && e.target.matches("input, select, textarea")) {
+        formFocused = true;
+        glow.classList.remove("is-on");
+      }
+    });
+    document.addEventListener("focusout", function () { formFocused = false; });
+    document.addEventListener("pointerleave", function () { glow.classList.remove("is-on"); });
+  }
+
   /* ---------- How-it-works stepper (accessible tabs) ---------- */
   var tabs = Array.prototype.slice.call(document.querySelectorAll(".demo-step"));
   var panels = Array.prototype.slice.call(document.querySelectorAll(".demo-screen"));

@@ -75,17 +75,19 @@ export function clientIp(request: Request): string {
   return request.headers.get('cf-connecting-ip') ?? '0.0.0.0';
 }
 
-/** Reject cross-origin mutations. Same-origin or configured base URL only. */
-export function originAllowed(request: Request, publicBaseUrl: string | undefined): boolean {
+/** Reject cross-origin mutations. Same-origin, the configured base URL, or an
+ *  explicitly allowlisted extra origin (public form endpoints only). */
+export function originAllowed(request: Request, publicBaseUrl: string | undefined, extraOrigins: string[] = []): boolean {
   const origin = request.headers.get('origin');
   if (!origin) return true; // non-browser clients (tests, curl) — auth still applies
   const requestOrigin = new URL(request.url).origin;
   if (origin === requestOrigin) return true;
-  if (publicBaseUrl) {
+  for (const candidate of [publicBaseUrl, ...extraOrigins]) {
+    if (!candidate) continue;
     try {
-      if (origin === new URL(publicBaseUrl).origin) return true;
+      if (origin === new URL(candidate).origin) return true;
     } catch {
-      /* invalid configured URL — fall through */
+      /* invalid configured URL — skip */
     }
   }
   return false;

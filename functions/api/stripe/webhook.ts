@@ -112,7 +112,18 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
               ref: req.ref,
               supportEmail: config.supportEmail,
               extra: { amount: formatCents(refundedCents) },
-            });
+            }, undefined, `refund_issued:${payment.id}`);
+            if (env.ADMIN_NOTIFY_EMAIL) {
+              await sendTemplate(env, db, payment.request_id, 'owner_notify', env.ADMIN_NOTIFY_EMAIL, {
+                ref: req.ref,
+                supportEmail: config.supportEmail,
+                extra: {
+                  kind: 'REFUND COMPLETED',
+                  detail: `${formatCents(refundedCents)} refunded — Stripe confirmed`,
+                  adminUrl: `${(env.PUBLIC_BASE_URL ?? '').replace(/\/$/, '')}/ppi/admin/`,
+                },
+              }, undefined, `owner_refund:${payment.id}`);
+            }
           }
         }
         break;
@@ -211,17 +222,19 @@ async function handlePaymentSucceeded(env: Env, sessionId: string, paymentIntent
     if (isStatus(requestRow.status) && requestRow.status === 'awaiting_payment') {
       await applyStatus(db, payment.request_id, 'awaiting_payment', 'confirmed', 'system:stripe-webhook', 'Payment succeeded — booking confirmed', payment.id);
     }
+    // Dedupe keys make these single-send even if a duplicate Stripe delivery
+    // ever slipped past the event-id replay guard.
     await sendTemplate(env, db, payment.request_id, 'payment_received', requestRow.email, {
       ref: requestRow.ref,
       supportEmail: config.supportEmail,
       extra: { amount: formatCents(payment.amount_cents) },
-    });
+    }, undefined, `payment_received:${payment.id}`);
     await sendTemplate(env, db, payment.request_id, 'appointment_confirmed', requestRow.email, {
       ref: requestRow.ref,
       portalUrl: `${(env.PUBLIC_BASE_URL ?? '').replace(/\/$/, '')}/ppi/portal/`,
       supportEmail: config.supportEmail,
       extra: { slot: slotStartsAt ? fmtSlot(slotStartsAt, config.scheduling.timezone) : '' },
-    });
+    }, undefined, `appointment_confirmed:${payment.id}`);
     if (env.ADMIN_NOTIFY_EMAIL) {
       await sendTemplate(env, db, payment.request_id, 'owner_notify', env.ADMIN_NOTIFY_EMAIL, {
         ref: requestRow.ref,
@@ -231,7 +244,7 @@ async function handlePaymentSucceeded(env: Env, sessionId: string, paymentIntent
           detail: `${formatCents(payment.amount_cents)} paid — ${slotStartsAt ? fmtSlot(slotStartsAt, config.scheduling.timezone) : ''}`,
           adminUrl: `${(env.PUBLIC_BASE_URL ?? '').replace(/\/$/, '')}/ppi/admin/`,
         },
-      });
+      }, undefined, `owner_booking_confirmed:${payment.id}`);
     }
   } else {
     // Paid but the held time was lost (expired hold taken by another request).

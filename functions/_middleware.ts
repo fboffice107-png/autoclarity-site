@@ -9,6 +9,7 @@
 
 import type { Env } from './lib/types.ts';
 import { requireAdmin } from './lib/auth.ts';
+import { corsHeaders, corsPreflight } from './lib/cors.ts';
 
 // Anything matching these is repo scaffolding, never website content. This
 // middleware runs before static-asset serving on both `wrangler pages dev`
@@ -34,6 +35,13 @@ function isBlockedPath(pathname: string): boolean {
   return BLOCKED_PREFIXES.some((p) => pathname.startsWith(p));
 }
 
+// Public form surfaces that the static marketing site may call cross-origin
+// (allowlisted origins only — see lib/cors.ts). Admin/inspector APIs are
+// deliberately NOT here and never receive CORS headers.
+function isPublicCorsPath(pathname: string): boolean {
+  return pathname.startsWith('/api/ppi/') || pathname === '/api/portal/upload';
+}
+
 export const onRequest: PagesFunction<Env>[] = [
   async (context) => {
     const url = new URL(context.request.url);
@@ -41,6 +49,16 @@ export const onRequest: PagesFunction<Env>[] = [
 
     if (isBlockedPath(url.pathname)) {
       return new Response('Not found', { status: 404, headers: { 'x-robots-tag': 'noindex, nofollow', 'content-type': 'text/plain' } });
+    }
+
+    // CORS preflight for the public form endpoints (no route handler exports
+    // onRequestOptions, so answer here before routing). Every other API path
+    // refuses OPTIONS outright — admin/inspector surfaces must never pick up
+    // permissive preflight headers from any lower layer (wrangler dev adds
+    // `access-control-allow-origin: *` to unhandled OPTIONS).
+    if (context.request.method === 'OPTIONS' && url.pathname.startsWith('/api/')) {
+      if (isPublicCorsPath(url.pathname)) return corsPreflight(context.request, context.env);
+      return new Response(null, { status: 405 });
     }
 
     // In production, the admin and inspector UIs are never served without
@@ -60,6 +78,9 @@ export const onRequest: PagesFunction<Env>[] = [
       headers.set('referrer-policy', 'no-referrer');
       headers.set('cache-control', 'no-store');
       headers.set('x-robots-tag', 'noindex, nofollow');
+      if (isPublicCorsPath(url.pathname)) {
+        for (const [k, v] of Object.entries(corsHeaders(context.request, context.env))) headers.set(k, v);
+      }
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
     }
     if (!isProduction) {

@@ -47,6 +47,23 @@ Afterwards: diagnostics reverted, `PAYMENTS_ENABLED=false` restored, redeployed 
 > still not the customer domain). The CLI has no preview-env flag; set
 > preview-env values in the dashboard if you use branch-alias previews.
 
+## 2026-07-23 (pre-launch infrastructure pass) — what changed on the hosted preview
+
+- **Cross-origin form support deployed and verified**: `/api/ppi/*` +
+  `/api/portal/upload` answer CORS preflights for `https://getautoclarity.com`
+  and `https://www.getautoclarity.com` only (`PUBLIC_FORM_ORIGINS` in
+  `wrangler.toml`; `functions/lib/cors.ts`). Verified live with curl: preflight
+  204 + correct headers from the allowed origin, 403 from a foreign origin, a
+  full cross-origin submission stored in D1 (`PPI-260724-TXVX`) and visible in
+  admin, and **no CORS headers ever on admin/inspector APIs** (OPTIONS → 405).
+- **`ADMIN_NOTIFY_EMAIL` secret set** (owner email) — owner notices now record
+  on the hosted preview (status `recorded` until the Resend key exists).
+- The full inspector publish cycle was re-verified against the hosted preview
+  (start → 104 items → autosave/conflict → publish gates → portal + PDF →
+  immutability 423 → amendment v2), see the session handoff.
+- Fixture data was re-seeded; test requests from this session remain in the
+  preview D1 (harmless; re-seeding cleans fixtures).
+
 ## Remaining owner actions
 
 ### 1. Enable R2 (for customer photo uploads) — dashboard, ~1 min

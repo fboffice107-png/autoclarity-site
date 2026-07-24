@@ -14,32 +14,80 @@ business/legal/insurance items are done — only the owner can confirm those.
 5. A **sole proprietor may use SSN/ITIN** if no EIN exists — an EIN is **not** an automatic technical requirement.
 6. Review the agreement drafts (`functions/lib/agreements.ts`) + `legal/PPI_PRIVACY_SUPPLEMENT.md` with a Nevada-licensed attorney; publish the approved privacy/terms/cancellation/refund docs.
 
-## B. Notifications — CURRENT STATUS: NOT DELIVERED (launch blocker)
+## B. Notifications — CODE COMPLETE + PROVEN; owner must connect the provider (launch blocker)
 
-No outbound email provider is configured, so `functions/lib/email.ts` **records**
-every owner/customer message to the `messages` table but does **not send** it
-(it returns early when `RESEND_API_KEY`/`EMAIL_FROM` are unset; owner notices
-are skipped when `ADMIN_NOTIFY_EMAIL` is unset). All templates + event hooks
-already exist and are wired into the flow — only the provider connection is missing.
+_Updated 2026-07-23._ The Resend adapter in `functions/lib/email.ts` is fully
+implemented and **proven end-to-end against a mock provider in the integration
+suite** (`tests/integration/flow.test.ts`, "email delivery"): correct
+recipients and content, provider message id + `sent` status recorded, a
+provider **failure never loses the stored request** (status `failed` +
+error recorded), dedupe keys and the `stripe_events` replay guard prevent
+duplicate emails, and every event in the owner/customer matrix now has a hook
+(this session added the missing owner notices for slot selection, unpaid
+cancellation and completed refund). `ADMIN_NOTIFY_EMAIL` is already set on the
+hosted preview; messages currently record with status `recorded` because no
+provider key exists — nothing is claimed to be delivered.
 
-**Minimal implementation plan (do not add a paid provider without owner approval):**
+**Remaining = owner actions only (~15 min + DNS propagation). Do these
+yourself — API keys must never transit chat:**
 
-1. Choose a transactional provider (the adapter is written for **Resend**; any could be swapped behind `sendEmail`).
-2. Verify the sending **domain** (SPF + DKIM DNS records) for `getautoclarity.com` so mail isn't spam-foldered.
-3. Set Cloudflare Pages **production** secrets (names only):
-   - `RESEND_API_KEY`
-   - `EMAIL_FROM` (e.g. `AutoClarity <notify@getautoclarity.com>`)
-   - `ADMIN_NOTIFY_EMAIL` = `fboffice107@gmail.com` (internal owner destination — **never shown publicly**)
-   - `SUPPORT_EMAIL` stays `support@getautoclarity.com` (public reply-to identity)
-4. Redeploy. Then run a **real hosted test**: submit a request → confirm the owner email arrives at `fboffice107@gmail.com`; confirm a customer email arrives at an owner-controlled test address; **replay a webhook and confirm no duplicate email** (idempotency: each message is one row; webhook replay is guarded by `stripe_events`).
-5. Notification records already store status / provider message id / attempt / error (no secrets). Verify delivery status flips to `sent`.
+1. Create a free **Resend** account at https://resend.com (100 emails/day free
+   — plenty; do not buy a plan).
+2. Resend dashboard → **Domains → Add Domain** → `getautoclarity.com`. Resend
+   shows 3–4 DNS records (SPF TXT, DKIM TXT/CNAME, optional DMARC). Add them
+   in **Cloudflare dashboard → getautoclarity.com → DNS** exactly as shown.
+   These are additive mail-authentication records — they do **not** move the
+   website — but they are DNS changes, so they are yours to make. Wait for
+   Resend to show **Verified** (minutes to an hour).
+3. Resend → **API Keys → Create** (sending access only) and set the secrets
+   yourself (values never in chat/files/git):
+   ```bash
+   cd "/Volumes/Super Storage/autoclarity-site"
+   npx wrangler pages secret put RESEND_API_KEY --project-name autoclarity-site
+   npx wrangler pages secret put EMAIL_FROM --project-name autoclarity-site
+   ```
+   `EMAIL_FROM` = `AutoClarity <notify@getautoclarity.com>`.
+   (`ADMIN_NOTIFY_EMAIL` = `fboffice107@gmail.com` is already set — internal
+   owner destination, never shown publicly. `SUPPORT_EMAIL` stays
+   `support@getautoclarity.com`, the public reply-to identity.)
+4. Redeploy: `npx wrangler pages deploy . --project-name autoclarity-site --branch main --commit-dirty=true`
+5. **Real hosted test (required before claiming delivery works):** submit a
+   request on `autoclarity-site.pages.dev` with an owner-controlled email →
+   confirm the customer email arrives there AND the owner notice arrives at
+   `fboffice107@gmail.com`; check the message rows flip to `sent` with a
+   provider id (admin → request → messages).
 
-Owner events covered by templates: new request, slot selected, agreement accepted,
-payment confirmed, cancellation, refund, payment failure/expired, manual-attention.
-Customer events: request received, quote/appointment options, time selected,
-agreement/payment required, payment confirmed, appointment confirmed, cancellation,
-refund, schedule change. Emails carry ref #, vehicle year/make/model, appointment
-date + Las Vegas time, and a safe portal link — no secret admin links, no unnecessary PII.
+Owner events covered: new request (+ manual-attention flag), slot selected,
+agreement accepted, payment confirmed, PAID-but-slot-lapsed, customer message,
+unpaid cancellation, paid cancellation request, refund completed, inspection
+started, report published, amended report published.
+Customer events: request received (with vehicle summary), needs-info, seller
+access, quote ready, slots offered, time selected/held, payment received,
+appointment confirmed (Las Vegas time), reschedule, cancellation, refund,
+report ready, report amended. All carry the ref #; portal links are the safe
+customer magic link — no secret admin links, no unnecessary PII.
+
+## B2. Live form fix — publish to GitHub Pages (owner-gated, one command)
+
+The live getautoclarity.com form still runs the old JavaScript that opens the
+customer's email app. The fix is complete and verified on this branch: the
+form now submits to the hosted Cloudflare API cross-origin (CORS-allowlisted
+for `getautoclarity.com` + `www`, already deployed and verified on the API
+side), shows the real reference number only after D1 storage succeeds, and
+fails honestly if the API is unreachable — the mailto path is deleted.
+
+Because getautoclarity.com serves from the `main` branch (GitHub Pages),
+making the live form use it requires publishing `main` — an owner decision:
+
+```bash
+cd "/Volumes/Super Storage/autoclarity-site"
+git checkout main && git merge feature/las-vegas-ppi-portal && git push origin main && git checkout feature/las-vegas-ppi-portal
+```
+
+This changes the live site (form behavior + the visual polish). Rollback:
+`git push -f origin pre-ppi-production:main`. Requests then flow into the
+hosted D1 + admin dashboard immediately, even before the custom-domain
+cutover; emails start when §B is done.
 
 ## C. Stripe live (owner-gated)
 
@@ -51,7 +99,7 @@ date + Las Vegas time, and a safe portal link — no secret admin links, no unne
 
 ## D. Infrastructure & security
 
-11. **Cloudflare Access** protecting **all four** private surfaces: `/ppi/admin*`, `/api/admin*`, `/inspector*`, `/api/inspector*` (Zero Trust → Access → self-hosted app, allow owner email; exact steps in `docs/PPI_INSPECTOR_GUIDE.md`). Copy the app AUD + team domain into production env `CF_ACCESS_AUD` + `CF_ACCESS_TEAM_DOMAIN`. With `PPI_ENV=production` the dev key is refused and admin/inspector fail closed without Access.
+11. **Cloudflare Access** protecting **all four** private surfaces: `/ppi/admin*`, `/api/admin*`, `/inspector*`, `/api/inspector*` — full owner walkthrough incl. **authentication test and rollback** in `docs/PPI_ACCESS_SETUP.md` (dashboard-only; the CLI token has no Zero Trust scope — verified 2026-07-23). The fail-closed matrix (dev key refused in production, 503 until Access configured, JWT audience/signature verification) is covered by `tests/unit/auth.test.ts`.
 12. Enable R2 (optional — inspection-report photos + stored PDFs, and customer intake uploads): follow `docs/PPI_R2_SETUP.md`. Reports work fully without it (PDFs render on demand).
 12b. **Report notifications**: `report_ready` / `report_amended` emails are recorded idempotently at publish time and start sending automatically once §B's provider is configured — verify one publish → one email on a controlled test after that.
 13. Production env vars: `PPI_ENV=production`, `PUBLIC_BASE_URL=https://getautoclarity.com`, `PPI_MODE=live` (only after B + C), `PAYMENTS_ENABLED=true` (only after C), `STRIPE_ENV=live`.

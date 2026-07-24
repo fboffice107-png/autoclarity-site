@@ -780,6 +780,7 @@
               normally receive a response the same day and no later than 24 hours.
             </p>
             <p class="success-ref">Reference: <strong id="successRef"></strong></p>
+            <p class="field-hint" id="successDuplicateNote" hidden>We already had an open request for this vehicle, so here is your existing reference — no duplicate was created.</p>
             <p><a class="btn btn-primary" id="successPortalLink" href="#">Open your secure status page</a></p>
             <div class="upload-block" id="uploadBlock">
               <h4>Optional: add photos now</h4>
@@ -787,18 +788,19 @@
               <input type="file" id="uploadInput" aria-label="Choose photos to upload" accept="image/jpeg,image/png,image/webp,image/heic" multiple />
               <ul class="upload-list" id="uploadList"></ul>
             </div>
-            <p class="field-hint">A confirmation email with your secure link is on its way. Questions: <a href="mailto:support@getautoclarity.com">support@getautoclarity.com</a></p>
+            <p class="field-hint">Save your reference number — your secure status page link above works any time. Questions: <a href="mailto:support@getautoclarity.com">support@getautoclarity.com</a></p>
           </div>
         </div>
 
-        <!-- Static fallback when the API isn't reachable (e.g. GitHub Pages) -->
-        <div class="form-shell reveal" id="fallbackShell" hidden>
-          <h3>Request an inspection by email</h3>
+        <!-- Honest failure help: shown ONLY after a submit could not reach the
+             API. Never claims the request was received. -->
+        <div class="form-shell" id="fallbackShell" hidden>
+          <h3>Having trouble submitting?</h3>
           <p>
-            Online requests aren’t available right now. Email
+            Your answers stay saved on this device — trying again in a minute usually works.
+            If you're in a hurry, you can also reach AutoClarity directly at
             <a href="mailto:support@getautoclarity.com?subject=Las%20Vegas%20inspection%20request">support@getautoclarity.com</a>
-            with the vehicle year/make/model, the VIN if you have it, where the vehicle is,
-            and how soon you need to decide — you’ll get a personal reply.
+            with the vehicle year/make/model, where it is, and how soon you need to decide.
           </p>
         </div>
       </div>

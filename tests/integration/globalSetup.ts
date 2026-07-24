@@ -21,15 +21,31 @@ export default async function setup() {
   // 2. migrations
   execSync('npx wrangler d1 migrations apply autoclarity_ppi --local', { stdio: 'pipe' });
 
-  // 3. mock Stripe
+  // 3. mock Stripe + mock Resend (same server)
   let sessionCounter = 0;
   let lastSessionParams: Record<string, string> = {};
+  let emailCounter = 0;
+  const sentEmails: Array<Record<string, unknown>> = [];
   mockStripe = http.createServer((req, res) => {
     let body = '';
     req.on('data', (chunk) => (body += chunk));
     req.on('end', () => {
       res.setHeader('content-type', 'application/json');
-      if (req.method === 'POST' && req.url === '/v1/checkout/sessions') {
+      if (req.method === 'POST' && req.url === '/emails') {
+        // Mock Resend: a recipient containing "failwith500" simulates a
+        // provider outage so tests can prove failure never breaks the flow.
+        const parsed = JSON.parse(body) as { to?: string[] };
+        if ((parsed.to ?? []).some((t) => String(t).includes('failwith500'))) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ message: 'mock provider outage' }));
+          return;
+        }
+        emailCounter++;
+        sentEmails.push({ ...parsed, id: `resend_mock_${emailCounter}` });
+        res.end(JSON.stringify({ id: `resend_mock_${emailCounter}` }));
+      } else if (req.method === 'GET' && req.url === '/sent-emails') {
+        res.end(JSON.stringify(sentEmails));
+      } else if (req.method === 'POST' && req.url === '/v1/checkout/sessions') {
         lastSessionParams = Object.fromEntries(new URLSearchParams(body));
         sessionCounter++;
         res.end(
@@ -60,11 +76,18 @@ export default async function setup() {
     BOOKING_ENABLED: 'true',
     UPLOADS_ENABLED: 'true',
     PUBLIC_BASE_URL: BASE,
+    PUBLIC_FORM_ORIGINS: 'https://getautoclarity.com,https://www.getautoclarity.com',
     ADMIN_DEV_KEY: ADMIN_KEY,
     TURNSTILE_SECRET_KEY: '1x0000000000000000000000000000000AA',
     STRIPE_SECRET_KEY: 'sk_test_integration_mock',
     STRIPE_WEBHOOK_SECRET: WEBHOOK_SECRET,
     STRIPE_API_BASE: 'http://127.0.0.1:8798/v1',
+    // Email delivery against the mock Resend above — proves the real send
+    // path (payload, provider id, sent/failed status, dedupe) without secrets.
+    RESEND_API_KEY: 're_test_integration_mock',
+    RESEND_API_BASE: 'http://127.0.0.1:8798',
+    EMAIL_FROM: 'AutoClarity <notify@getautoclarity.com>',
+    ADMIN_NOTIFY_EMAIL: 'owner-test@example.com',
   };
   const args = ['wrangler', 'pages', 'dev', '.', '--port', '8799'];
   for (const [k, v] of Object.entries(bindings)) args.push('--binding', `${k}=${v}`);

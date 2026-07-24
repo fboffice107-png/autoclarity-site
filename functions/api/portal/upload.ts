@@ -9,6 +9,7 @@ import { modeFlags } from '../../lib/types.ts';
 import { getConfig } from '../../lib/config.ts';
 import { requirePortal } from '../../lib/portal.ts';
 import { errorJson, json, newId, nowIso, clampStr, originAllowed } from '../../lib/util.ts';
+import { formOrigins } from '../../lib/cors.ts';
 
 const KIND_OPTIONS = ['listing', 'vin', 'dashboard', 'damage', 'other'] as const;
 
@@ -35,7 +36,7 @@ const EXT_BY_TYPE: Record<string, string> = {
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { request, env } = context;
-  if (!originAllowed(request, env.PUBLIC_BASE_URL)) {
+  if (!originAllowed(request, env.PUBLIC_BASE_URL, formOrigins(env))) {
     return errorJson('bad_origin', 'Cross-origin requests are not accepted.', 403);
   }
   const flags = modeFlags(env);

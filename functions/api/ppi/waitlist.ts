@@ -6,12 +6,13 @@ import { verifyTurnstile } from '../../lib/turnstile.ts';
 import { rateLimit } from '../../lib/ratelimit.ts';
 import { validEmail } from '../../lib/validate.ts';
 import { clampStr, clientIp, errorJson, json, newId, nowIso, originAllowed } from '../../lib/util.ts';
+import { formOrigins } from '../../lib/cors.ts';
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { request, env } = context;
   const flags = modeFlags(env);
 
-  if (!originAllowed(request, env.PUBLIC_BASE_URL)) {
+  if (!originAllowed(request, env.PUBLIC_BASE_URL, formOrigins(env))) {
     return errorJson('bad_origin', 'Cross-origin submissions are not accepted.', 403);
   }
   const ip = clientIp(request);

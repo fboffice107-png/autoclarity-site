@@ -140,6 +140,17 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           holdMinutes: String(config.scheduling.holdMinutes),
         },
       });
+      if (env.ADMIN_NOTIFY_EMAIL) {
+        await sendTemplate(env, db, requestId, 'owner_notify', env.ADMIN_NOTIFY_EMAIL, {
+          ref: req.ref,
+          supportEmail: config.supportEmail,
+          extra: {
+            kind: 'appointment selected',
+            detail: `Customer held ${slot ? fmtSlot(slot.starts_at, config.scheduling.timezone) : 'a window'} (agreement + payment pending)`,
+            adminUrl: `${(env.PUBLIC_BASE_URL ?? '').replace(/\/$/, '')}/ppi/admin/`,
+          },
+        }, undefined, `owner_slot_selected:${slotId}`);
+      }
       return json({ ok: true, holdExpiresAt: holdUntil });
     }
 
@@ -329,6 +340,17 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           supportEmail: config.supportEmail,
           extra: { note: 'No payment had been made, so there is nothing to refund.' },
         });
+        if (env.ADMIN_NOTIFY_EMAIL) {
+          await sendTemplate(env, db, requestId, 'owner_notify', env.ADMIN_NOTIFY_EMAIL, {
+            ref: req.ref,
+            supportEmail: config.supportEmail,
+            extra: {
+              kind: 'customer cancelled (unpaid)',
+              detail: reason || '(no reason given)',
+              adminUrl: `${(env.PUBLIC_BASE_URL ?? '').replace(/\/$/, '')}/ppi/admin/`,
+            },
+          }, req.email, `owner_cancelled:${requestId}`);
+        }
         return json({ ok: true, cancelled: true });
       }
 

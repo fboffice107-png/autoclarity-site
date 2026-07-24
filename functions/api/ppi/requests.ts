@@ -14,6 +14,7 @@ import { rateLimit } from '../../lib/ratelimit.ts';
 import { issueMagicLink, portalUrl } from '../../lib/magic.ts';
 import { sendTemplate } from '../../lib/email.ts';
 import { clientIp, errorJson, json, newId, newRef, nowIso, originAllowed, toCents } from '../../lib/util.ts';
+import { formOrigins } from '../../lib/cors.ts';
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { request, env } = context;
@@ -22,7 +23,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   if (flags.mode === 'waitlist') {
     return errorJson('waitlist_mode', 'Inspection requests are not open yet — join the launch list instead.', 409);
   }
-  if (!originAllowed(request, env.PUBLIC_BASE_URL)) {
+  if (!originAllowed(request, env.PUBLIC_BASE_URL, formOrigins(env))) {
     return errorJson('bad_origin', 'Cross-origin submissions are not accepted.', 403);
   }
 
@@ -224,6 +225,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     ref,
     portalUrl: link,
     supportEmail: config.supportEmail,
+    extra: { vehicle: [payload.year, payload.make, payload.model, payload.trim].filter(Boolean).join(' ') },
   });
   if (env.ADMIN_NOTIFY_EMAIL) {
     await sendTemplate(

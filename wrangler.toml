@@ -32,6 +32,10 @@ TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
 # production: https://getautoclarity.com). Unset → code falls back to the
 # request origin, which is correct for local `wrangler pages dev`.
 SUPPORT_EMAIL = "support@getautoclarity.com"
+# Origins allowed to call the PUBLIC form APIs cross-origin (the static
+# marketing site while it is still hosted on GitHub Pages). Remove after the
+# custom-domain cutover if desired — same-origin always works regardless.
+PUBLIC_FORM_ORIGINS = "https://getautoclarity.com,https://www.getautoclarity.com"
 
 [[d1_databases]]
 binding = "DB"

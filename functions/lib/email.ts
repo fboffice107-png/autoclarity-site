@@ -43,8 +43,13 @@ export async function sendEmail(
     return { id, status: 'recorded' }; // no provider configured — recorded only
   }
 
+  // Test-only endpoint override (mock provider in the integration suite);
+  // production always talks to the real Resend API.
+  const apiBase =
+    env.PPI_ENV !== 'production' && env.RESEND_API_BASE ? env.RESEND_API_BASE : 'https://api.resend.com';
+
   try {
-    const res = await fetch('https://api.resend.com/emails', {
+    const res = await fetch(`${apiBase}/emails`, {
       method: 'POST',
       headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -96,6 +101,7 @@ export const EMAIL_TEMPLATES = {
       'Your pre-purchase inspection request has been received.',
       '',
       `Reference: ${ctx.ref}`,
+      ctx.extra?.['vehicle'] ? `Vehicle: ${ctx.extra['vehicle']}` : '',
       '',
       'AutoClarity will review the vehicle, location and requested timing.',
       'You will normally receive a response the same day and no later than 24 hours.',

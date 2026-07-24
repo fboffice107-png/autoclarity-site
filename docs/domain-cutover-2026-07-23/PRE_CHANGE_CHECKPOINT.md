@@ -116,3 +116,27 @@ branch `main`, CNAME file and certificate are all left intact by this session.
 7. Content rollback (independent of DNS): `git push -f origin
    pre-ppi-production:main` restores the pre-PPI site (`15a121c`) — only if
    the owner explicitly wants the older content.
+
+---
+
+## 2026-07-24 — LIVE RE-SNAPSHOT immediately before the actual cutover
+
+Re-verified authoritatively (dig @cesar.ns.cloudflare.com) minutes before
+domain attachment. Identical to the table above: apex A ×4 → 185.199.108–111.153,
+www CNAME → fboffice107-png.github.io, MX ×3 (route1–3.mx.cloudflare.net,
+Cloudflare Email Routing) + SPF TXT present — **MX + SPF must survive the
+cutover untouched**. getautoclarity.com still `server: GitHub.com`.
+
+- Git: `3a8a70b` (production-mode flip), tree clean, pushed.
+- Rollback targets intact: `origin/main` = `a907ebf` (GitHub Pages build),
+  tag `pre-ppi-production` = `15a121c`. No history deleted.
+- Pages deployment `f42c4431` = commit `3a8a70b`, **PPI_ENV=production**
+  verified live on pages.dev: dev key → 503, admin/inspector HTML+API → 503
+  (fail closed, Access-only), seed → 403, public 200, noindex intact,
+  form preflight 204. Secrets present (names): ADMIN_DEV_KEY,
+  ADMIN_NOTIFY_EMAIL, CF_ACCESS_AUD, CF_ACCESS_TEAM_DOMAIN, PUBLIC_BASE_URL
+  (= https://getautoclarity.com), STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
+  TURNSTILE_SECRET_KEY. STRIPE_ENV=test, PAYMENTS_ENABLED=false.
+- Access app "AutoClarity Private Tools" created by the owner (four
+  destinations + owner-only policy, owner-attested); end-to-end verification
+  happens on the custom domain right after attachment.

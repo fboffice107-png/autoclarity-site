@@ -10,7 +10,7 @@
 import type { Env } from './lib/types.ts';
 import { requireAdmin } from './lib/auth.ts';
 import { corsHeaders, corsPreflight } from './lib/cors.ts';
-import { canonicalHostRedirect, isNonCanonicalProductionHost } from './lib/canonical.ts';
+import { canonicalHostRedirect, inspectionAliasRedirect, isNonCanonicalProductionHost } from './lib/canonical.ts';
 
 // Anything matching these is repo scaffolding, never website content. This
 // middleware runs before static-asset serving on both `wrangler pages dev`
@@ -50,6 +50,9 @@ export const onRequest: PagesFunction<Env>[] = [
 
     const hostRedirect = canonicalHostRedirect(url);
     if (hostRedirect) return hostRedirect;
+
+    const aliasRedirect = inspectionAliasRedirect(url);
+    if (aliasRedirect) return aliasRedirect;
 
     if (isBlockedPath(url.pathname)) {
       return new Response('Not found', { status: 404, headers: { 'x-robots-tag': 'noindex, nofollow', 'content-type': 'text/plain' } });

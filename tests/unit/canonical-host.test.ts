@@ -2,7 +2,7 @@
 // path + query intact, and only the canonical production host is indexable —
 // pages.dev (and any deployment alias) stays noindex even in production.
 import { describe, expect, it } from 'vitest';
-import { CANONICAL_HOST, canonicalHostRedirect, isNonCanonicalProductionHost } from '../../functions/lib/canonical.ts';
+import { CANONICAL_HOST, canonicalHostRedirect, inspectionAliasRedirect, isNonCanonicalProductionHost } from '../../functions/lib/canonical.ts';
 
 describe('canonicalHostRedirect', () => {
   it('301s www to the apex preserving path and query (incl. UTM + portal tokens)', () => {
@@ -52,5 +52,34 @@ describe('isNonCanonicalProductionHost', () => {
     expect(isNonCanonicalProductionHost('bd27679d.autoclarity-site.pages.dev')).toBe(true);
     expect(isNonCanonicalProductionHost('www.getautoclarity.com')).toBe(true);
     expect(isNonCanonicalProductionHost('localhost')).toBe(true);
+  });
+});
+
+describe('inspectionAliasRedirect', () => {
+  it('301s uppercase and mixed-case short aliases to the canonical inspection page', () => {
+    for (const p of ['/PPI', '/Ppi/', '/PRE-PURCHASE-INSPECTION', '/Pre-Purchase-Inspection/']) {
+      const res = inspectionAliasRedirect(new URL(`https://getautoclarity.com${p}`));
+      expect(res, p).not.toBeNull();
+      expect(res!.status).toBe(301);
+      expect(res!.headers.get('location')).toBe('https://getautoclarity.com/las-vegas-pre-purchase-inspection/');
+    }
+  });
+
+  it('preserves the query string', () => {
+    const res = inspectionAliasRedirect(new URL('https://getautoclarity.com/PPI?utm_source=flyer&x=1'));
+    expect(res!.headers.get('location')).toBe(
+      'https://getautoclarity.com/las-vegas-pre-purchase-inspection/?utm_source=flyer&x=1'
+    );
+  });
+
+  it('leaves lowercase forms to the static _redirects file', () => {
+    expect(inspectionAliasRedirect(new URL('https://getautoclarity.com/ppi'))).toBeNull();
+    expect(inspectionAliasRedirect(new URL('https://getautoclarity.com/pre-purchase-inspection/'))).toBeNull();
+  });
+
+  it('never touches the real /ppi/* routes in any casing', () => {
+    for (const p of ['/ppi/admin/', '/PPI/admin/', '/ppi/portal/?t=x', '/PPI/PORTAL/', '/api/ppi/requests']) {
+      expect(inspectionAliasRedirect(new URL(`https://getautoclarity.com${p}`)), p).toBeNull();
+    }
   });
 });

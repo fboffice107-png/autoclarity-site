@@ -25,3 +25,18 @@ export function canonicalHostRedirect(url: URL): Response | null {
 export function isNonCanonicalProductionHost(hostname: string): boolean {
   return hostname !== CANONICAL_HOST;
 }
+
+// "/PPI", "/Ppi/" etc. arrive from print and word-of-mouth. `_redirects` is
+// case-sensitive and already 301s the lowercase forms, so this only handles
+// non-lowercase spellings. EXACT path matches only — /ppi/portal and
+// /ppi/admin are real routes and must never be caught here.
+const INSPECTION_ALIASES = new Set(['/ppi', '/ppi/', '/pre-purchase-inspection', '/pre-purchase-inspection/']);
+
+export function inspectionAliasRedirect(url: URL): Response | null {
+  const lower = url.pathname.toLowerCase();
+  if (!INSPECTION_ALIASES.has(lower)) return null;
+  if (url.pathname === lower) return null; // lowercase → static _redirects handles it
+  const to = new URL(url.toString());
+  to.pathname = '/las-vegas-pre-purchase-inspection/';
+  return Response.redirect(to.toString(), 301);
+}

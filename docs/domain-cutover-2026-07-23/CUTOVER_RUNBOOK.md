@@ -3,6 +3,15 @@
 _Written 2026-07-23. Status: **CUTOVER NOT PERFORMED — stopped at the
 Cloudflare Access safety gate.** Everything else is ready and verified._
 
+> **Re-verified 2026-07-24 (follow-up session):** state unchanged and healthy.
+> `CF_ACCESS_AUD`/`CF_ACCESS_TEAM_DOMAIN` still absent from the Pages secret
+> list → the Access app has not been created, so the gate stays closed and no
+> DNS/domain change was made. Deployed pages.dev assets byte-match `f274c00`
+> (neon grid live), DNS still exactly matches `PRE_CHANGE_CHECKPOINT.md`
+> (four GitHub A records + www CNAME + MX×3 + SPF), pages.dev noindex holds,
+> 186 tests + tsc clean. The next action remains OWNER STEP 1 below — nothing
+> else is pending.
+
 ## Why the cutover stopped
 
 The session rule: the custom domain must not be attached until production

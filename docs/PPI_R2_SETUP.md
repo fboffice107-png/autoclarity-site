@@ -1,4 +1,10 @@
-# R2 photo/PDF storage — owner activation steps
+# R2 photo/PDF storage — ✅ ACTIVE IN PRODUCTION since 2026-07-25
+
+> Bucket `autoclarity-ppi-uploads` (private, WNAM), binding `UPLOADS`,
+> `UPLOADS_ENABLED=true`, public r2.dev access disabled. Live proof:
+> `docs/email-r2-turnstile-2026-07-24/PHASE23_LIVE_ACCEPTANCE.md`.
+> Steps below kept for rebuild reference.
+
 
 Report photos and stored PDFs are feature-flagged on Cloudflare R2. R2 is
 **not enabled on the account yet** (re-verified 2026-07-23: the API returns

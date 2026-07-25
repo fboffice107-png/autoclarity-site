@@ -16,10 +16,11 @@ making any production change._
 | **Public website** | **https://getautoclarity.com — LIVE on Cloudflare Pages since 2026-07-24** (`PPI_ENV=production`). www → 301 apex. pages.dev stays noindex (staging alias of the same deployment; dev key no longer works there — production mode). |
 | Private surfaces | `/ppi/admin*`, `/api/admin*`, `/inspector*`, `/api/inspector*` behind **Cloudflare Access** (app "AutoClarity Private Tools", owner-only policy, one-time PIN). Dev key refused in production. Staging = local `ppi-ui-test` server (preview bindings). |
 | D1 | `autoclarity_ppi` (`0ae44d57…af26`), migrations 0001+0002 applied |
-| R2 | Still not enabled on the account; feature-flagged off; honest `uploads_disabled`. Steps: `docs/PPI_R2_SETUP.md` |
-| Stripe | test/sandbox only; `STRIPE_ENV=test`, `PAYMENTS_ENABLED=false` |
+| R2 | **LIVE 2026-07-25**: private bucket `autoclarity-ppi-uploads` (WNAM), binding `UPLOADS`, `UPLOADS_ENABLED=true`, public r2.dev access disabled; real 2 MB phone-JPEG proven end-to-end on the live domain incl. cross-tenant denial. Evidence: `docs/email-r2-turnstile-2026-07-24/PHASE23_LIVE_ACCEPTANCE.md` |
+| Turnstile | **REAL keys LIVE 2026-07-25**: managed widget "AutoClarity Public Request Form" (getautoclarity.com + www), sitekey `0x4AAAAAAD9RlzUuK7woWT3B`; dummy/missing tokens 403; two real browser submissions passed non-interactively. Test keys only in local harness. |
+| Stripe | test/sandbox only; `STRIPE_ENV=test`, `PAYMENTS_ENABLED=false` — unchanged all session |
 | Email | **LIVE + PROVEN 2026-07-24**: Resend domain verified, `RESEND_API_KEY`/`EMAIL_FROM` secrets set by owner, redeploy `3c20211d`. Real submission `PPI-260725-G2JW` on the apex → both messages `sent` with Resend provider IDs in D1, duplicate resubmit sent nothing, and the **owner confirmed both inbox arrivals** (customer + owner notices). Evidence: `docs/email-r2-turnstile-2026-07-24/PHASE1_EMAIL_EVIDENCE.md` |
-| Turnstile | Still always-pass TEST keys (form works; bot protection reduced) — real keys = checklist §D14 |
+| Rules | **Never run `npm test` while a local dev server is running** — the integration harness rebuilds `.wrangler/state` and wedges the server (see WORKFLOW_QA_REVIEW.md) |
 | Tests | **190 pass** — 118 unit + 72 integration; `tsc` clean; 20 links OK; header checks pass |
 | Rollback | `docs/domain-cutover-2026-07-23/PRE_CHANGE_CHECKPOINT.md` (DNS restore) + tags `pre-ppi-production` → `15a121c`, GitHub Pages `main`=`a907ebf` intact |
 
@@ -147,9 +148,17 @@ field is focused**, reduced-motion + mobile static fallbacks. No overflow at
 3. ~~Live form fix~~ — **DONE**: superseded by the cutover; live intake
    verified again this session (`PPI-260725-G2JW`).
 4. **Business/legal + live Stripe** — owner + counsel (checklist §A/§C).
-   Stripe remains `test`, `PAYMENTS_ENABLED=false`.
-5. **R2** (photos) — in progress this session (Phase 2).
-6. **Production Turnstile keys** — planned this session (Phase 3).
+   Stripe remains `test`, `PAYMENTS_ENABLED=false`. **This is now the ONLY
+   remaining blocker class before live customers.**
+5. ~~R2~~ — **LIVE + PROVEN 2026-07-25** (see snapshot).
+6. ~~Production Turnstile~~ — **LIVE + PROVEN 2026-07-25** (see snapshot).
+7. **Owner PIN login spot-check** (outstanding since cutover): incognito →
+   getautoclarity.com/inspector/ → one-time PIN → open a report, add one
+   photo. ~3 min; the only production surface unreachable by automation.
+8. **Data hygiene (release review F4, pre-existing)**: production D1 still
+   holds 10 preview-era `PPI-FIXTURE-*` rows + a few labeled test requests
+   (incl. `PPI-260725-G2JW`/`-MQZ9` from this session's proofs). Access-gated,
+   never public; cancel/clean from the admin dashboard at leisure.
 
 ## Exact next commands (fresh session / owner)
 
@@ -157,7 +166,7 @@ field is focused**, reduced-motion + mobile static fallbacks. No overflow at
 cd "/Volumes/Super Storage/autoclarity-site"
 npx wrangler whoami
 git log --oneline -3
-npm test                                 # 114 unit + 72 integration
+npm test                                 # 118 unit + 72 integration — NEVER while a dev server runs
 npx wrangler pages deploy . --project-name autoclarity-site --branch main --commit-dirty=true
 ```
 

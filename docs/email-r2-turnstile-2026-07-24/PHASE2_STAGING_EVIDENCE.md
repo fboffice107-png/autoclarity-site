@@ -94,8 +94,11 @@ was needed: widget **"AutoClarity Public Request Form"** (mode: managed,
 domains getautoclarity.com + www) created via the API. Public sitekey
 `0x4AAAAAAD9RlzUuK7woWT3B` → `TURNSTILE_SITE_KEY` (wrangler.toml). The
 secret went API→stdin→`wrangler pages secret put TURNSTILE_SECRET_KEY`
-(never displayed; scratch file destroyed). Test always-pass keys remain ONLY
-in launch.json + the integration harness. **Site key + secret + R2 binding
+(never displayed; scratch file destroyed). Test always-pass keys are used by
+launch.json + the integration harness, and additionally appear as fail-safe
+fallback constants in production source (`runtime-config.ts` sitekey
+fallback, `turnstile.ts` test-secret constant) — release review F1/F2: with
+the real secret set, test-widget tokens fail verification (proven live, 403). **Site key + secret + R2 binding
 must ship in ONE deploy** (secrets bind at deployment), which is why the
 sitekey swap waits for the R2 deploy rather than deploying alone.
 

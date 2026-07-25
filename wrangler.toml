@@ -28,8 +28,11 @@ BOOKING_ENABLED = "true"
 UPLOADS_ENABLED = "true"
 # Public site key only — never the secret. Real production widget
 # "AutoClarity Public Request Form" (managed; getautoclarity.com + www),
-# created 2026-07-24. The always-pass TEST pair lives only in the local/test
-# harnesses (launch.json, integration globalSetup).
+# created 2026-07-24. The always-pass TEST pair is used by the local/test
+# harnesses (launch.json, integration globalSetup) and also appears as
+# fail-safe fallback constants in source (runtime-config.ts sitekey fallback,
+# turnstile.ts test-secret constant) — harmless: with the real secret set,
+# test-widget tokens fail server verification (proven live, 403).
 TURNSTILE_SITE_KEY = "0x4AAAAAAD9RlzUuK7woWT3B"
 # Absolute origin used to build magic links, success/cancel URLs and emails.
 # Set per-environment as a Pages secret/var (preview: the *.pages.dev URL;

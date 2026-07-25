@@ -108,10 +108,10 @@ cutover; emails start when §B is done.
 ## D. Infrastructure & security
 
 11. **Cloudflare Access** protecting **all four** private surfaces: `/ppi/admin*`, `/api/admin*`, `/inspector*`, `/api/inspector*` — full owner walkthrough incl. **authentication test and rollback** in `docs/PPI_ACCESS_SETUP.md` (dashboard-only; the CLI token has no Zero Trust scope — verified 2026-07-23). The fail-closed matrix (dev key refused in production, 503 until Access configured, JWT audience/signature verification) is covered by `tests/unit/auth.test.ts`.
-12. Enable R2 (optional — inspection-report photos + stored PDFs, and customer intake uploads): follow `docs/PPI_R2_SETUP.md`. Reports work fully without it (PDFs render on demand).
+12. ~~Enable R2~~ — **✅ DONE 2026-07-25**: private bucket `autoclarity-ppi-uploads` live with binding `UPLOADS`, real photo proven on the production domain (evidence: `docs/email-r2-turnstile-2026-07-24/PHASE23_LIVE_ACCEPTANCE.md`).
 12b. **Report notifications**: `report_ready` / `report_amended` emails are recorded idempotently at publish time and start sending automatically once §B's provider is configured — verify one publish → one email on a controlled test after that.
 13. Production env vars: `PPI_ENV=production`, `PUBLIC_BASE_URL=https://getautoclarity.com`, `PPI_MODE=live` (only after B + C), `PAYMENTS_ENABLED=true` (only after C), `STRIPE_ENV=live`.
-14. Turnstile: real site + secret keys (replace the always-pass test keys).
+14. ~~Turnstile~~ — **✅ DONE 2026-07-25**: managed widget live for getautoclarity.com + www; dummy tokens 403; real submissions pass (same evidence doc).
 
 ## E. SEO / launch switches (Phase 7 — PREPARE, do not activate on pages.dev)
 

@@ -1,9 +1,17 @@
 # AutoClarity Pre-Purchase Inspection Portal — Session Handoff
 
-_Last updated: 2026-07-24 (**LIVE: single-domain cutover completed**).
-Read this plus `docs/domain-cutover-2026-07-23/POST_CUTOVER_VERIFICATION.md`,
+_Last updated: 2026-07-25 (**site FROZEN after the final copy-only release**).
+Read this plus `docs/release-2026-07-25-future-tense-copy/RELEASE.md`,
+`docs/domain-cutover-2026-07-23/POST_CUTOVER_VERIFICATION.md`,
 `docs/PPI_PRODUCTION_LAUNCH_CHECKLIST.md`, `docs/PPI_ACCESS_SETUP.md` before
 making any production change._
+
+> **Deploying? Read this first.** Production is Pages **direct upload** — `git push`
+> does not deploy. Branch HEAD contains payment-hardening backend code and
+> `migrations/0003` that must **not** reach production until 0003 is intentionally
+> applied, so **never deploy HEAD blindly**. Releases are built in a temporary
+> detached worktree at the production base `3cfc7d9` with only copy-only files
+> overlaid — see `docs/release-2026-07-25-future-tense-copy/RELEASE.md`.
 
 ## Snapshot
 
@@ -15,13 +23,14 @@ making any production change._
 | Cloudflare Pages project | `autoclarity-site` |
 | **Public website** | **https://getautoclarity.com — LIVE on Cloudflare Pages since 2026-07-24** (`PPI_ENV=production`). www → 301 apex. pages.dev stays noindex (staging alias of the same deployment; dev key no longer works there — production mode). |
 | Private surfaces | `/ppi/admin*`, `/api/admin*`, `/inspector*`, `/api/inspector*` behind **Cloudflare Access** (app "AutoClarity Private Tools", owner-only policy, one-time PIN). Dev key refused in production. Staging = local `ppi-ui-test` server (preview bindings). |
-| D1 | `autoclarity_ppi` (`0ae44d57…af26`), migrations 0001+0002 applied |
+| **Current production deployment** | **`456542d7`** (2026-07-25, copy-only future-tense release, source base `3cfc7d9`). Previous: `213e8c96`. Rollback: `213e8c96`, then `ba2df6bd`. Git checkpoint tag `pre-future-tense-copy-2026-07-25` = `5ec6b4a`. |
+| D1 | `autoclarity_ppi` (`0ae44d57…af26`), migrations 0001+0002 applied — **`0003_checkout_attempt_guard.sql` deliberately NOT applied** (re-confirmed pending 2026-07-25 after the release) |
 | R2 | **LIVE 2026-07-25**: private bucket `autoclarity-ppi-uploads` (WNAM), binding `UPLOADS`, `UPLOADS_ENABLED=true`, public r2.dev access disabled; real 2 MB phone-JPEG proven end-to-end on the live domain incl. cross-tenant denial. Evidence: `docs/email-r2-turnstile-2026-07-24/PHASE23_LIVE_ACCEPTANCE.md` |
 | Turnstile | **REAL keys LIVE 2026-07-25**: managed widget "AutoClarity Public Request Form" (getautoclarity.com + www), sitekey `0x4AAAAAAD9RlzUuK7woWT3B`; dummy/missing tokens 403; two real browser submissions passed non-interactively. Test keys only in local harness. |
 | Stripe | test/sandbox only; `STRIPE_ENV=test`, `PAYMENTS_ENABLED=false` — unchanged all session |
 | Email | **LIVE + PROVEN 2026-07-24**: Resend domain verified, `RESEND_API_KEY`/`EMAIL_FROM` secrets set by owner, redeploy `3c20211d`. Real submission `PPI-260725-G2JW` on the apex → both messages `sent` with Resend provider IDs in D1, duplicate resubmit sent nothing, and the **owner confirmed both inbox arrivals** (customer + owner notices). Evidence: `docs/email-r2-turnstile-2026-07-24/PHASE1_EMAIL_EVIDENCE.md` |
 | Rules | **Never run `npm test` while a local dev server is running** — the integration harness rebuilds `.wrangler/state` and wedges the server (see WORKFLOW_QA_REVIEW.md) |
-| Tests | **190 pass** — 118 unit + 72 integration; `tsc` clean; 20 links OK; header checks pass |
+| Tests | **296 pass** — 157 unit + 139 integration; `tsc` clean; 20 links OK; header checks pass |
 | Rollback | `docs/domain-cutover-2026-07-23/PRE_CHANGE_CHECKPOINT.md` (DNS restore) + tags `pre-ppi-production` → `15a121c`, GitHub Pages `main`=`a907ebf` intact |
 
 ## THIS SESSION (2026-07-23, third pass — neon grid + cutover prep)

@@ -139,6 +139,12 @@ then in the dashboard roll back to `213e8c96-6f4d-4099-a144-82ec08b7dc2f`
 (the immediately previous production deployment), or `ba2df6bd-e25b-477c-b4dc-52ea39490d9b`
 (the pre-"Launching soon" state).
 
+> **Roll back by deployment ID and timestamp, never by the Source column.**
+> Because every release is built from the same base, `456542d7`, `213e8c96` and
+> `ba2df6bd` are all labelled source `3cfc7d9` in the deployment list. The
+> Source column cannot distinguish them; only the ID, the timestamp and the
+> served content can.
+
 Git:
 
 ```

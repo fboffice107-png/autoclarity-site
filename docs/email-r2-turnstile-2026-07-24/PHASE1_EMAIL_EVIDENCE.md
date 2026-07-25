@@ -42,13 +42,12 @@
 ## Delivery confirmation
 
 - [x] Resend accepted both messages (provider IDs above).
-- [ ] **PENDING — owner inbox confirmation.** Delivery is NOT claimed until
-  the owner confirms both arrivals: customer `request_received` at the
-  +ppitest alias (expected sender `AutoClarity <support@getautoclarity.com>`,
-  ref `PPI-260725-G2JW`, vehicle + portal link) and the private
-  `owner_notify` at the owner address; Resend dashboard → Logs should show
-  both message IDs as Delivered. Update this checkbox only after that
-  confirmation.
+- [x] **Owner confirmed in chat (2026-07-24): both emails RECEIVED in
+  Gmail.** Customer `request_received` at the +ppitest alias — sender
+  displayed `AutoClarity <support@getautoclarity.com>`, vehicle details,
+  ref `PPI-260725-G2JW` and secure portal link present. Private
+  `owner_notify` at the owner's main address with the admin link.
+  **Phase 1 real email delivery is PROVEN.**
 
 ## Rollback
 

@@ -14,7 +14,15 @@ business/legal/insurance items are done — only the owner can confirm those.
 5. A **sole proprietor may use SSN/ITIN** if no EIN exists — an EIN is **not** an automatic technical requirement.
 6. Review the agreement drafts (`functions/lib/agreements.ts`) + `legal/PPI_PRIVACY_SUPPLEMENT.md` with a Nevada-licensed attorney; publish the approved privacy/terms/cancellation/refund docs.
 
-## B. Notifications — CODE COMPLETE + PROVEN; owner must connect the provider (launch blocker)
+## B. Notifications — ✅ DONE 2026-07-24: real delivery PROVEN on production
+
+> Resend domain verified, owner-set `RESEND_API_KEY` + `EMAIL_FROM`
+> (`AutoClarity <support@getautoclarity.com>`), redeploy `3c20211d`. Live
+> apex submission `PPI-260725-G2JW`: customer + owner messages `sent` with
+> provider IDs in D1; owner confirmed both Gmail arrivals; duplicate
+> resubmit sent nothing. Evidence:
+> `docs/email-r2-turnstile-2026-07-24/PHASE1_EMAIL_EVIDENCE.md`.
+> Steps below kept for reference / rebuild.
 
 _Updated 2026-07-23._ The Resend adapter in `functions/lib/email.ts` is fully
 implemented and **proven end-to-end against a mock provider in the integration

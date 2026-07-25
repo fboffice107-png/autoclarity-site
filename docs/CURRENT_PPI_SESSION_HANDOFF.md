@@ -18,7 +18,7 @@ making any production change._
 | D1 | `autoclarity_ppi` (`0ae44d57…af26`), migrations 0001+0002 applied |
 | R2 | Still not enabled on the account; feature-flagged off; honest `uploads_disabled`. Steps: `docs/PPI_R2_SETUP.md` |
 | Stripe | test/sandbox only; `STRIPE_ENV=test`, `PAYMENTS_ENABLED=false` |
-| Email | Adapter complete + proven vs mock provider; live messages record honestly (`recorded`) until owner connects Resend — checklist §B. **No delivery claimed.** |
+| Email | **LIVE + PROVEN 2026-07-24**: Resend domain verified, `RESEND_API_KEY`/`EMAIL_FROM` secrets set by owner, redeploy `3c20211d`. Real submission `PPI-260725-G2JW` on the apex → both messages `sent` with Resend provider IDs in D1, duplicate resubmit sent nothing, and the **owner confirmed both inbox arrivals** (customer + owner notices). Evidence: `docs/email-r2-turnstile-2026-07-24/PHASE1_EMAIL_EVIDENCE.md` |
 | Turnstile | Still always-pass TEST keys (form works; bot protection reduced) — real keys = checklist §D14 |
 | Tests | **190 pass** — 118 unit + 72 integration; `tsc` clean; 20 links OK; header checks pass |
 | Rollback | `docs/domain-cutover-2026-07-23/PRE_CHANGE_CHECKPOINT.md` (DNS restore) + tags `pre-ppi-production` → `15a121c`, GitHub Pages `main`=`a907ebf` intact |
@@ -138,16 +138,18 @@ field is focused**, reduced-motion + mobile static fallbacks. No overflow at
 320–1440 (8 widths, asserted). 33 before/after screenshots + full report:
 `docs/visual-polish-2026-07-23/`. Legal pages (light theme) unaffected.
 
-## Known blockers before live customers (updated 2026-07-23 third pass)
+## Known blockers before live customers (updated 2026-07-24 completion session)
 
-1. **Cloudflare Access** — owner: `docs/PPI_ACCESS_SETUP.md` (~10 min).
-   **This is now the ONLY blocker for the custom-domain cutover** — runbook:
-   `docs/domain-cutover-2026-07-23/CUTOVER_RUNBOOK.md`.
-2. **Email provider connection** — owner: launch checklist §B (~15 min).
-3. **Live form fix on getautoclarity.com** — owner: publish `main` (§B2), or
-   skip straight to the cutover (which supersedes it — same code, same fix).
+1. ~~Cloudflare Access~~ — **DONE**: live on all four surfaces since the
+   2026-07-24 cutover (anon → 302 Access login, verified this session).
+2. ~~Email provider connection~~ — **DONE + PROVEN 2026-07-24** (see Email
+   row above / `docs/email-r2-turnstile-2026-07-24/PHASE1_EMAIL_EVIDENCE.md`).
+3. ~~Live form fix~~ — **DONE**: superseded by the cutover; live intake
+   verified again this session (`PPI-260725-G2JW`).
 4. **Business/legal + live Stripe** — owner + counsel (checklist §A/§C).
-5. **R2** (optional, photos) — owner dashboard enable (`docs/PPI_R2_SETUP.md`).
+   Stripe remains `test`, `PAYMENTS_ENABLED=false`.
+5. **R2** (photos) — in progress this session (Phase 2).
+6. **Production Turnstile keys** — planned this session (Phase 3).
 
 ## Exact next commands (fresh session / owner)
 

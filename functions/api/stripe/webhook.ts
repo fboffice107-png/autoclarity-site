@@ -3,7 +3,7 @@
 // Confirming a booking happens HERE, never on the browser success redirect.
 
 import type { Env } from '../../lib/types.ts';
-import { verifyStripeSignature, claimStripeEvent, markStripeEventProcessed } from '../../lib/stripe.ts';
+import { verifyStripeSignature, claimStripeEvent, markStripeEventProcessed, settledPaymentFilter } from '../../lib/stripe.ts';
 import { applyStatus, isStatus, type Status } from '../../lib/status.ts';
 import { getConfig } from '../../lib/config.ts';
 import { sendTemplate } from '../../lib/email.ts';
@@ -86,7 +86,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           .prepare(`SELECT id, request_id, amount_cents FROM payments WHERE stripe_payment_intent = ?`)
           .bind(paymentIntent)
           .first<{ id: string; request_id: string; amount_cents: number }>();
-        if (!payment) break;
+        if (!payment) {
+          console.error('stripe_refund_unmatched_intent', paymentIntent.slice(0, 40));
+          await alertOwner(env, null, 'UNKNOWN', 'REFUND FOR AN UNKNOWN PAYMENT', `Stripe reported a refund on ${paymentIntent}, which matches no payment row. Reconcile by hand.`, `owner_unmatched_refund:${paymentIntent}`);
+          break;
+        }
         await db
           .prepare(`UPDATE payments SET status = ?, refunded_cents = ?, updated_at = ? WHERE id = ?`)
           .bind(fully ? 'refunded' : 'partially_refunded', refundedCents, nowIso(), payment.id)
@@ -131,7 +135,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           .prepare(`SELECT id, request_id FROM payments WHERE stripe_payment_intent = ?`)
           .bind(paymentIntent)
           .first<{ id: string; request_id: string }>();
-        if (!payment) break;
+        if (!payment) {
+          console.error('stripe_dispute_unmatched_intent', paymentIntent.slice(0, 40));
+          await alertOwner(env, null, 'UNKNOWN', 'DISPUTE ON AN UNKNOWN PAYMENT', `Stripe opened a dispute on ${paymentIntent}, which matches no payment row. Respond in the Stripe dashboard.`, `owner_unmatched_dispute:${paymentIntent}`);
+          break;
+        }
         await db.prepare(`UPDATE payments SET status = 'disputed', updated_at = ? WHERE id = ?`).bind(nowIso(), payment.id).run();
         const req = await db.prepare(`SELECT status FROM ppi_requests WHERE id = ?`).bind(payment.request_id).first<{ status: string }>();
         if (req && isStatus(req.status) && (['completed', 'refunded', 'customer_cancelled', 'admin_cancelled'] as Status[]).includes(req.status)) {
@@ -154,6 +162,33 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 };
 
+/** One-line owner alert with a dedupe key, for states that need a human. */
+async function alertOwner(
+  env: Env,
+  requestId: string | null,
+  ref: string,
+  kind: string,
+  detail: string,
+  dedupeKey: string,
+): Promise<void> {
+  if (!env.ADMIN_NOTIFY_EMAIL) return;
+  const config = await getConfig(env.DB);
+  await sendTemplate(
+    env,
+    env.DB,
+    requestId,
+    'owner_notify',
+    env.ADMIN_NOTIFY_EMAIL,
+    {
+      ref,
+      supportEmail: config.supportEmail,
+      extra: { kind, detail, adminUrl: `${(env.PUBLIC_BASE_URL ?? '').replace(/\/$/, '')}/ppi/admin/` },
+    },
+    undefined,
+    dedupeKey,
+  );
+}
+
 /**
  * A checkout that expired or failed must not keep holding an appointment
  * window. Releases the held slot back to 'offered' and returns the request to
@@ -168,9 +203,10 @@ async function releaseAfterFailedCheckout(env: Env, sessionId: string, outcome: 
     .first<{ id: string; request_id: string; booking_id: string | null }>();
   if (!payment) return;
 
+  const settled = settledPaymentFilter();
   const paid = await db
-    .prepare(`SELECT id FROM payments WHERE request_id = ? AND status IN ('succeeded','refunded','partially_refunded','disputed') LIMIT 1`)
-    .bind(payment.request_id)
+    .prepare(`SELECT id FROM payments WHERE request_id = ? AND status IN (${settled.sql}) LIMIT 1`)
+    .bind(payment.request_id, ...settled.values)
     .first<{ id: string }>();
   if (paid) return; // the booking is already paid for — leave it alone
 
@@ -222,15 +258,30 @@ async function handlePaymentSucceeded(env: Env, sessionId: string, paymentIntent
   const now = nowIso();
   const config = await getConfig(db);
 
-  // Idempotent claim of the payment row itself.
+  // Money has moved. It gets recorded even if this end had written the attempt
+  // off locally — the one thing we must never do is acknowledge a real payment
+  // and drop it.
+  const before = await db
+    .prepare(`SELECT id, status FROM payments WHERE stripe_session_id = ?`)
+    .bind(sessionId)
+    .first<{ id: string; status: string }>();
+  if (!before) {
+    console.error('stripe_payment_unmatched_session', sessionId.slice(0, 40));
+    await alertOwner(env, null, 'UNKNOWN', 'PAYMENT WITH NO LOCAL RECORD — investigate', `Stripe reported a successful payment for session ${sessionId} that matches no payment row. Check Stripe and reconcile by hand.`, `owner_unmatched_payment:${sessionId}`);
+    return;
+  }
+
+  // Idempotent claim of the payment row itself. 'expired'/'failed' are included
+  // because those are OUR conclusions, and Stripe has just overruled them.
   const upd = await db
     .prepare(
       `UPDATE payments SET status = 'succeeded', stripe_payment_intent = ?, updated_at = ?
-       WHERE stripe_session_id = ? AND status IN ('created','pending')`,
+       WHERE stripe_session_id = ? AND status IN ('created','pending','expired','failed')`,
     )
     .bind(paymentIntent, now, sessionId)
     .run();
-  if ((upd.meta?.changes ?? 0) !== 1) return; // already handled or unknown session
+  if ((upd.meta?.changes ?? 0) !== 1) return; // already succeeded/refunded/disputed
+  const writtenOff = before.status === 'expired' || before.status === 'failed';
 
   const payment = await db
     .prepare(`SELECT id, request_id, quote_id, booking_id, amount_cents FROM payments WHERE stripe_session_id = ?`)
@@ -246,6 +297,32 @@ async function handlePaymentSucceeded(env: Env, sessionId: string, paymentIntent
     .first<{ status: string; ref: string; email: string }>();
   if (!requestRow) return;
 
+  // Loud, deduped alerts for the two states that mean money needs a human.
+  if (writtenOff) {
+    await alertOwner(
+      env,
+      payment.request_id,
+      requestRow.ref,
+      'PAYMENT ARRIVED ON A CLOSED ATTEMPT',
+      `${formatCents(payment.amount_cents)} succeeded on a checkout this system had marked ${before.status}. Confirm no second payment was taken.`,
+      `owner_late_payment:${payment.id}`,
+    );
+  }
+  const settled = await db
+    .prepare(`SELECT COUNT(*) AS n FROM payments WHERE request_id = ? AND status IN ('succeeded','partially_refunded')`)
+    .bind(payment.request_id)
+    .first<{ n: number }>();
+  if ((settled?.n ?? 0) > 1) {
+    await alertOwner(
+      env,
+      payment.request_id,
+      requestRow.ref,
+      'DUPLICATE PAYMENT — refund needed',
+      `This request now has ${settled?.n} settled payments. Refund the extra one from the admin dashboard.`,
+      `owner_duplicate_payment:${payment.id}`,
+    );
+  }
+
   const booking = await db
     .prepare(`SELECT id, slot_id FROM bookings WHERE id = ?`)
     .bind(payment.booking_id)
@@ -257,15 +334,33 @@ async function handlePaymentSucceeded(env: Env, sessionId: string, paymentIntent
   let slotStartsAt: string | null = null;
   if (booking?.slot_id) {
     let slotUpd: D1Result | null = null;
+    // Same overlap rule the portal enforces at selection time: the unique index
+    // only covers identical start times, and an inspection lasts hours.
+    const window = await db
+      .prepare(`SELECT starts_at, ends_at FROM appointment_slots WHERE id = ?`)
+      .bind(booking.slot_id)
+      .first<{ starts_at: string; ends_at: string }>();
+    const overlap = window
+      ? await db
+          .prepare(
+            `SELECT id FROM appointment_slots
+              WHERE id != ? AND request_id != ? AND status IN ('held','confirmed')
+                AND starts_at < ? AND ends_at > ? LIMIT 1`,
+          )
+          .bind(booking.slot_id, payment.request_id, window.ends_at, window.starts_at)
+          .first<{ id: string }>()
+      : null;
     try {
+      if (overlap) throw new Error('window overlaps another booking');
       slotUpd = await db
         .prepare(`UPDATE appointment_slots SET status = 'confirmed', hold_expires_at = NULL, updated_at = ? WHERE id = ? AND status IN ('held','offered')`)
         .bind(now, booking.slot_id)
         .run();
     } catch {
-      // The no-double-booking index refused: that start time now belongs to a
-      // different confirmed appointment. Treat it exactly like a lapsed hold —
-      // the payment stands, scheduling reopens, and the owner is alerted below.
+      // The window now belongs to someone else — either the overlap check above
+      // or the no-double-booking index refused it. Treat it exactly like a
+      // lapsed hold: the payment stands, scheduling reopens, the owner is
+      // alerted below, and nobody is double-booked.
       slotUpd = null;
     }
     slotConfirmed = (slotUpd?.meta?.changes ?? 0) === 1;
@@ -287,8 +382,24 @@ async function handlePaymentSucceeded(env: Env, sessionId: string, paymentIntent
       .prepare(`UPDATE appointment_slots SET status = 'released', updated_at = ? WHERE request_id = ? AND id != ? AND status IN ('offered','held')`)
       .bind(now, payment.request_id, booking.slot_id)
       .run();
-    if (isStatus(requestRow.status) && requestRow.status === 'awaiting_payment') {
-      await applyStatus(db, payment.request_id, 'awaiting_payment', 'confirmed', 'system:stripe-webhook', 'Payment succeeded — booking confirmed', payment.id);
+    // The status was read before the slot update; if it moved underneath us the
+    // compare-and-swap fails and the request would silently disagree with the
+    // confirmation emails we are about to send. Tell the owner instead.
+    const confirmedRequest =
+      requestRow.status === 'awaiting_payment' &&
+      (await applyStatus(db, payment.request_id, 'awaiting_payment', 'confirmed', 'system:stripe-webhook', 'Payment succeeded — booking confirmed', payment.id));
+    if (!confirmedRequest) {
+      const current = await db.prepare(`SELECT status FROM ppi_requests WHERE id = ?`).bind(payment.request_id).first<{ status: string }>();
+      if (current?.status !== 'confirmed') {
+        await alertOwner(
+          env,
+          payment.request_id,
+          requestRow.ref,
+          'PAID AND SCHEDULED BUT STATUS DID NOT MOVE',
+          `The window is confirmed and the customer was emailed, but the request is still "${current?.status ?? 'unknown'}". Set it to Confirmed by hand.`,
+          `owner_status_divergence:${payment.id}`,
+        );
+      }
     }
     // Dedupe keys make these single-send even if a duplicate Stripe delivery
     // ever slipped past the event-id replay guard.

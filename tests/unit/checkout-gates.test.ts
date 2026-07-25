@@ -122,9 +122,12 @@ describe('checkout gates — quote', () => {
     });
   });
 
-  it('honours the injected clock (a quote expiring in the future is fine)', () => {
-    const r = evaluateCheckoutGates(facts({ now: new Date(Date.now() + 1000) }));
-    expect(r.ok).toBe(true);
+  it('honours the injected clock rather than the wall clock', () => {
+    // Same quote, two clocks: one before the expiry, one after it.
+    const expiresAt = new Date(Date.now() + 3600_000).toISOString();
+    const quote = { id: QUOTE_ID, status: 'sent', expiresAt, totalCents: 24900 };
+    expect(evaluateCheckoutGates(facts({ quote, now: new Date(Date.now() + 60_000) }))).toEqual({ ok: true });
+    expect(evaluateCheckoutGates(facts({ quote, now: new Date(Date.now() + 7200_000) }))).toMatchObject({ code: 'quote_expired' });
   });
 
   it('refuses a zero, negative or non-integer total', () => {

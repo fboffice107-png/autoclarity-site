@@ -13,7 +13,14 @@ import { applyStatus, isStatus, type Status } from '../../lib/status.ts';
 import { quoteExpired, cancellationOutcome } from '../../lib/pricing.ts';
 import { latestAgreements } from '../../lib/agreements.ts';
 import { evaluateCheckoutGates } from '../../lib/checkout-gates.ts';
-import { createCheckoutSession, expireCheckoutSession, StripeConfigError } from '../../lib/stripe.ts';
+import {
+  createCheckoutSession,
+  expireCheckoutSession,
+  retrieveCheckoutSession,
+  sessionIsPayingOrPaid,
+  settledPaymentFilter,
+  StripeConfigError,
+} from '../../lib/stripe.ts';
 import { sendTemplate } from '../../lib/email.ts';
 import { clampStr, clientIp, errorJson, formatCents, json, newId, nowIso, originAllowed } from '../../lib/util.ts';
 import { rateLimit } from '../../lib/ratelimit.ts';
@@ -114,6 +121,32 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       } catch {
         // Partial unique index tripped: same start time already held/confirmed.
         return errorJson('slot_taken', 'That time was just taken. Please pick another window.', 409);
+      }
+
+      // The database index only guarantees one hold per exact start time. An
+      // inspection runs for hours, so reserve-then-verify covers overlap too:
+      // the hold above is already visible, so of two racing customers at least
+      // one sees the other and steps back.
+      const heldWindow = await db
+        .prepare(`SELECT starts_at, ends_at FROM appointment_slots WHERE id = ?`)
+        .bind(slotId)
+        .first<{ starts_at: string; ends_at: string }>();
+      if (heldWindow) {
+        const overlap = await db
+          .prepare(
+            `SELECT id FROM appointment_slots
+              WHERE id != ? AND request_id != ? AND status IN ('held','confirmed')
+                AND starts_at < ? AND ends_at > ? LIMIT 1`,
+          )
+          .bind(slotId, requestId, heldWindow.ends_at, heldWindow.starts_at)
+          .first<{ id: string }>();
+        if (overlap) {
+          await db
+            .prepare(`UPDATE appointment_slots SET status = 'offered', hold_expires_at = NULL, updated_at = ? WHERE id = ? AND request_id = ? AND status = 'held'`)
+            .bind(nowIso(), slotId, requestId)
+            .run();
+          return errorJson('slot_taken', 'That window overlaps an appointment that was just booked. Please pick another one.', 409);
+        }
       }
 
       // Advance the request state, checking each hop. If the compare-and-swap
@@ -225,9 +258,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         .all<{ agreement_version_id: string; quote_id: string | null }>();
       const acceptedRows = acceptances.results ?? [];
 
+      const settledFilter = settledPaymentFilter();
       const settled = await db
-        .prepare(`SELECT id FROM payments WHERE request_id = ? AND status IN ('succeeded','refunded','partially_refunded','disputed') LIMIT 1`)
-        .bind(requestId)
+        .prepare(`SELECT id FROM payments WHERE request_id = ? AND status IN (${settledFilter.sql}) LIMIT 1`)
+        .bind(requestId, ...settledFilter.values)
         .first<{ id: string }>();
 
       const gate = evaluateCheckoutGates({
@@ -325,9 +359,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         const sameTarget = open.quote_id === activeQuote.id && open.slot_id === heldSlot.id;
         const sessionLive =
           open.checkout_url && open.session_expires_at && new Date(open.session_expires_at).getTime() > Date.now() + 120_000;
-        // An attempt is only worth retrying while its deterministic 30-minute
-        // session window is still comfortably in the future; past that, Stripe
-        // would reject the replayed expires_at.
+        // An attempt is only worth retrying while Stripe would still accept its
+        // replayed expires_at (which must be at least 30 minutes ahead).
         const attemptFresh = Date.now() - new Date(open.created_at).getTime() < 25 * 60_000;
 
         if (sameTarget && sessionLive) {
@@ -337,12 +370,40 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           attemptId = open.id;
           attemptCreatedAt = open.created_at;
           retryingAttempt = true;
+        } else if (open.stripe_session_id) {
+          // Replacing an attempt that HAS a session is the one genuinely
+          // dangerous move: our local expiry estimate can lag a payment the
+          // customer already completed. Stripe decides, not the database.
+          const remote = await retrieveCheckoutSession(env, open.stripe_session_id);
+          if (!remote) {
+            return errorJson(
+              'checkout_unavailable',
+              'We could not reach the payment service to check your existing checkout. Nothing was charged — please try again in a moment.',
+              503,
+            );
+          }
+          if (sessionIsPayingOrPaid(remote)) {
+            return errorJson(
+              'payment_processing',
+              'Your payment is already going through. This page updates by itself as soon as it is confirmed — please do not pay again.',
+              409,
+            );
+          }
+          if (remote.status === 'open' && !(await expireCheckoutSession(env, open.stripe_session_id))) {
+            return errorJson(
+              'checkout_in_progress',
+              'Your previous checkout is still open. Finish it, or wait a moment and reload this page.',
+              409,
+            );
+          }
+          await db
+            .prepare(`UPDATE payments SET status = 'expired', updated_at = ? WHERE id = ? AND status IN ('created','pending')`)
+            .bind(now, open.id)
+            .run();
         } else {
-          // A known session is closed explicitly. An attempt too stale to retry
-          // may leave a session we never learned the id of; it expires on its
-          // own within minutes, because its expires_at was fixed to the
-          // attempt's creation time.
-          if (open.stripe_session_id) await expireCheckoutSession(env, open.stripe_session_id);
+          // No session was ever recorded and the attempt is too stale to replay.
+          // Any session Stripe did create expires on its own, because its
+          // expires_at was fixed to this attempt's creation time.
           await db
             .prepare(`UPDATE payments SET status = 'expired', updated_at = ? WHERE id = ? AND status IN ('created','pending')`)
             .bind(now, open.id)
@@ -398,8 +459,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         }
       }
 
-      // Extend the hold to cover the 30-minute Checkout window + webhook lag.
-      const extended = new Date(Date.now() + Math.max(config.scheduling.holdMinutes, 45) * 60_000).toISOString();
+      // 60 minutes from the ATTEMPT, not from now: Stripe requires at least 30
+      // minutes of runway, and a replay up to 25 minutes later must send this
+      // exact same value.
+      const attemptExpiresAtEpoch = Math.floor(new Date(attemptCreatedAt).getTime() / 1000) + 3600;
+
+      // Keep the hold alive past the Checkout window (60 min) + webhook lag, so
+      // a payment can never land on a window we already gave away.
+      const extended = new Date(Date.now() + Math.max(config.scheduling.holdMinutes, 70) * 60_000).toISOString();
       await db
         .prepare(`UPDATE appointment_slots SET hold_expires_at = ?, updated_at = ? WHERE id = ? AND status = 'held'`)
         .bind(extended, now, heldSlot.id)
@@ -416,13 +483,21 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           amountCents: activeQuote.total_cents,
           customerEmail: req.email,
           publicBaseUrl: env.PUBLIC_BASE_URL ?? new URL(request.url).origin,
-          expiresAtEpoch: Math.floor(new Date(attemptCreatedAt).getTime() / 1000) + 1800,
+          expiresAtEpoch: attemptExpiresAtEpoch,
         });
         await db
           .prepare(
             `UPDATE payments SET stripe_session_id = ?, checkout_url = ?, session_expires_at = ?, updated_at = ? WHERE id = ?`,
           )
-          .bind(session.id, session.url, new Date(session.expiresAt * 1000).toISOString(), nowIso(), attemptId)
+          .bind(
+            session.id,
+            session.url,
+            // Stripe echoes expires_at; fall back to what we asked for rather
+            // than throwing on a malformed value.
+            new Date((Number.isFinite(session.expiresAt) && session.expiresAt > 0 ? session.expiresAt : attemptExpiresAtEpoch) * 1000).toISOString(),
+            nowIso(),
+            attemptId,
+          )
           .run();
         return json({ ok: true, checkoutUrl: session.url });
       } catch (e) {
@@ -468,9 +543,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     // ----------------------------------------------------------------- cancel
     case 'cancel': {
       const reason = clampStr(body.reason, 500);
+      // Every settled state counts as paid here, not just 'succeeded': telling
+      // a customer whose payment was refunded or disputed that "no payment had
+      // been made" would be false, and auto-cancelling during a dispute
+      // destroys the record the owner needs.
+      const cancelFilter = settledPaymentFilter();
       const paid = await db
-        .prepare(`SELECT id FROM payments WHERE request_id = ? AND status = 'succeeded' LIMIT 1`)
-        .bind(requestId)
+        .prepare(`SELECT id FROM payments WHERE request_id = ? AND status IN (${cancelFilter.sql}) LIMIT 1`)
+        .bind(requestId, ...cancelFilter.values)
         .first<{ id: string }>();
 
       if (!paid) {

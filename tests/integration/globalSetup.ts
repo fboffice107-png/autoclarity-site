@@ -26,6 +26,10 @@ export default async function setup() {
   let lastSessionParams: Record<string, string> = {};
   const openSessions = new Set<string>();
   const expiredSessions: string[] = [];
+  // What "Stripe" currently thinks of each session, so the Worker's status
+  // lookup has something real to answer with.
+  const sessionState = new Map<string, { status: string; payment_status: string }>();
+  let failNextSessionLookup = false;
   // Stripe-style idempotency: a repeated Idempotency-Key replays the original
   // response instead of creating a second object.
   const idempotent = new Map<string, Record<string, unknown>>();
@@ -64,7 +68,8 @@ export default async function setup() {
         sessionCounter++;
         const id = `cs_mock_${sessionCounter}`;
         openSessions.add(id);
-        const session = { id, url: `http://127.0.0.1:8798/pay/${id}`, expires_at: Math.floor(Date.now() / 1000) + 1800 };
+        const session = { id, url: `http://127.0.0.1:8798/pay/${id}`, expires_at: Math.floor(Date.now() / 1000) + 3600 };
+        sessionState.set(id, { status: 'open', payment_status: 'unpaid' });
         if (idemKey) idempotent.set(idemKey, session);
         if (failNextSessionResponse) {
           // The session EXISTS at Stripe but the caller never learns its id —
@@ -78,6 +83,31 @@ export default async function setup() {
       } else if (req.method === 'POST' && req.url === '/control/fail-next-session-response') {
         failNextSessionResponse = true;
         res.end(JSON.stringify({ ok: true }));
+      } else if (req.method === 'POST' && req.url === '/control/fail-next-session-lookup') {
+        failNextSessionLookup = true;
+        res.end(JSON.stringify({ ok: true }));
+      } else if (req.method === 'POST' && /^\/control\/mark-session-paid\/[^/]+$/.test(req.url ?? '')) {
+        const id = (req.url ?? '').split('/')[3] ?? '';
+        sessionState.set(id, { status: 'complete', payment_status: 'paid' });
+        openSessions.delete(id);
+        res.end(JSON.stringify({ ok: true }));
+      } else if (req.method === 'GET' && /^\/v1\/checkout\/sessions\/[^/]+$/.test(req.url ?? '')) {
+        // Session status lookup — the Worker must ask Stripe before it decides
+        // an existing session is safe to discard.
+        if (failNextSessionLookup) {
+          failNextSessionLookup = false;
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: { message: 'mock: lookup unavailable' } }));
+          return;
+        }
+        const id = (req.url ?? '').split('/')[4] ?? '';
+        const state = sessionState.get(id);
+        if (!state) {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ error: { message: 'mock: no such session' } }));
+          return;
+        }
+        res.end(JSON.stringify({ id, ...state }));
       } else if (req.method === 'GET' && req.url === '/idempotency') {
         res.end(JSON.stringify({ keys: [...idempotent.keys()], hits: Object.fromEntries(idempotencyHits) }));
       } else if (req.method === 'POST' && /^\/v1\/checkout\/sessions\/[^/]+\/expire$/.test(req.url ?? '')) {
@@ -86,6 +116,7 @@ export default async function setup() {
         const id = (req.url ?? '').split('/')[4] ?? '';
         if (openSessions.delete(id)) {
           expiredSessions.push(id);
+          sessionState.set(id, { status: 'expired', payment_status: 'unpaid' });
           res.end(JSON.stringify({ id, status: 'expired' }));
         } else {
           res.statusCode = 400;

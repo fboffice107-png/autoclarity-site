@@ -18,6 +18,20 @@ function apiBase(env: Env): string {
 export class StripeConfigError extends Error {}
 
 /**
+ * Payment states that mean money has moved. Anything in this list must block a
+ * new charge, block an "unpaid" cancellation, and stop a slot release. One
+ * definition, used by the checkout gate, the portal cancel action and the
+ * webhook — the customer-facing copy in assets/js/ppi-portal.js mirrors it.
+ */
+export const SETTLED_PAYMENT_STATUSES = ['succeeded', 'refunded', 'partially_refunded', 'disputed'] as const;
+const SETTLED_PLACEHOLDERS = SETTLED_PAYMENT_STATUSES.map(() => '?').join(',');
+
+/** `SELECT ... WHERE status IN (?,?,?,?)` fragment plus its bind values. */
+export function settledPaymentFilter(): { sql: string; values: string[] } {
+  return { sql: SETTLED_PLACEHOLDERS, values: [...SETTLED_PAYMENT_STATUSES] };
+}
+
+/**
  * Returns the Stripe secret key after safety checks:
  * - payments must be enabled
  * - test env requires sk_test_; a live key is refused unless STRIPE_ENV=live
@@ -149,7 +163,7 @@ export async function createCheckoutSession(env: Env, input: CheckoutInput): Pro
       'payment_intent_data[metadata][booking_id]': input.bookingId,
       success_url: `${base}/ppi/portal/?checkout=success`,
       cancel_url: `${base}/ppi/portal/?checkout=cancelled`,
-      expires_at: String(input.expiresAtEpoch), // 30 min from the attempt, not from "now"
+      expires_at: String(input.expiresAtEpoch), // fixed to the attempt, never to "now"
     },
     idempotencyKey,
   );
@@ -162,9 +176,9 @@ export async function createCheckoutSession(env: Env, input: CheckoutInput): Pro
 
 /**
  * Closes an open Checkout Session so a request can never have two live
- * sessions (double-charge protection). Best-effort by design: a session that
- * Stripe has already completed or expired returns an error, which the caller
- * treats as "nothing left to close".
+ * sessions (double-charge protection). Returns false when Stripe refused —
+ * which includes the dangerous case of a session it has already completed, so
+ * callers must never treat false as "safe to replace".
  */
 export async function expireCheckoutSession(env: Env, sessionId: string): Promise<boolean> {
   try {
@@ -174,6 +188,39 @@ export async function expireCheckoutSession(env: Env, sessionId: string): Promis
   } catch {
     return false;
   }
+}
+
+export interface RemoteSession {
+  /** open | complete | expired */
+  status: string;
+  /** paid | unpaid | no_payment_required */
+  paymentStatus: string;
+}
+
+/**
+ * Asks Stripe what it currently thinks of a session. The local database is not
+ * allowed to decide that a session is dead — only Stripe knows whether money
+ * has moved. Returns null when Stripe could not be reached, which callers must
+ * treat as "unknown", never as "expired".
+ */
+export async function retrieveCheckoutSession(env: Env, sessionId: string): Promise<RemoteSession | null> {
+  try {
+    const key = stripeKey(env);
+    const res = await fetch(`${apiBase(env)}/checkout/sessions/${encodeURIComponent(sessionId)}`, {
+      headers: { authorization: `Bearer ${key}`, 'stripe-version': '2024-06-20' },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as Record<string, unknown>;
+    return { status: String(body['status'] ?? ''), paymentStatus: String(body['payment_status'] ?? '') };
+  } catch {
+    return null;
+  }
+}
+
+/** Money has moved (or is committed) on this session. */
+export function sessionIsPayingOrPaid(remote: RemoteSession): boolean {
+  return remote.status === 'complete' || remote.paymentStatus === 'paid' || remote.paymentStatus === 'no_payment_required';
 }
 
 /**

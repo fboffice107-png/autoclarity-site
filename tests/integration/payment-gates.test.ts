@@ -65,6 +65,14 @@ const stripeMock = {
   loseNextSessionResponse: async (): Promise<void> => {
     await fetch(`${MOCK_STRIPE}/control/fail-next-session-response`, { method: 'POST' });
   },
+  /** The customer completed payment on this session; Stripe now calls it paid. */
+  markSessionPaid: async (sessionId: string): Promise<void> => {
+    await fetch(`${MOCK_STRIPE}/control/mark-session-paid/${sessionId}`, { method: 'POST' });
+  },
+  /** The next session status lookup fails, as in a Stripe outage. */
+  loseNextSessionLookup: async (): Promise<void> => {
+    await fetch(`${MOCK_STRIPE}/control/fail-next-session-lookup`, { method: 'POST' });
+  },
 };
 
 // Each request comes from its own client IP so the 5/hour public submission
@@ -353,13 +361,28 @@ describe('checkout stays closed until every gate is satisfied', () => {
       type: 'checkout.session.completed',
       data: { object: { id: sessionId, payment_status: 'paid', payment_intent: 'pi_forged' } },
     });
-    for (const signature of ['t=1,v1=deadbeef', '']) {
+    // A CURRENT timestamp signed with the wrong secret: this reaches the HMAC
+    // comparison itself, rather than being thrown out on the time window.
+    const nowSec = Math.floor(Date.now() / 1000);
+    const wrongKey = await crypto.subtle.importKey('raw', new TextEncoder().encode('whsec_not_the_real_secret'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const wrongMac = await crypto.subtle.sign('HMAC', wrongKey, new TextEncoder().encode(`${nowSec}.${payload}`));
+    const wrongHex = [...new Uint8Array(wrongMac)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    // And a correctly-signed body that was then tampered with.
+    const tampered = payload.replace('pi_forged', 'pi_tampered');
+
+    const forgeries: Array<[string, string]> = [
+      [`t=${nowSec},v1=${wrongHex}`, payload], // right shape, wrong secret
+      [await signWebhook(payload), tampered], // right secret, altered body
+      ['t=1,v1=deadbeef', payload], // stale timestamp
+      ['', payload], // no signature at all
+    ];
+    for (const [signature, sent] of forgeries) {
       const res = await fetch(BASE + '/api/stripe/webhook', {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...(signature ? { 'stripe-signature': signature } : {}) },
-        body: payload,
+        body: sent,
       });
-      expect(res.status).toBe(400);
+      expect(res.status, signature.slice(0, 20)).toBe(400);
     }
     const after = await get(`/api/admin/requests/${c.id}`, admin);
     expect(after.body.request.status).toBe('awaiting_payment');
@@ -650,6 +673,39 @@ describe('two customers can never hold or confirm the same window', () => {
     expect(detailB.body.request.status).toBe('quote_sent');
   });
 
+  // The database index only covers identical start times. An inspection runs
+  // for hours, so overlap has to be refused too.
+  it('refuses a window that merely OVERLAPS one another customer holds', async () => {
+    const early = new Date(Date.now() + 130 * 24 * 3600_000);
+    early.setUTCHours(17, 0, 0, 0);
+    const late = new Date(early.getTime() + 60 * 60_000); // one hour into a two-hour job
+
+    const one = (await submitRequest('overlap-a')).customer;
+    const two = (await submitRequest('overlap-b')).customer;
+    await quoteAndSend(one);
+    await quoteAndSend(two);
+    // Both are offerable while neither is held.
+    await proposeSlots(one, [early.toISOString()]);
+    await proposeSlots(two, [late.toISOString()]);
+
+    const viewOne = await portalGet(one);
+    const slotOne = viewOne.body.slots.find((s: Json) => s.status === 'offered');
+    expect((await portalPost(one, { action: 'select_slot', slotId: slotOne.id })).status).toBe(200);
+
+    const viewTwo = await portalGet(two);
+    const slotTwo = viewTwo.body.slots.find((s: Json) => s.status === 'offered');
+    const clash = await portalPost(two, { action: 'select_slot', slotId: slotTwo.id });
+    expect(clash.status).toBe(409);
+    expect(clash.body.error.code).toBe('slot_taken');
+
+    // The refused hold is rolled back, not left dangling.
+    const detailTwo = await get(`/api/admin/requests/${two.id}`, admin);
+    expect(detailTwo.body.slots.find((s: Json) => s.id === slotTwo.id).status).toBe('offered');
+    expect(detailTwo.body.request.status).toBe('quote_sent');
+    const detailOne = await get(`/api/admin/requests/${one.id}`, admin);
+    expect(detailOne.body.slots.find((s: Json) => s.id === slotOne.id).status).toBe('held');
+  });
+
   it('never proposes a window that clashes with a confirmed appointment', async () => {
     const r = await adminAction(second, { action: 'propose_slots', slots: shared });
     expect(r.status).toBe(200);
@@ -714,6 +770,23 @@ describe('a payment that lands after its window is gone never confirms a lost sl
       (m) => String(m.subject).includes(c.ref) && String(m.subject).toLowerCase().includes('appointment confirmed'),
     );
     expect(confirmations).toEqual([]);
+  });
+
+  it('never tells a paid customer that no payment was made', async () => {
+    // The request is in a cancellable status while a settled payment exists —
+    // the exact combination where an "unpaid" cancellation would be a lie.
+    const r = await portalPost(c, { action: 'cancel', reason: 'Changed my mind' });
+    expect(r.status).toBe(200);
+    expect(r.body.cancelled).toBe(false);
+    expect(r.body.underReview).toBe(true);
+
+    const detail = await get(`/api/admin/requests/${c.id}`, admin);
+    expect(detail.body.request.status).not.toBe('customer_cancelled');
+    const emails = await stripeMock.emails();
+    const falseClaim = emails.filter(
+      (m) => String(m.subject).includes(c.ref) && /nothing to refund/i.test(String(m.text ?? '')),
+    );
+    expect(falseClaim).toEqual([]);
   });
 
   it('never charges the customer a second time when they re-book the lost window', async () => {
@@ -989,6 +1062,213 @@ describe('a paid session cannot confirm on top of another customer window', () =
     expect(r.status).toBe(409);
     expect(r.body.error.code).toBe('already_paid');
     expect((await stripeMock.sessions()).created).toBe(before.created);
+  });
+});
+
+// The database's opinion about whether a session is still live is an estimate.
+// Stripe's is the fact. Replacing a session it has already taken money for is
+// the one move that produces a double charge, so it must be impossible.
+describe('a session Stripe has already been paid is never replaced', () => {
+  let c: Customer;
+  let firstSession = '';
+  let firstSlot = '';
+  let secondSlot = '';
+
+  it('opens a checkout on the first window', async () => {
+    c = (await submitRequest('paid-session')).customer;
+    await quoteAndSend(c);
+    await proposeSlots(c, slotTimes(110));
+    const view = await portalGet(c);
+    const offered = view.body.slots.filter((s: Json) => s.status === 'offered');
+    firstSlot = offered[0].id;
+    secondSlot = offered[1].id;
+    expect((await portalPost(c, { action: 'select_slot', slotId: firstSlot })).status).toBe(200);
+    await acceptAllAgreements(c);
+    expect((await portalPost(c, { action: 'checkout' })).status).toBe(200);
+    firstSession = (await get(`/api/admin/requests/${c.id}`, admin)).body.payments[0].stripe_session_id;
+  });
+
+  it('refuses to mint a replacement while that session is being paid', async () => {
+    // The customer pays, then — before the webhook lands — changes their mind
+    // about the time. The attempt no longer matches the held window, which is
+    // exactly the path that used to discard a live, paid session.
+    await stripeMock.markSessionPaid(firstSession);
+    expect((await adminAction(c, { action: 'set_status', to: 'awaiting_time_selection', reason: 'Customer asked to move' })).status).toBe(200);
+    expect((await portalPost(c, { action: 'select_slot', slotId: secondSlot })).status).toBe(200);
+    await acceptAllAgreements(c);
+
+    const before = await stripeMock.sessions();
+    const r = await portalPost(c, { action: 'checkout' });
+    expect(r.status).toBe(409);
+    expect(r.body.error.code).toBe('payment_processing');
+    expect((await stripeMock.sessions()).created).toBe(before.created); // no second session
+
+    const detail = await get(`/api/admin/requests/${c.id}`, admin);
+    expect(detail.body.payments).toHaveLength(1);
+    expect(detail.body.payments[0].status).toBe('created'); // not written off
+  });
+
+  it('confirms the window that payment was actually for, and releases the rest', async () => {
+    const wh = await sendWebhook({
+      id: 'evt_gate_paidsession_1',
+      type: 'checkout.session.completed',
+      data: { object: { id: firstSession, payment_status: 'paid', payment_intent: 'pi_gate_paidsession' } },
+    });
+    expect(wh.status).toBe(200);
+
+    const detail = await get(`/api/admin/requests/${c.id}`, admin);
+    expect(detail.body.payments.filter((p: Json) => p.status === 'succeeded')).toHaveLength(1);
+    expect(detail.body.request.status).toBe('confirmed');
+    // The booking the session was created for wins — the later re-selection was
+    // never paid for, and the confirmation email names the confirmed time.
+    expect(detail.body.slots.find((s: Json) => s.id === firstSlot).status).toBe('confirmed');
+    expect(detail.body.slots.filter((s: Json) => s.status === 'confirmed')).toHaveLength(1);
+    expect(detail.body.slots.find((s: Json) => s.id === secondSlot).status).toBe('released');
+
+    const emails = await stripeMock.emails();
+    const confirmation = emails.find(
+      (m) => String(m.subject).includes(c.ref) && String(m.subject).toLowerCase().includes('appointment confirmed'),
+    );
+    expect(confirmation).toBeTruthy();
+  });
+
+  it('fails closed when Stripe cannot be reached to check', async () => {
+    const other = (await submitRequest('lookup-outage')).customer;
+    await quoteAndSend(other);
+    await proposeSlots(other, slotTimes(116));
+    const view = await portalGet(other);
+    const offered = view.body.slots.filter((s: Json) => s.status === 'offered');
+    expect((await portalPost(other, { action: 'select_slot', slotId: offered[0].id })).status).toBe(200);
+    await acceptAllAgreements(other);
+    expect((await portalPost(other, { action: 'checkout' })).status).toBe(200);
+
+    // Move to the other window so the open attempt no longer matches…
+    expect((await adminAction(other, { action: 'set_status', to: 'awaiting_time_selection' })).status).toBe(200);
+    expect((await portalPost(other, { action: 'select_slot', slotId: offered[1].id })).status).toBe(200);
+    await acceptAllAgreements(other);
+
+    // …and make the status lookup fail.
+    await stripeMock.loseNextSessionLookup();
+    const before = await stripeMock.sessions();
+    const r = await portalPost(other, { action: 'checkout' });
+    expect(r.status).toBe(503);
+    expect(r.body.error.code).toBe('checkout_unavailable');
+    expect((await stripeMock.sessions()).created).toBe(before.created);
+
+    // With Stripe reachable again the stale session is expired and replaced.
+    const retry = await portalPost(other, { action: 'checkout' });
+    expect(retry.status).toBe(200);
+    const expired = await stripeMock.expired();
+    const detail = await get(`/api/admin/requests/${other.id}`, admin);
+    expect(detail.body.payments.filter((p: Json) => p.status === 'expired')).toHaveLength(1);
+    expect(expired).toContain(detail.body.payments.find((p: Json) => p.status === 'expired').stripe_session_id);
+  });
+});
+
+// A payment landing on an attempt this system had written off must still be
+// recorded, and must be loud about it.
+describe('a payment on a closed attempt is recovered, never discarded', () => {
+  let c: Customer;
+  let abandoned = '';
+  let live = '';
+
+  it('leaves one attempt expired and opens another', async () => {
+    c = (await submitRequest('late-recovery')).customer;
+    await quoteAndSend(c);
+    await proposeSlots(c, slotTimes(122));
+    const view = await portalGet(c);
+    const offered = view.body.slots.filter((s: Json) => s.status === 'offered');
+    expect((await portalPost(c, { action: 'select_slot', slotId: offered[0].id })).status).toBe(200);
+    await acceptAllAgreements(c);
+    expect((await portalPost(c, { action: 'checkout' })).status).toBe(200);
+    abandoned = (await get(`/api/admin/requests/${c.id}`, admin)).body.payments[0].stripe_session_id;
+
+    expect((await adminAction(c, { action: 'set_status', to: 'awaiting_time_selection' })).status).toBe(200);
+    expect((await portalPost(c, { action: 'select_slot', slotId: offered[1].id })).status).toBe(200);
+    await acceptAllAgreements(c);
+    expect((await portalPost(c, { action: 'checkout' })).status).toBe(200);
+
+    const detail = await get(`/api/admin/requests/${c.id}`, admin);
+    expect(detail.body.payments.find((p: Json) => p.stripe_session_id === abandoned).status).toBe('expired');
+    live = detail.body.payments.find((p: Json) => p.status === 'created').stripe_session_id;
+    expect(live).not.toBe(abandoned);
+  });
+
+  it('records a payment that lands on the expired attempt and alerts the owner', async () => {
+    const wh = await sendWebhook({
+      id: 'evt_gate_recovery_1',
+      type: 'checkout.session.completed',
+      data: { object: { id: abandoned, payment_status: 'paid', payment_intent: 'pi_gate_recovery' } },
+    });
+    expect(wh.status).toBe(200);
+
+    const detail = await get(`/api/admin/requests/${c.id}`, admin);
+    const recovered = detail.body.payments.find((p: Json) => p.stripe_session_id === abandoned);
+    expect(recovered.status).toBe('succeeded'); // never silently dropped
+
+    const emails = await stripeMock.emails();
+    expect(
+      emails.filter((m) => String(m.subject).includes(c.ref) && /CLOSED ATTEMPT/i.test(String(m.subject))),
+    ).toHaveLength(1);
+  });
+
+  it('flags a genuine duplicate payment for refund instead of hiding it', async () => {
+    const wh = await sendWebhook({
+      id: 'evt_gate_recovery_2',
+      type: 'checkout.session.completed',
+      data: { object: { id: live, payment_status: 'paid', payment_intent: 'pi_gate_recovery_2' } },
+    });
+    expect(wh.status).toBe(200);
+
+    const detail = await get(`/api/admin/requests/${c.id}`, admin);
+    expect(detail.body.payments.filter((p: Json) => p.status === 'succeeded')).toHaveLength(2);
+    const emails = await stripeMock.emails();
+    expect(
+      emails.filter((m) => String(m.subject).includes(c.ref) && /DUPLICATE PAYMENT/i.test(String(m.subject))),
+    ).toHaveLength(1);
+  });
+
+  it('alerts on a payment for a session with no local record at all', async () => {
+    const wh = await sendWebhook({
+      id: 'evt_gate_orphan_1',
+      type: 'checkout.session.completed',
+      data: { object: { id: 'cs_never_seen_here', payment_status: 'paid', payment_intent: 'pi_orphan' } },
+    });
+    expect(wh.status).toBe(200);
+    const emails = await stripeMock.emails();
+    expect(emails.filter((m) => /NO LOCAL RECORD/i.test(String(m.subject)))).toHaveLength(1);
+  });
+});
+
+describe('a quote that totals nothing can never reach Stripe', () => {
+  it('refuses checkout on a fully discounted quote', async () => {
+    const c = (await submitRequest('zero-total')).customer;
+    const created = await adminAction(c, {
+      action: 'create_quote',
+      tier: 'standard',
+      discountCents: 19900, // cancels the standard base price exactly
+      discountLabel: 'Goodwill',
+    });
+    expect(created.status).toBe(200);
+    if (created.body.totalCents !== 0) {
+      // The quote builder refused to produce a zero total — the gate is then
+      // unreachable from here, which is an equally good outcome.
+      expect(created.body.totalCents).toBeGreaterThan(0);
+      return;
+    }
+    expect((await adminAction(c, { action: 'send_quote', quoteId: created.body.quoteId })).status).toBe(200);
+    await proposeSlots(c, slotTimes(140));
+    const view = await portalGet(c);
+    const slot = view.body.slots.find((s: Json) => s.status === 'offered');
+    expect((await portalPost(c, { action: 'select_slot', slotId: slot.id })).status).toBe(200);
+    await acceptAllAgreements(c);
+
+    const before = await stripeMock.sessions();
+    const r = await portalPost(c, { action: 'checkout' });
+    expect(r.status).toBe(409);
+    expect(r.body.error.code).toBe('invalid_amount');
+    expect((await stripeMock.sessions()).created).toBe(before.created);
+    expect((await get(`/api/admin/requests/${c.id}`, admin)).body.payments).toEqual([]);
   });
 });
 

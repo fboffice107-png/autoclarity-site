@@ -46,7 +46,10 @@ facts read from the database. In order:
    `accepted = 1` acceptance. This is a set comparison, not a count, so a newly
    published document version cannot be satisfied by older acceptances.
 6. **Quote stability** — those acceptances must be bound to the quote being
-   charged, so a customer is never charged an amount they did not accept.
+   charged, so a customer is never charged an amount they did not accept. This
+   gate is defence in depth: the admin API refuses to re-quote a request that is
+   mid-payment, so today it is unreachable over HTTP and is covered by unit
+   tests rather than an end-to-end one.
 
 Only then is `PAYMENTS_ENABLED` consulted. With payments off (the production
 setting today) the portal returns an honest "payment is switched off" message
@@ -63,7 +66,7 @@ A refused checkout puts the request back where the customer can act:
 
 ## One live Checkout Session per request
 
-Three independent layers, because any one of them can fail:
+Three controls, only the last of which is fully independent of the others:
 
 1. **A server-side Stripe idempotency key.** `checkoutIdempotencyKey()` hashes
    the request id, the quote being charged, the window it reserves and the
@@ -71,22 +74,37 @@ Three independent layers, because any one of them can fail:
    repeated key, so a retry after a timeout or a dropped response recovers the
    session Stripe already created instead of making a second payable one. Every
    field of the session request is therefore a pure function of the attempt —
-   including `expires_at`, which is derived from the attempt's own `created_at`,
-   never from the clock (Stripe rejects a repeated key whose body differs).
+   including `expires_at`, which is fixed at the attempt's `created_at` plus 60
+   minutes, never derived from the clock (Stripe rejects a repeated key whose
+   body differs, and requires at least 30 minutes of runway, so a replay up to
+   the 25-minute retry cutoff still validates).
 2. **Attempt reuse.** An open attempt for the same quote and window is retried
-   as *itself*: the same row, so the same key. An attempt is only retried while
-   its deterministic 30-minute session window is still ahead (25-minute cutoff);
-   after that it is expired at Stripe and replaced. If the quote or window
-   changed, the previous session is expired before a replacement is created.
-   A failed Stripe call therefore does **not** mark the attempt failed — only a
-   `StripeConfigError`, which proves no request ever left the Worker, does.
-3. **A database invariant.** The payment attempt row is written *before* Stripe
-   is called, so a session can never exist without a row for its webhook to
-   match, and the partial unique index `idx_payments_one_open_attempt`
-   (migration 0003) caps a request at one open attempt.
+   as *itself*, so it replays the same key. This is not independent of (1) — the
+   key is derived from the attempt row — but it is what makes the key reachable
+   on a retry. A failed Stripe call therefore does **not** mark the attempt
+   failed; only a `StripeConfigError`, which proves no request left the Worker,
+   does.
+3. **A database invariant.** The attempt row is written *before* Stripe is
+   called, so a session can never exist without a row for its webhook to match,
+   and the partial unique index `idx_payments_one_open_attempt` (migration 0003)
+   caps a request at one open attempt. This one holds even if the other two are
+   wrong.
 
-UI debouncing is not part of this list; the button state is a convenience, not a
+UI debouncing is not on this list; the button state is a convenience, not a
 control.
+
+### Replacing an existing session
+
+Discarding a session locally is the one move that can produce a double charge,
+because our expiry estimate can lag a payment the customer has already made. So
+before any replacement, the portal **asks Stripe** what the session is:
+
+- paid or complete → `409 payment_processing`, nothing is replaced, and the
+  customer is told their payment is going through;
+- open → expire it at Stripe first, and refuse to replace it if that fails;
+- expired → safe to replace;
+- Stripe unreachable → `503 checkout_unavailable`. Unknown is never treated as
+  dead.
 
 Refunds carry an idempotency key too, seeded with the payment id, the amount
 already refunded and the amount requested — a double-submitted refund replays,
@@ -116,24 +134,67 @@ whatever the server already believes.
 - `checkout.session.expired` and `checkout.session.async_payment_failed`
   release the held window back to `offered` and return the request to time
   selection, unless a payment for that request has already settled.
+- **A payment is never discarded because we had written the attempt off.**
+  `expired` and `failed` are our conclusions, and Stripe overrules them: such a
+  payment is still recorded as succeeded and raises a `PAYMENT ARRIVED ON A
+  CLOSED ATTEMPT` alert. A paid session with no matching row at all raises
+  `PAYMENT WITH NO LOCAL RECORD` rather than being silently acknowledged, and a
+  request that ends up with two settled payments raises `DUPLICATE PAYMENT`.
 
 ## Double booking
 
-`idx_slots_no_double_booking` is a partial unique index over `starts_at` for
-slots in `held` or `confirmed`. Offering the same free time to two customers is
-allowed; the race is resolved when one of them selects it, and the loser gets a
-409 asking them to pick again. `propose_slots` additionally refuses times that
-clash with an existing held/confirmed appointment including travel and report
-buffers.
+Two guarantees, at different strengths:
+
+- **Identical start times** are refused by the database: the partial unique
+  index `idx_slots_no_double_booking` covers `starts_at` for slots in `held` or
+  `confirmed`. This cannot be bypassed by any code path.
+- **Overlapping windows** (an inspection runs about two hours) are refused by
+  the application: `select_slot` places its hold first and then checks for an
+  overlapping held/confirmed window belonging to another request, rolling the
+  hold back if it finds one. Because the hold is already visible, two customers
+  racing on overlapping times will each see the other; the worst case is that
+  both step back and pick again, never that both are booked. The Stripe webhook
+  repeats the same check before confirming.
+
+Offering the same free window to two customers is deliberately allowed — the
+race is resolved at selection, not at proposal. `propose_slots` additionally
+refuses times that clash with an existing held or confirmed appointment,
+including travel and report buffers.
 
 ## Before payments are ever enabled
 
-1. Apply migration 0003 to the production database:
+1. Check that no request has two open payment attempts, or the unique index in
+   migration 0003 will refuse to build:
+   `SELECT request_id, COUNT(*) FROM payments WHERE status IN ('created','pending') GROUP BY request_id HAVING COUNT(*) > 1;`
+2. Apply migration 0003 to the production database:
    `npx wrangler d1 migrations apply autoclarity_ppi --remote`.
    The columns and index it adds are only read when `PAYMENTS_ENABLED=true`, so
    production is unaffected until then — but the migration must land *before*
-   the flag flips.
-2. Follow `docs/PPI_STRIPE_SETUP.md` (test mode first, live mode owner-gated).
+   the flag flips. Enabling payments first would 500 every checkout (failing
+   closed, but loudly).
+3. Follow `docs/PPI_STRIPE_SETUP.md` (test mode first, live mode owner-gated).
+
+## Owner alerts that mean money needs a human
+
+All are deduped, so each situation emails once:
+
+| Subject contains | Meaning |
+|---|---|
+| `PAID BUT SLOT LAPSED` | Payment succeeded but the window could not be confirmed. Offer new windows. |
+| `PAYMENT ARRIVED ON A CLOSED ATTEMPT` | Stripe paid a checkout this system had written off. Check no second payment was taken. |
+| `DUPLICATE PAYMENT` | The request has more than one settled payment. Refund the extra one. |
+| `PAYMENT WITH NO LOCAL RECORD` | A paid session matching no payment row. Reconcile by hand in Stripe. |
+| `PAID AND SCHEDULED BUT STATUS DID NOT MOVE` | The booking is confirmed and the customer emailed, but the request status did not follow. Set it by hand. |
+| `REFUND FOR AN UNKNOWN PAYMENT` / `DISPUTE ON AN UNKNOWN PAYMENT` | Stripe activity we cannot match locally. |
+
+## One behaviour change that is live even with payments off
+
+A refused checkout now performs its recovery transition *before* the
+`PAYMENTS_ENABLED` check. In production today, a customer who clicks Pay after
+their hold has lapsed moves from `awaiting_payment` back to
+`awaiting_time_selection`, gets a portal message, and the owner gets one email —
+where previously that click was an inert `409`. This is intended (it un-sticks
+the customer), but it is a real change with payments disabled.
 
 ## Where the proof lives
 

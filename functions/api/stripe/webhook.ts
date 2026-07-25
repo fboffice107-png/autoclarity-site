@@ -65,20 +65,17 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         await handlePaymentSucceeded(env, sessionId, String(obj['payment_intent'] ?? ''));
         break;
       }
-      case 'checkout.session.async_payment_failed': {
-        const sessionId = String(obj['id'] ?? '');
-        await db
-          .prepare(`UPDATE payments SET status = 'failed', updated_at = ? WHERE stripe_session_id = ? AND status IN ('created','pending')`)
-          .bind(nowIso(), sessionId)
-          .run();
-        break;
-      }
+      case 'checkout.session.async_payment_failed':
       case 'checkout.session.expired': {
         const sessionId = String(obj['id'] ?? '');
-        await db
-          .prepare(`UPDATE payments SET status = 'expired', updated_at = ? WHERE stripe_session_id = ? AND status IN ('created','pending')`)
-          .bind(nowIso(), sessionId)
+        const outcome = event.type === 'checkout.session.expired' ? 'expired' : 'failed';
+        const upd = await db
+          .prepare(`UPDATE payments SET status = ?, updated_at = ? WHERE stripe_session_id = ? AND status IN ('created','pending')`)
+          .bind(outcome, nowIso(), sessionId)
           .run();
+        // Only the delivery that actually closed the attempt releases the slot,
+        // so a replay or a late duplicate can never disturb a live booking.
+        if ((upd.meta?.changes ?? 0) === 1) await releaseAfterFailedCheckout(env, sessionId, outcome);
         break;
       }
       case 'charge.refunded': {
@@ -157,6 +154,69 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 };
 
+/**
+ * A checkout that expired or failed must not keep holding an appointment
+ * window. Releases the held slot back to 'offered' and returns the request to
+ * time selection so the portal shows the picker again. Never touches a request
+ * that already has a successful payment.
+ */
+async function releaseAfterFailedCheckout(env: Env, sessionId: string, outcome: 'expired' | 'failed'): Promise<void> {
+  const db = env.DB;
+  const payment = await db
+    .prepare(`SELECT id, request_id, booking_id FROM payments WHERE stripe_session_id = ?`)
+    .bind(sessionId)
+    .first<{ id: string; request_id: string; booking_id: string | null }>();
+  if (!payment) return;
+
+  const paid = await db
+    .prepare(`SELECT id FROM payments WHERE request_id = ? AND status IN ('succeeded','refunded','partially_refunded','disputed') LIMIT 1`)
+    .bind(payment.request_id)
+    .first<{ id: string }>();
+  if (paid) return; // the booking is already paid for — leave it alone
+
+  const now = nowIso();
+  if (payment.booking_id) {
+    const booking = await db
+      .prepare(`SELECT slot_id FROM bookings WHERE id = ?`)
+      .bind(payment.booking_id)
+      .first<{ slot_id: string | null }>();
+    if (booking?.slot_id) {
+      await db
+        .prepare(`UPDATE appointment_slots SET status = 'offered', hold_expires_at = NULL, updated_at = ? WHERE id = ? AND status = 'held'`)
+        .bind(now, booking.slot_id)
+        .run();
+    }
+    await db.prepare(`UPDATE bookings SET status = 'pending_payment', updated_at = ? WHERE id = ?`).bind(now, payment.booking_id).run();
+  }
+
+  const req = await db.prepare(`SELECT status FROM ppi_requests WHERE id = ?`).bind(payment.request_id).first<{ status: string }>();
+  if (req?.status !== 'awaiting_payment') return;
+  const moved = await applyStatus(
+    db,
+    payment.request_id,
+    'awaiting_payment',
+    'awaiting_time_selection',
+    'system:stripe-webhook',
+    `Checkout ${outcome} — appointment window released`,
+    payment.id,
+  );
+  if (!moved) return;
+  await db
+    .prepare(
+      `INSERT INTO messages (id, request_id, direction, channel, body_text, status, created_at)
+       VALUES (?, ?, 'outbound', 'portal', ?, 'recorded', ?)`,
+    )
+    .bind(
+      newId('msg'),
+      payment.request_id,
+      outcome === 'expired'
+        ? 'Your secure checkout expired before payment completed, so the appointment window was released. Nothing was charged — pick a time below whenever you are ready.'
+        : 'Your payment did not complete, so the appointment window was released. Nothing was charged — pick a time below to try again.',
+      now,
+    )
+    .run();
+}
+
 async function handlePaymentSucceeded(env: Env, sessionId: string, paymentIntent: string): Promise<void> {
   const db = env.DB;
   const now = nowIso();
@@ -196,11 +256,19 @@ async function handlePaymentSucceeded(env: Env, sessionId: string, paymentIntent
   let slotConfirmed = false;
   let slotStartsAt: string | null = null;
   if (booking?.slot_id) {
-    const slotUpd = await db
-      .prepare(`UPDATE appointment_slots SET status = 'confirmed', hold_expires_at = NULL, updated_at = ? WHERE id = ? AND status IN ('held','offered')`)
-      .bind(now, booking.slot_id)
-      .run();
-    slotConfirmed = (slotUpd.meta?.changes ?? 0) === 1;
+    let slotUpd: D1Result | null = null;
+    try {
+      slotUpd = await db
+        .prepare(`UPDATE appointment_slots SET status = 'confirmed', hold_expires_at = NULL, updated_at = ? WHERE id = ? AND status IN ('held','offered')`)
+        .bind(now, booking.slot_id)
+        .run();
+    } catch {
+      // The no-double-booking index refused: that start time now belongs to a
+      // different confirmed appointment. Treat it exactly like a lapsed hold —
+      // the payment stands, scheduling reopens, and the owner is alerted below.
+      slotUpd = null;
+    }
+    slotConfirmed = (slotUpd?.meta?.changes ?? 0) === 1;
     if (slotConfirmed) {
       const slot = await db.prepare(`SELECT starts_at FROM appointment_slots WHERE id = ?`).bind(booking.slot_id).first<{ starts_at: string }>();
       slotStartsAt = slot?.starts_at ?? null;

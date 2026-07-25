@@ -215,7 +215,15 @@
     }
 
     // ---------- payment ----------
-    if (v.status === "awaiting_payment") {
+    // A payment that already settled is never offered again, even if the
+    // request came back to this step (e.g. a held time lapsed mid-checkout).
+    var settled = v.payment && ["succeeded", "refunded", "partially_refunded", "disputed"].indexOf(v.payment.status) !== -1;
+    if (v.status === "awaiting_payment" && settled) {
+      html += '<section class="portal-card"><h2>Payment</h2>' +
+        '<div class="notice good">Your payment has already been received — nothing further is due.</div>' +
+        '<p style="color:var(--text-2);font-size:15px;margin-top:12px;">AutoClarity is confirming your appointment time with you directly. ' +
+        'You can send a message below at any time.</p></section>';
+    } else if (v.status === "awaiting_payment") {
       html += '<section class="portal-card"><h2>Payment</h2>' +
         '<p style="color:var(--text-2);font-size:15px;">Full payment reserves the approved appointment time. Your appointment is not confirmed until payment is successfully completed.</p>' +
         '<button class="btn btn-primary btn-lg" id="checkoutBtn" style="width:100%;margin-top:14px;">Pay securely with Stripe' +

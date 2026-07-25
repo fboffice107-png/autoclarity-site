@@ -115,6 +115,22 @@ export async function createCheckoutSession(env: Env, input: CheckoutInput): Pro
   };
 }
 
+/**
+ * Closes an open Checkout Session so a request can never have two live
+ * sessions (double-charge protection). Best-effort by design: a session that
+ * Stripe has already completed or expired returns an error, which the caller
+ * treats as "nothing left to close".
+ */
+export async function expireCheckoutSession(env: Env, sessionId: string): Promise<boolean> {
+  try {
+    const key = stripeKey(env);
+    await stripePost(env, key, `/checkout/sessions/${encodeURIComponent(sessionId)}/expire`, {});
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function createRefund(env: Env, paymentIntent: string, amountCents?: number): Promise<Record<string, unknown>> {
   const key = stripeKey(env);
   const params: Record<string, string> = { payment_intent: paymentIntent };

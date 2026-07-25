@@ -614,12 +614,16 @@ describe('email delivery (mock provider)', () => {
 
   it('webhook replays did not duplicate any payment email', async () => {
     // The webhook suite earlier delivered checkout.session.completed twice
-    // (replay guard test). Exactly one payment email must exist per template.
+    // (replay guard test). Scoped to THIS request's reference, because other
+    // suites confirm bookings of their own against the same mock provider.
+    const ref = 'PPI-FIXTURE-EUROLX';
     const sent = await sentEmails();
-    const paymentEmails = sent.filter((m) => String(m.subject).includes('payment received'));
-    const confirmEmails = sent.filter((m) => String(m.subject).includes('appointment confirmed'));
-    expect(paymentEmails.length).toBeLessThanOrEqual(1 * 1 + 0); // one confirmed booking in this suite
-    expect(paymentEmails.length + confirmEmails.length).toBeGreaterThan(0);
+    const forThisRequest = (needle: string) =>
+      sent.filter((m) => String(m.subject).includes(needle) && String(m.subject).includes(ref));
+    const paymentEmails = forThisRequest('payment received');
+    const confirmEmails = forThisRequest('appointment confirmed');
+    expect(paymentEmails).toHaveLength(1);
+    expect(confirmEmails).toHaveLength(1);
     expect(new Set(paymentEmails.map((m) => m.subject)).size).toBe(paymentEmails.length);
   });
 });

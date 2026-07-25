@@ -24,6 +24,8 @@ export default async function setup() {
   // 3. mock Stripe + mock Resend (same server)
   let sessionCounter = 0;
   let lastSessionParams: Record<string, string> = {};
+  const openSessions = new Set<string>();
+  const expiredSessions: string[] = [];
   let emailCounter = 0;
   const sentEmails: Array<Record<string, unknown>> = [];
   mockStripe = http.createServer((req, res) => {
@@ -48,13 +50,30 @@ export default async function setup() {
       } else if (req.method === 'POST' && req.url === '/v1/checkout/sessions') {
         lastSessionParams = Object.fromEntries(new URLSearchParams(body));
         sessionCounter++;
+        const id = `cs_mock_${sessionCounter}`;
+        openSessions.add(id);
         res.end(
           JSON.stringify({
-            id: `cs_mock_${sessionCounter}`,
-            url: `http://127.0.0.1:8798/pay/cs_mock_${sessionCounter}`,
+            id,
+            url: `http://127.0.0.1:8798/pay/${id}`,
             expires_at: Math.floor(Date.now() / 1000) + 1800,
           }),
         );
+      } else if (req.method === 'POST' && /^\/v1\/checkout\/sessions\/[^/]+\/expire$/.test(req.url ?? '')) {
+        // Mirrors Stripe: expiring an open session succeeds once; expiring an
+        // unknown or already-closed session is an error.
+        const id = (req.url ?? '').split('/')[4] ?? '';
+        if (openSessions.delete(id)) {
+          expiredSessions.push(id);
+          res.end(JSON.stringify({ id, status: 'expired' }));
+        } else {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: { message: 'mock: session is not open' } }));
+        }
+      } else if (req.method === 'GET' && req.url === '/expired-sessions') {
+        res.end(JSON.stringify(expiredSessions));
+      } else if (req.method === 'GET' && req.url === '/session-count') {
+        res.end(JSON.stringify({ created: sessionCounter, open: [...openSessions] }));
       } else if (req.method === 'POST' && req.url === '/v1/refunds') {
         res.end(JSON.stringify({ id: 're_mock_1', status: 'succeeded' }));
       } else if (req.method === 'GET' && req.url === '/last-session') {

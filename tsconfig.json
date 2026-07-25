@@ -14,5 +14,6 @@
     "isolatedModules": true
   },
   "include": ["functions/**/*.ts", "tests/**/*.ts"],
-  "exclude": ["node_modules", ".wrangler", "tests/integration/globalSetup.ts"]
+  "//": "Excluded files use Node APIs (fs/child_process) rather than the Workers runtime this config types.",
+  "exclude": ["node_modules", ".wrangler", "tests/integration/globalSetup.ts", "tests/unit/production-config.test.ts"]
 }

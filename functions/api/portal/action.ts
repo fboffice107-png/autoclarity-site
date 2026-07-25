@@ -12,7 +12,8 @@ import { requirePortal, releaseExpiredHolds } from '../../lib/portal.ts';
 import { applyStatus, isStatus, type Status } from '../../lib/status.ts';
 import { quoteExpired, cancellationOutcome } from '../../lib/pricing.ts';
 import { latestAgreements } from '../../lib/agreements.ts';
-import { createCheckoutSession, StripeConfigError } from '../../lib/stripe.ts';
+import { evaluateCheckoutGates } from '../../lib/checkout-gates.ts';
+import { createCheckoutSession, expireCheckoutSession, StripeConfigError } from '../../lib/stripe.ts';
 import { sendTemplate } from '../../lib/email.ts';
 import { clampStr, clientIp, errorJson, formatCents, json, newId, nowIso, originAllowed } from '../../lib/util.ts';
 import { rateLimit } from '../../lib/ratelimit.ts';
@@ -76,12 +77,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       }
       await releaseExpiredHolds(db);
 
+      // 'accepted' is included so a customer whose paid appointment lost its
+      // window (see the Stripe webhook) can still pick a replacement time —
+      // and an already-paid quote is not re-checked for expiry.
       const quote = await db
-        .prepare(`SELECT id, expires_at FROM quotes WHERE request_id = ? AND status = 'sent' ORDER BY version DESC LIMIT 1`)
+        .prepare(`SELECT id, status, expires_at FROM quotes WHERE request_id = ? AND status IN ('sent','accepted') ORDER BY version DESC LIMIT 1`)
         .bind(requestId)
-        .first<{ id: string; expires_at: string }>();
+        .first<{ id: string; status: string; expires_at: string }>();
       if (!quote) return errorJson('no_quote', 'There is no active quote for this request.', 409);
-      if (quoteExpired(quote.expires_at)) {
+      if (quote.status === 'sent' && quoteExpired(quote.expires_at)) {
         return errorJson('quote_expired', 'This quote has expired. AutoClarity will send you a refreshed quote.', 409);
       }
 
@@ -188,42 +192,95 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             .bind(newId('aa'), requestId, quote?.id ?? null, doc.id, typedName, ip, ua, now),
         ),
       );
-      await applyStatus(db, requestId, 'awaiting_agreement', 'awaiting_payment', 'customer', 'All agreements accepted');
+      // Consent is recorded either way; only advance if the request is still
+      // where we found it, so a concurrent admin change can't be overwritten.
+      const advanced = await applyStatus(db, requestId, 'awaiting_agreement', 'awaiting_payment', 'customer', 'All agreements accepted');
+      if (!advanced) {
+        return errorJson('conflict', 'This request changed a moment ago — reload the page and continue from there.', 409);
+      }
       return json({ ok: true });
     }
 
     // --------------------------------------------------------------- checkout
     case 'checkout': {
-      if (status !== 'awaiting_payment') {
-        return errorJson('wrong_state', 'Payment is not available for this request yet.', 409);
-      }
       await releaseExpiredHolds(db);
 
+      // ---- gather the facts every gate is decided on -----------------------
+      // The highest-version quote whatever its status, so "superseded" and
+      // "draft" are distinguishable from "no quote at all".
       const quote = await db
-        .prepare(`SELECT id, expires_at, total_cents FROM quotes WHERE request_id = ? AND status = 'sent' ORDER BY version DESC LIMIT 1`)
+        .prepare(`SELECT id, status, expires_at, total_cents FROM quotes WHERE request_id = ? ORDER BY version DESC LIMIT 1`)
         .bind(requestId)
-        .first<{ id: string; expires_at: string; total_cents: number }>();
-      if (!quote) return errorJson('no_quote', 'There is no active quote for this request.', 409);
-      if (quoteExpired(quote.expires_at)) {
-        return errorJson('quote_expired', 'This quote has expired. AutoClarity will send you a refreshed quote.', 409);
-      }
+        .first<{ id: string; status: string; expires_at: string; total_cents: number }>();
 
       const slot = await db
         .prepare(`SELECT id, starts_at FROM appointment_slots WHERE request_id = ? AND status = 'held' LIMIT 1`)
         .bind(requestId)
         .first<{ id: string; starts_at: string }>();
-      if (!slot) {
-        return errorJson('hold_lapsed', 'Your held time lapsed. Please choose an appointment window again.', 409);
+
+      const required = await latestAgreements(db);
+      const acceptances = await db
+        .prepare(`SELECT agreement_version_id, quote_id FROM agreement_acceptances WHERE request_id = ? AND accepted = 1`)
+        .bind(requestId)
+        .all<{ agreement_version_id: string; quote_id: string | null }>();
+      const acceptedRows = acceptances.results ?? [];
+
+      const settled = await db
+        .prepare(`SELECT id FROM payments WHERE request_id = ? AND status IN ('succeeded','refunded','partially_refunded','disputed') LIMIT 1`)
+        .bind(requestId)
+        .first<{ id: string }>();
+
+      const gate = evaluateCheckoutGates({
+        status,
+        quote: quote ? { id: quote.id, status: quote.status, expiresAt: quote.expires_at, totalCents: quote.total_cents } : null,
+        hasSettledPayment: Boolean(settled),
+        heldSlotId: slot?.id ?? null,
+        requiredAgreementIds: required.map((d) => d.id),
+        acceptedAgreementIds: acceptedRows.map((a) => a.agreement_version_id),
+        acceptedForQuoteIds: quote
+          ? acceptedRows.filter((a) => a.quote_id === quote.id).map((a) => a.agreement_version_id)
+          : [],
+      });
+
+      if (!gate.ok) {
+        // Never leave the customer on a dead-end screen: walk the request back
+        // to the step that needs redoing, so the portal renders that step.
+        if (gate.recover === 'time_selection') {
+          const moved = await applyStatus(db, requestId, 'awaiting_payment', 'awaiting_time_selection', 'system:checkout-gate', gate.code);
+          if (moved) {
+            await db
+              .prepare(
+                `INSERT INTO messages (id, request_id, direction, channel, body_text, status, created_at)
+                 VALUES (?, ?, 'outbound', 'portal', ?, 'recorded', ?)`,
+              )
+              .bind(
+                newId('msg'),
+                requestId,
+                'The appointment time you were holding was released before payment completed. Nothing is lost — choose one of the available windows below, or message us and fresh times will be offered.',
+                nowIso(),
+              )
+              .run();
+            if (env.ADMIN_NOTIFY_EMAIL) {
+              await sendTemplate(env, db, requestId, 'owner_notify', env.ADMIN_NOTIFY_EMAIL, {
+                ref: req.ref,
+                supportEmail: config.supportEmail,
+                extra: {
+                  kind: 'hold lapsed before payment',
+                  detail: 'The customer returned to pay after their held window was released. Offer fresh windows if none remain.',
+                  adminUrl: `${(env.PUBLIC_BASE_URL ?? '').replace(/\/$/, '')}/ppi/admin/`,
+                },
+              }, undefined, `owner_hold_lapsed:${requestId}`);
+            }
+          }
+        } else if (gate.recover === 'agreement') {
+          await applyStatus(db, requestId, 'awaiting_payment', 'awaiting_agreement', 'system:checkout-gate', gate.code);
+        }
+        return errorJson(gate.code, gate.message, gate.httpStatus);
       }
 
-      const acceptedCount = await db
-        .prepare(`SELECT COUNT(DISTINCT agreement_version_id) AS n FROM agreement_acceptances WHERE request_id = ?`)
-        .bind(requestId)
-        .first<{ n: number }>();
-      const required = await latestAgreements(db);
-      if ((acceptedCount?.n ?? 0) < required.length) {
-        return errorJson('agreements_missing', 'Please accept the service agreements first.', 409);
-      }
+      // Gates passed; `quote` and `slot` are non-null from here.
+      const activeQuote = quote!;
+      const heldSlot = slot!;
 
       if (!flags.paymentsEnabled) {
         return json({
@@ -233,55 +290,121 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         });
       }
 
-      // Booking row (one per request) — created/reused before the session.
       const now = nowIso();
+
+      // ---- one live Checkout Session per request ---------------------------
+      // A second click (or a second tab) must never mint a second payable
+      // session. An open attempt for the same quote + slot hands back the same
+      // URL; anything else is closed at Stripe before a replacement is made.
+      const open = await db
+        .prepare(
+          `SELECT p.id, p.quote_id, p.stripe_session_id, p.checkout_url, p.session_expires_at, b.slot_id
+             FROM payments p LEFT JOIN bookings b ON b.id = p.booking_id
+            WHERE p.request_id = ? AND p.status IN ('created','pending')
+            ORDER BY p.created_at DESC LIMIT 1`,
+        )
+        .bind(requestId)
+        .first<{
+          id: string;
+          quote_id: string;
+          stripe_session_id: string | null;
+          checkout_url: string | null;
+          session_expires_at: string | null;
+          slot_id: string | null;
+        }>();
+
+      if (open) {
+        const stillOpen =
+          open.checkout_url &&
+          open.session_expires_at &&
+          new Date(open.session_expires_at).getTime() > Date.now() + 120_000;
+        if (stillOpen && open.quote_id === activeQuote.id && open.slot_id === heldSlot.id) {
+          return json({ ok: true, checkoutUrl: open.checkout_url, reused: true });
+        }
+        if (open.stripe_session_id) await expireCheckoutSession(env, open.stripe_session_id);
+        await db
+          .prepare(`UPDATE payments SET status = 'expired', updated_at = ? WHERE id = ? AND status IN ('created','pending')`)
+          .bind(now, open.id)
+          .run();
+      }
+
+      // Booking row (one per request) — created/reused before the session.
       let booking = await db
         .prepare(`SELECT id FROM bookings WHERE request_id = ?`)
         .bind(requestId)
         .first<{ id: string }>();
       if (!booking) {
         const bookingId = newId('bkg');
+        try {
+          await db
+            .prepare(
+              `INSERT INTO bookings (id, request_id, quote_id, slot_id, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, 'pending_payment', ?, ?)`,
+            )
+            .bind(bookingId, requestId, activeQuote.id, heldSlot.id, now, now)
+            .run();
+          booking = { id: bookingId };
+        } catch {
+          // UNIQUE(request_id): a concurrent attempt created it first.
+          booking = await db.prepare(`SELECT id FROM bookings WHERE request_id = ?`).bind(requestId).first<{ id: string }>();
+          if (!booking) return errorJson('checkout_failed', 'The payment service is temporarily unavailable — please try again shortly.', 502);
+        }
+      }
+      await db
+        .prepare(`UPDATE bookings SET quote_id = ?, slot_id = ?, status = 'pending_payment', updated_at = ? WHERE id = ?`)
+        .bind(activeQuote.id, heldSlot.id, now, booking.id)
+        .run();
+
+      // Reserve the payment attempt BEFORE talking to Stripe, so a session can
+      // never exist without a row to match its webhook against. The partial
+      // unique index on open attempts makes this the concurrency guard too.
+      const paymentId = newId('pay');
+      try {
         await db
           .prepare(
-            `INSERT INTO bookings (id, request_id, quote_id, slot_id, status, created_at, updated_at)
-             VALUES (?, ?, ?, ?, 'pending_payment', ?, ?)`,
+            `INSERT INTO payments (id, request_id, quote_id, booking_id, amount_cents, status, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, 'created', ?, ?)`,
           )
-          .bind(bookingId, requestId, quote.id, slot.id, now, now)
+          .bind(paymentId, requestId, activeQuote.id, booking.id, activeQuote.total_cents, now, now)
           .run();
-        booking = { id: bookingId };
-      } else {
-        await db
-          .prepare(`UPDATE bookings SET quote_id = ?, slot_id = ?, status = 'pending_payment', updated_at = ? WHERE id = ?`)
-          .bind(quote.id, slot.id, now, booking.id)
-          .run();
+      } catch {
+        return errorJson(
+          'checkout_in_progress',
+          'A secure checkout is already being opened for this request. Give it a moment, then reload this page.',
+          409,
+        );
       }
 
       // Extend the hold to cover the 30-minute Checkout window + webhook lag.
       const extended = new Date(Date.now() + Math.max(config.scheduling.holdMinutes, 45) * 60_000).toISOString();
       await db
         .prepare(`UPDATE appointment_slots SET hold_expires_at = ?, updated_at = ? WHERE id = ? AND status = 'held'`)
-        .bind(extended, now, slot.id)
+        .bind(extended, now, heldSlot.id)
         .run();
 
       try {
         const session = await createCheckoutSession(env, {
           requestId,
           requestRef: req.ref,
-          quoteId: quote.id,
+          quoteId: activeQuote.id,
           bookingId: booking.id,
-          amountCents: quote.total_cents,
+          amountCents: activeQuote.total_cents,
           customerEmail: req.email,
           publicBaseUrl: env.PUBLIC_BASE_URL ?? new URL(request.url).origin,
         });
         await db
           .prepare(
-            `INSERT INTO payments (id, request_id, quote_id, booking_id, stripe_session_id, amount_cents, status, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, 'created', ?, ?)`,
+            `UPDATE payments SET stripe_session_id = ?, checkout_url = ?, session_expires_at = ?, updated_at = ? WHERE id = ?`,
           )
-          .bind(newId('pay'), requestId, quote.id, booking.id, session.id, quote.total_cents, now, now)
+          .bind(session.id, session.url, new Date(session.expiresAt * 1000).toISOString(), nowIso(), paymentId)
           .run();
         return json({ ok: true, checkoutUrl: session.url });
       } catch (e) {
+        // Release the reserved attempt so the customer can retry immediately.
+        await db
+          .prepare(`UPDATE payments SET status = 'failed', updated_at = ? WHERE id = ? AND status = 'created'`)
+          .bind(nowIso(), paymentId)
+          .run();
         if (e instanceof StripeConfigError) {
           return errorJson('payments_unavailable', 'Payments are not configured in this environment.', 503);
         }

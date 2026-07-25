@@ -4,6 +4,22 @@
 `PPI_ENV=production` AND `PPI_MODE=live` AND `STRIPE_ENV=live` — and switching
 those on is an owner decision gated by the production checklist.**
 
+The customer-facing rule, and how the gates enforce it, is documented in
+[PPI_PAYMENT_FLOW.md](PPI_PAYMENT_FLOW.md). Read that first.
+
+## Prerequisite before `PAYMENTS_ENABLED=true` anywhere
+
+Apply migration 0003 to that environment's database:
+
+```
+npx wrangler d1 migrations apply autoclarity_ppi --remote
+```
+
+It adds `payments.checkout_url`, `payments.session_expires_at` and the partial
+unique index that keeps a request to one open checkout attempt. Those columns
+are only read when payments are enabled, so applying it changes nothing while
+the flag is off — but the checkout endpoint needs them the moment it is on.
+
 ## Test mode (preview) — ~10 minutes
 
 1. Create/log into the Stripe account → toggle **Test mode**.

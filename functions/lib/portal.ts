@@ -12,8 +12,16 @@ import { quoteExpired } from './pricing.ts';
 
 export type PortalAuth = { ok: true; requestId: string; token: string } | { ok: false; response: Response };
 
-export async function requirePortal(request: Request, env: Env): Promise<PortalAuth> {
-  const limited = await rateLimit(env.DB, clientIp(request), 'portal_token', 60, 3600);
+export interface PortalAuthOptions {
+  /** Rate-limit class. Image streams use a wider bucket ('portal_photo',
+      600/hr) so a photo-heavy published report never 429s a legitimate
+      customer, while token brute force stays bounded. */
+  limitName?: string;
+  limitMax?: number;
+}
+
+export async function requirePortal(request: Request, env: Env, opts?: PortalAuthOptions): Promise<PortalAuth> {
+  const limited = await rateLimit(env.DB, clientIp(request), opts?.limitName ?? 'portal_token', opts?.limitMax ?? 60, 3600);
   if (!limited.allowed) {
     return { ok: false, response: errorJson('rate_limited', 'Too many attempts. Please try again later.', 429) };
   }

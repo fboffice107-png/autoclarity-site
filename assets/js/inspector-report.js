@@ -781,7 +781,10 @@
           }, "image/jpeg", 0.82);
         } catch (e) { reject(e); }
       };
-      img.onerror = function () { URL.revokeObjectURL(url); resolve(file); }; // fall back to the original
+      // Never fall back to the original bytes: the canvas re-encode is what
+      // strips EXIF (incl. GPS) before anything leaves the device. A photo
+      // that cannot be decoded is refused instead.
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error("This photo could not be read — try retaking it.")); };
       img.src = url;
     });
   }

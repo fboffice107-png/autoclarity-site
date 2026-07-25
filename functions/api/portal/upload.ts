@@ -40,7 +40,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return errorJson('bad_origin', 'Cross-origin requests are not accepted.', 403);
   }
   const flags = modeFlags(env);
-  if (!flags.uploadsEnabled) return errorJson('uploads_disabled', 'Uploads are switched off right now.', 409);
+  if (!flags.uploadsEnabled || !env.UPLOADS) {
+    return errorJson('uploads_disabled', 'Uploads are switched off right now.', 409);
+  }
 
   const auth = await requirePortal(request, env);
   if (!auth.ok) return auth.response;
@@ -113,6 +115,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     .first<{ object_key: string; content_type: string; original_name: string }>();
   if (!row) return errorJson('not_found', 'Image not found.', 404);
 
+  if (!env.UPLOADS) return errorJson('uploads_disabled', 'Photo storage is not enabled.', 409);
   const object = await env.UPLOADS.get(row.object_key);
   if (!object) return errorJson('not_found', 'Image not found.', 404);
 

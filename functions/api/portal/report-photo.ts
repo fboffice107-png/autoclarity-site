@@ -8,15 +8,37 @@ import { requirePortal } from '../../lib/portal.ts';
 import { getPublishedVersion } from '../../lib/report.ts';
 import { errorJson } from '../../lib/util.ts';
 
+/** Exact membership check: walk the snapshot's photo lists rather than a
+    substring probe, so free text in the payload can never match a photo id. */
+function publishedPhotoIds(payloadJson: string): Set<string> {
+  const ids = new Set<string>();
+  try {
+    const payload = JSON.parse(payloadJson) as {
+      sections?: Array<{ items?: Array<{ photos?: Array<{ id?: string }> }> }>;
+      generalPhotos?: Array<{ id?: string }>;
+    };
+    for (const sec of payload.sections ?? []) {
+      for (const item of sec.items ?? []) {
+        for (const p of item.photos ?? []) if (p.id) ids.add(p.id);
+      }
+    }
+    for (const p of payload.generalPhotos ?? []) if (p.id) ids.add(p.id);
+  } catch {
+    // Unparseable snapshot → no photo is served from it.
+  }
+  return ids;
+}
+
 export const onRequestGet: PagesFunction<Env> = async (context) => {
-  const auth = await requirePortal(context.request, context.env);
+  // Wider rate bucket: a published report legitimately streams many photos.
+  const auth = await requirePortal(context.request, context.env, { limitName: 'portal_photo', limitMax: 600 });
   if (!auth.ok) return auth.response;
   const db = context.env.DB;
 
   const id = new URL(context.request.url).searchParams.get('id') ?? '';
   const version = await getPublishedVersion(db, auth.requestId);
   if (!version) return errorJson('not_found', 'Photo not found.', 404);
-  if (!version.payload_json.includes(`"${id}"`)) return errorJson('not_found', 'Photo not found.', 404);
+  if (!publishedPhotoIds(version.payload_json).has(id)) return errorJson('not_found', 'Photo not found.', 404);
 
   const photo = await db
     .prepare(`SELECT object_key, content_type FROM report_photos WHERE id = ? AND report_id = ?`)

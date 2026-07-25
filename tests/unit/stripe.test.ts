@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { verifyStripeSignature, stripeKey, StripeConfigError } from '../../functions/lib/stripe.ts';
+import { verifyStripeSignature, stripeKey, StripeConfigError, checkoutIdempotencyKey } from '../../functions/lib/stripe.ts';
 import type { Env } from '../../functions/lib/types.ts';
 
 const SECRET = 'whsec_test_secret_for_unit_tests';
@@ -85,5 +85,41 @@ describe('stripeKey safety rails', () => {
 
   it('accepts sk_test_ in test env', () => {
     expect(stripeKey({ ...baseEnv, STRIPE_SECRET_KEY: 'sk_test_ok' } as Env)).toBe('sk_test_ok');
+  });
+});
+
+// The server-side guarantee that a retry can never mint a second payable
+// session: the key is a pure function of the attempt's immutable identity.
+describe('checkoutIdempotencyKey', () => {
+  const attempt = { requestId: 'req_1', quoteId: 'qot_1', slotId: 'slt_1', paymentId: 'pay_1' };
+
+  it('is stable across calls for the same attempt', async () => {
+    const a = await checkoutIdempotencyKey(attempt);
+    const b = await checkoutIdempotencyKey({ ...attempt });
+    expect(a).toBe(b);
+    expect(a).toMatch(/^ppi_co_[0-9a-f]{48}$/);
+  });
+
+  it('changes when the quote changes — a new price is a new payment', async () => {
+    expect(await checkoutIdempotencyKey({ ...attempt, quoteId: 'qot_2' })).not.toBe(await checkoutIdempotencyKey(attempt));
+  });
+
+  it('changes when the appointment window changes', async () => {
+    expect(await checkoutIdempotencyKey({ ...attempt, slotId: 'slt_2' })).not.toBe(await checkoutIdempotencyKey(attempt));
+  });
+
+  it('changes when a new attempt row is reserved', async () => {
+    expect(await checkoutIdempotencyKey({ ...attempt, paymentId: 'pay_2' })).not.toBe(await checkoutIdempotencyKey(attempt));
+  });
+
+  it('never collides across requests that share ids in a different order', async () => {
+    const a = await checkoutIdempotencyKey({ requestId: 'a', quoteId: 'b', slotId: 'c', paymentId: 'd' });
+    const b = await checkoutIdempotencyKey({ requestId: 'b', quoteId: 'a', slotId: 'd', paymentId: 'c' });
+    expect(a).not.toBe(b);
+  });
+
+  it('stays inside the Stripe 255-character limit', async () => {
+    const key = await checkoutIdempotencyKey(attempt);
+    expect(key.length).toBeLessThanOrEqual(255);
   });
 });

@@ -393,7 +393,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         return errorJson('validation', 'Refund exceeds the remaining refundable amount.', 422);
       }
       try {
-        await createRefund(env, payment.stripe_payment_intent, amount);
+        // Seeded with the refund decision, so a double-submitted refund replays
+        // at Stripe instead of moving money twice.
+        await createRefund(env, payment.stripe_payment_intent, amount, `${payment.id}|${payment.refunded_cents}|${amount ?? 'full'}`);
       } catch (e) {
         if (e instanceof StripeConfigError) return errorJson('payments_unavailable', 'Payments are not configured in this environment.', 503);
         return errorJson('refund_failed', `Stripe refund failed: ${String(e).slice(0, 200)}`, 502);

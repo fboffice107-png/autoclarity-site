@@ -2,7 +2,7 @@
 // Checkout Sessions for one-time physical-service payments only. Webhooks —
 // never the browser redirect — are the source of truth for payment status.
 
-import { timingSafeEqual } from './util.ts';
+import { sha256Hex, timingSafeEqual } from './util.ts';
 import type { Env } from './types.ts';
 import { modeFlags } from './types.ts';
 
@@ -49,13 +49,23 @@ export function stripeKey(env: Env): string {
   return key;
 }
 
-async function stripePost(env: Env, key: string, path: string, params: Record<string, string>): Promise<Record<string, unknown>> {
+async function stripePost(
+  env: Env,
+  key: string,
+  path: string,
+  params: Record<string, string>,
+  idempotencyKey?: string,
+): Promise<Record<string, unknown>> {
   const res = await fetch(`${apiBase(env)}${path}`, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${key}`,
       'content-type': 'application/x-www-form-urlencoded',
       'stripe-version': '2024-06-20',
+      // Stripe replays the original response for a repeated key, so a retry
+      // after a lost response recovers the first object instead of creating a
+      // second one. This is server-side and survives any client behaviour.
+      ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
     },
     body: new URLSearchParams(params),
     signal: AbortSignal.timeout(15000),
@@ -73,9 +83,34 @@ export interface CheckoutInput {
   requestRef: string;
   quoteId: string;
   bookingId: string;
+  /** The window this payment reserves — part of the attempt's identity. */
+  slotId: string;
+  /** The reserved payments row. One attempt row = one payable session. */
+  paymentId: string;
   amountCents: number;
   customerEmail: string;
   publicBaseUrl: string;
+  /**
+   * Session expiry as a unix timestamp, derived by the caller from the payment
+   * attempt's own created_at. It must be IDENTICAL on every retry of the same
+   * attempt: Stripe rejects a repeated idempotency key whose request body
+   * differs, so a clock-derived value here would break retry recovery.
+   */
+  expiresAtEpoch: number;
+}
+
+/**
+ * Stable idempotency key for ONE intended payment attempt, derived only from
+ * immutable identifiers: the request, the quote being charged, the window it
+ * reserves and the reserved attempt row. Retrying the same attempt — after a
+ * timeout, a lost response, or a Worker restart — replays the same key, so
+ * Stripe can only ever return the session it already created. A different
+ * quote, window or attempt produces a different key, which is what makes a
+ * genuinely new payment possible.
+ */
+export async function checkoutIdempotencyKey(input: Pick<CheckoutInput, 'requestId' | 'quoteId' | 'slotId' | 'paymentId'>): Promise<string> {
+  const digest = await sha256Hex(`checkout|${input.requestId}|${input.quoteId}|${input.slotId}|${input.paymentId}`);
+  return `ppi_co_${digest.slice(0, 48)}`;
 }
 
 export interface CheckoutSession {
@@ -85,29 +120,39 @@ export interface CheckoutSession {
 }
 
 /**
- * Fresh Checkout Session per attempt. Metadata carries ONLY internal ids —
- * never VIN, address, notes or diagnostics.
+ * One Checkout Session per payment attempt. Metadata carries ONLY internal ids
+ * — never VIN, address, notes or diagnostics. Every field below must be a pure
+ * function of the attempt, because the idempotency key replays only when the
+ * request body is byte-identical.
  */
 export async function createCheckoutSession(env: Env, input: CheckoutInput): Promise<CheckoutSession> {
   const key = stripeKey(env);
   const base = input.publicBaseUrl.replace(/\/$/, '');
-  const session = await stripePost(env, key, '/checkout/sessions', {
-    mode: 'payment',
-    'line_items[0][quantity]': '1',
-    'line_items[0][price_data][currency]': 'usd',
-    'line_items[0][price_data][unit_amount]': String(input.amountCents),
-    'line_items[0][price_data][product_data][name]': `AutoClarity Pre-Purchase Inspection — ${input.requestRef}`,
-    customer_email: input.customerEmail,
-    client_reference_id: input.bookingId,
-    'metadata[request_id]': input.requestId,
-    'metadata[quote_id]': input.quoteId,
-    'metadata[booking_id]': input.bookingId,
-    'payment_intent_data[metadata][request_id]': input.requestId,
-    'payment_intent_data[metadata][booking_id]': input.bookingId,
-    success_url: `${base}/ppi/portal/?checkout=success`,
-    cancel_url: `${base}/ppi/portal/?checkout=cancelled`,
-    expires_at: String(Math.floor(Date.now() / 1000) + 1800), // 30 min minimum
-  });
+  const idempotencyKey = await checkoutIdempotencyKey(input);
+  const session = await stripePost(
+    env,
+    key,
+    '/checkout/sessions',
+    {
+      mode: 'payment',
+      'line_items[0][quantity]': '1',
+      'line_items[0][price_data][currency]': 'usd',
+      'line_items[0][price_data][unit_amount]': String(input.amountCents),
+      'line_items[0][price_data][product_data][name]': `AutoClarity Pre-Purchase Inspection — ${input.requestRef}`,
+      customer_email: input.customerEmail,
+      client_reference_id: input.bookingId,
+      'metadata[request_id]': input.requestId,
+      'metadata[quote_id]': input.quoteId,
+      'metadata[booking_id]': input.bookingId,
+      'metadata[payment_id]': input.paymentId,
+      'payment_intent_data[metadata][request_id]': input.requestId,
+      'payment_intent_data[metadata][booking_id]': input.bookingId,
+      success_url: `${base}/ppi/portal/?checkout=success`,
+      cancel_url: `${base}/ppi/portal/?checkout=cancelled`,
+      expires_at: String(input.expiresAtEpoch), // 30 min from the attempt, not from "now"
+    },
+    idempotencyKey,
+  );
   return {
     id: String(session['id']),
     url: String(session['url']),
@@ -131,11 +176,23 @@ export async function expireCheckoutSession(env: Env, sessionId: string): Promis
   }
 }
 
-export async function createRefund(env: Env, paymentIntent: string, amountCents?: number): Promise<Record<string, unknown>> {
+/**
+ * `attemptSeed` should describe this exact refund decision (payment id, amount,
+ * and how much was already refunded). A double-submitted refund replays and
+ * returns the first refund; a genuine second partial refund has a different
+ * seed and goes through.
+ */
+export async function createRefund(
+  env: Env,
+  paymentIntent: string,
+  amountCents?: number,
+  attemptSeed?: string,
+): Promise<Record<string, unknown>> {
   const key = stripeKey(env);
   const params: Record<string, string> = { payment_intent: paymentIntent };
   if (amountCents !== undefined) params['amount'] = String(amountCents);
-  return stripePost(env, key, '/refunds', params);
+  const idempotencyKey = attemptSeed ? `ppi_rf_${(await sha256Hex(`refund|${paymentIntent}|${attemptSeed}`)).slice(0, 48)}` : undefined;
+  return stripePost(env, key, '/refunds', params, idempotencyKey);
 }
 
 // ------------------------------------------------------------------ webhooks

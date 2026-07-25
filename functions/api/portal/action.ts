@@ -298,7 +298,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       // URL; anything else is closed at Stripe before a replacement is made.
       const open = await db
         .prepare(
-          `SELECT p.id, p.quote_id, p.stripe_session_id, p.checkout_url, p.session_expires_at, b.slot_id
+          `SELECT p.id, p.quote_id, p.created_at, p.stripe_session_id, p.checkout_url, p.session_expires_at, b.slot_id
              FROM payments p LEFT JOIN bookings b ON b.id = p.booking_id
             WHERE p.request_id = ? AND p.status IN ('created','pending')
             ORDER BY p.created_at DESC LIMIT 1`,
@@ -307,25 +307,47 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         .first<{
           id: string;
           quote_id: string;
+          created_at: string;
           stripe_session_id: string | null;
           checkout_url: string | null;
           session_expires_at: string | null;
           slot_id: string | null;
         }>();
 
+      // Reuse the attempt row itself where possible: the Stripe idempotency key
+      // is derived from it, so retrying the SAME attempt can only ever recover
+      // the session Stripe already made — never create a second payable one.
+      let attemptId = newId('pay');
+      let attemptCreatedAt = now;
+      let retryingAttempt = false;
+
       if (open) {
-        const stillOpen =
-          open.checkout_url &&
-          open.session_expires_at &&
-          new Date(open.session_expires_at).getTime() > Date.now() + 120_000;
-        if (stillOpen && open.quote_id === activeQuote.id && open.slot_id === heldSlot.id) {
+        const sameTarget = open.quote_id === activeQuote.id && open.slot_id === heldSlot.id;
+        const sessionLive =
+          open.checkout_url && open.session_expires_at && new Date(open.session_expires_at).getTime() > Date.now() + 120_000;
+        // An attempt is only worth retrying while its deterministic 30-minute
+        // session window is still comfortably in the future; past that, Stripe
+        // would reject the replayed expires_at.
+        const attemptFresh = Date.now() - new Date(open.created_at).getTime() < 25 * 60_000;
+
+        if (sameTarget && sessionLive) {
           return json({ ok: true, checkoutUrl: open.checkout_url, reused: true });
         }
-        if (open.stripe_session_id) await expireCheckoutSession(env, open.stripe_session_id);
-        await db
-          .prepare(`UPDATE payments SET status = 'expired', updated_at = ? WHERE id = ? AND status IN ('created','pending')`)
-          .bind(now, open.id)
-          .run();
+        if (sameTarget && !open.stripe_session_id && attemptFresh) {
+          attemptId = open.id;
+          attemptCreatedAt = open.created_at;
+          retryingAttempt = true;
+        } else {
+          // A known session is closed explicitly. An attempt too stale to retry
+          // may leave a session we never learned the id of; it expires on its
+          // own within minutes, because its expires_at was fixed to the
+          // attempt's creation time.
+          if (open.stripe_session_id) await expireCheckoutSession(env, open.stripe_session_id);
+          await db
+            .prepare(`UPDATE payments SET status = 'expired', updated_at = ? WHERE id = ? AND status IN ('created','pending')`)
+            .bind(now, open.id)
+            .run();
+        }
       }
 
       // Booking row (one per request) — created/reused before the session.
@@ -358,21 +380,22 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       // Reserve the payment attempt BEFORE talking to Stripe, so a session can
       // never exist without a row to match its webhook against. The partial
       // unique index on open attempts makes this the concurrency guard too.
-      const paymentId = newId('pay');
-      try {
-        await db
-          .prepare(
-            `INSERT INTO payments (id, request_id, quote_id, booking_id, amount_cents, status, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, 'created', ?, ?)`,
-          )
-          .bind(paymentId, requestId, activeQuote.id, booking.id, activeQuote.total_cents, now, now)
-          .run();
-      } catch {
-        return errorJson(
-          'checkout_in_progress',
-          'A secure checkout is already being opened for this request. Give it a moment, then reload this page.',
-          409,
-        );
+      if (!retryingAttempt) {
+        try {
+          await db
+            .prepare(
+              `INSERT INTO payments (id, request_id, quote_id, booking_id, amount_cents, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, 'created', ?, ?)`,
+            )
+            .bind(attemptId, requestId, activeQuote.id, booking.id, activeQuote.total_cents, now, now)
+            .run();
+        } catch {
+          return errorJson(
+            'checkout_in_progress',
+            'A secure checkout is already being opened for this request. Give it a moment, then reload this page.',
+            409,
+          );
+        }
       }
 
       // Extend the hold to cover the 30-minute Checkout window + webhook lag.
@@ -388,26 +411,32 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           requestRef: req.ref,
           quoteId: activeQuote.id,
           bookingId: booking.id,
+          slotId: heldSlot.id,
+          paymentId: attemptId,
           amountCents: activeQuote.total_cents,
           customerEmail: req.email,
           publicBaseUrl: env.PUBLIC_BASE_URL ?? new URL(request.url).origin,
+          expiresAtEpoch: Math.floor(new Date(attemptCreatedAt).getTime() / 1000) + 1800,
         });
         await db
           .prepare(
             `UPDATE payments SET stripe_session_id = ?, checkout_url = ?, session_expires_at = ?, updated_at = ? WHERE id = ?`,
           )
-          .bind(session.id, session.url, new Date(session.expiresAt * 1000).toISOString(), nowIso(), paymentId)
+          .bind(session.id, session.url, new Date(session.expiresAt * 1000).toISOString(), nowIso(), attemptId)
           .run();
         return json({ ok: true, checkoutUrl: session.url });
       } catch (e) {
-        // Release the reserved attempt so the customer can retry immediately.
-        await db
-          .prepare(`UPDATE payments SET status = 'failed', updated_at = ? WHERE id = ? AND status = 'created'`)
-          .bind(nowIso(), paymentId)
-          .run();
         if (e instanceof StripeConfigError) {
+          // Nothing was sent to Stripe, so the attempt cannot have a session.
+          await db
+            .prepare(`UPDATE payments SET status = 'failed', updated_at = ? WHERE id = ? AND status = 'created'`)
+            .bind(nowIso(), attemptId)
+            .run();
           return errorJson('payments_unavailable', 'Payments are not configured in this environment.', 503);
         }
+        // The call may or may not have reached Stripe (timeout, dropped
+        // response, 5xx). Leave the attempt OPEN: the next try replays the same
+        // idempotency key, which recovers the original session if one exists.
         console.error('checkout_session_failed', String(e).slice(0, 300));
         return errorJson('checkout_failed', 'The payment service is temporarily unavailable. Your held time is unaffected — please try again shortly.', 502);
       }

@@ -63,13 +63,34 @@ A refused checkout puts the request back where the customer can act:
 
 ## One live Checkout Session per request
 
-- The payment attempt row is written **before** Stripe is called, so a session
-  can never exist without a row for its webhook to match.
-- A partial unique index (`idx_payments_one_open_attempt`, migration 0003)
-  makes "at most one open attempt per request" a database invariant.
-- A repeat click on Pay returns the **same** session URL while it is still
-  open; if the quote or window changed, the previous session is expired at
-  Stripe before a replacement is created.
+Three independent layers, because any one of them can fail:
+
+1. **A server-side Stripe idempotency key.** `checkoutIdempotencyKey()` hashes
+   the request id, the quote being charged, the window it reserves and the
+   reserved payment-attempt row. Stripe replays the original response for a
+   repeated key, so a retry after a timeout or a dropped response recovers the
+   session Stripe already created instead of making a second payable one. Every
+   field of the session request is therefore a pure function of the attempt —
+   including `expires_at`, which is derived from the attempt's own `created_at`,
+   never from the clock (Stripe rejects a repeated key whose body differs).
+2. **Attempt reuse.** An open attempt for the same quote and window is retried
+   as *itself*: the same row, so the same key. An attempt is only retried while
+   its deterministic 30-minute session window is still ahead (25-minute cutoff);
+   after that it is expired at Stripe and replaced. If the quote or window
+   changed, the previous session is expired before a replacement is created.
+   A failed Stripe call therefore does **not** mark the attempt failed — only a
+   `StripeConfigError`, which proves no request ever left the Worker, does.
+3. **A database invariant.** The payment attempt row is written *before* Stripe
+   is called, so a session can never exist without a row for its webhook to
+   match, and the partial unique index `idx_payments_one_open_attempt`
+   (migration 0003) caps a request at one open attempt.
+
+UI debouncing is not part of this list; the button state is a convenience, not a
+control.
+
+Refunds carry an idempotency key too, seeded with the payment id, the amount
+already refunded and the amount requested — a double-submitted refund replays,
+while a genuine second partial refund still goes through.
 
 ## The webhook is the only authority
 
@@ -86,10 +107,11 @@ whatever the server already believes.
   request is released, the quote is marked accepted, and the confirmation emails
   are sent with dedupe keys.
 - **If the window is gone** — the hold lapsed and the time was reassigned, or the
-  no-double-booking index refuses the confirmation — the payment is still
-  recorded, the request returns to `awaiting_time_selection`, the customer sees
-  a portal message, and the owner gets a `PAID BUT SLOT LAPSED — action needed`
-  email. The customer can pick another window; the Pay button does **not** come
+  no-double-booking index refuses the confirmation because another customer now
+  holds that exact start time — the payment is still recorded, the request
+  returns to `awaiting_time_selection`, the customer sees a portal message, and
+  the owner gets exactly one `PAID BUT SLOT LAPSED — action needed` email
+  (deduped on the payment id). The customer can pick another window; the Pay button does **not** come
   back (gate 2 above), and the owner confirms the new time by hand.
 - `checkout.session.expired` and `checkout.session.async_payment_failed`
   release the held window back to `offered` and return the request to time
@@ -120,6 +142,9 @@ buffers.
 - `tests/integration/payment-gates.test.ts` — the end-to-end flow over real HTTP
   against a mock Stripe: free submission, every refused shortcut, duplicate
   clicks, forged webhooks, replays, expiry, admin schedule changes, re-quoting,
-  double booking, and the paid-but-lost-window path.
+  double booking, a Stripe response lost *after* the session was created, and a
+  paid session whose window a second customer now holds.
+- `tests/unit/stripe.test.ts` — signature verification, live-key refusal, and the
+  idempotency-key derivation.
 - `tests/unit/production-config.test.ts` — production ships with payments off,
   Stripe in test mode, and no live key material anywhere in the repository.

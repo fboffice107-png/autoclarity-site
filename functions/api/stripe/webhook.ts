@@ -337,10 +337,10 @@ async function handlePaymentSucceeded(env: Env, sessionId: string, paymentIntent
         supportEmail: config.supportEmail,
         extra: {
           kind: 'PAID BUT SLOT LAPSED — action needed',
-          detail: `Payment ${formatCents(payment.amount_cents)} succeeded after the hold expired. Offer new windows.`,
+          detail: `Payment ${formatCents(payment.amount_cents)} succeeded but the window could not be confirmed (hold released or the time was taken). Offer new windows.`,
           adminUrl: `${(env.PUBLIC_BASE_URL ?? '').replace(/\/$/, '')}/ppi/admin/`,
         },
-      });
+      }, undefined, `owner_slot_lapsed:${payment.id}`);
     }
   }
 }

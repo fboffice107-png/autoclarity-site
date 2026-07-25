@@ -26,6 +26,11 @@ export default async function setup() {
   let lastSessionParams: Record<string, string> = {};
   const openSessions = new Set<string>();
   const expiredSessions: string[] = [];
+  // Stripe-style idempotency: a repeated Idempotency-Key replays the original
+  // response instead of creating a second object.
+  const idempotent = new Map<string, Record<string, unknown>>();
+  const idempotencyHits = new Map<string, number>();
+  let failNextSessionResponse = false;
   let emailCounter = 0;
   const sentEmails: Array<Record<string, unknown>> = [];
   mockStripe = http.createServer((req, res) => {
@@ -49,16 +54,32 @@ export default async function setup() {
         res.end(JSON.stringify(sentEmails));
       } else if (req.method === 'POST' && req.url === '/v1/checkout/sessions') {
         lastSessionParams = Object.fromEntries(new URLSearchParams(body));
+        const idemKey = String(req.headers['idempotency-key'] ?? '');
+        if (idemKey) idempotencyHits.set(idemKey, (idempotencyHits.get(idemKey) ?? 0) + 1);
+        const replay = idemKey ? idempotent.get(idemKey) : undefined;
+        if (replay) {
+          res.end(JSON.stringify(replay)); // same object, no new session
+          return;
+        }
         sessionCounter++;
         const id = `cs_mock_${sessionCounter}`;
         openSessions.add(id);
-        res.end(
-          JSON.stringify({
-            id,
-            url: `http://127.0.0.1:8798/pay/${id}`,
-            expires_at: Math.floor(Date.now() / 1000) + 1800,
-          }),
-        );
+        const session = { id, url: `http://127.0.0.1:8798/pay/${id}`, expires_at: Math.floor(Date.now() / 1000) + 1800 };
+        if (idemKey) idempotent.set(idemKey, session);
+        if (failNextSessionResponse) {
+          // The session EXISTS at Stripe but the caller never learns its id —
+          // the exact failure an idempotency key has to survive.
+          failNextSessionResponse = false;
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: { message: 'mock: response lost after the session was created' } }));
+          return;
+        }
+        res.end(JSON.stringify(session));
+      } else if (req.method === 'POST' && req.url === '/control/fail-next-session-response') {
+        failNextSessionResponse = true;
+        res.end(JSON.stringify({ ok: true }));
+      } else if (req.method === 'GET' && req.url === '/idempotency') {
+        res.end(JSON.stringify({ keys: [...idempotent.keys()], hits: Object.fromEntries(idempotencyHits) }));
       } else if (req.method === 'POST' && /^\/v1\/checkout\/sessions\/[^/]+\/expire$/.test(req.url ?? '')) {
         // Mirrors Stripe: expiring an open session succeeds once; expiring an
         // unknown or already-closed session is an error.

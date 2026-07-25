@@ -1,16 +1,15 @@
 # getautoclarity.com → Cloudflare Pages cutover runbook
 
-_Written 2026-07-23. Status: **CUTOVER NOT PERFORMED — stopped at the
-Cloudflare Access safety gate.** Everything else is ready and verified._
+_Written 2026-07-23._
 
-> **Re-verified 2026-07-24 (follow-up session):** state unchanged and healthy.
-> `CF_ACCESS_AUD`/`CF_ACCESS_TEAM_DOMAIN` still absent from the Pages secret
-> list → the Access app has not been created, so the gate stays closed and no
-> DNS/domain change was made. Deployed pages.dev assets byte-match `f274c00`
-> (neon grid live), DNS still exactly matches `PRE_CHANGE_CHECKPOINT.md`
-> (four GitHub A records + www CNAME + MX×3 + SPF), pages.dev noindex holds,
-> 186 tests + tsc clean. The next action remains OWNER STEP 1 below — nothing
-> else is pending.
+> **STATUS 2026-07-24: CUTOVER PERFORMED AND VERIFIED.** The owner created
+> the Access app ("AutoClarity Private Tools"), stored both CF_ACCESS
+> secrets, and attached both custom domains; this session flipped
+> `PPI_ENV=production`, redeployed, and verified everything live — full
+> evidence in `POST_CUTOVER_VERIFICATION.md` (same dir). getautoclarity.com
+> now serves the Cloudflare Pages app; www 301s to the apex; MX/SPF
+> untouched; Access 302-gates all four private surfaces; 190 tests pass.
+> The steps below are kept for reference and rollback context.
 
 ## Why the cutover stopped
 

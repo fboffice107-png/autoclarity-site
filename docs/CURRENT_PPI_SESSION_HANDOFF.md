@@ -1,10 +1,9 @@
 # AutoClarity Pre-Purchase Inspection Portal — Session Handoff
 
-_Last updated: 2026-07-23 (neon energized-grid + single-domain cutover prep).
-Read this plus `docs/PPI_CLOUDFLARE_PREVIEW_STATUS.md`,
-`docs/PPI_PRODUCTION_LAUNCH_CHECKLIST.md`, `docs/PPI_ACCESS_SETUP.md`,
-`docs/domain-cutover-2026-07-23/CUTOVER_RUNBOOK.md` before making any
-production change._
+_Last updated: 2026-07-24 (**LIVE: single-domain cutover completed**).
+Read this plus `docs/domain-cutover-2026-07-23/POST_CUTOVER_VERIFICATION.md`,
+`docs/PPI_PRODUCTION_LAUNCH_CHECKLIST.md`, `docs/PPI_ACCESS_SETUP.md` before
+making any production change._
 
 ## Snapshot
 
@@ -14,15 +13,15 @@ production change._
 | Branch | `feature/las-vegas-ppi-portal` |
 | Remote | `origin` = github.com/fboffice107-png/autoclarity-site |
 | Cloudflare Pages project | `autoclarity-site` |
-| Hosted preview | https://autoclarity-site.pages.dev (noindex; **not** the customer domain) |
-| Custom domain | **UNCHANGED** — getautoclarity.com still GitHub Pages (`main`). No DNS change made. |
+| **Public website** | **https://getautoclarity.com — LIVE on Cloudflare Pages since 2026-07-24** (`PPI_ENV=production`). www → 301 apex. pages.dev stays noindex (staging alias of the same deployment; dev key no longer works there — production mode). |
+| Private surfaces | `/ppi/admin*`, `/api/admin*`, `/inspector*`, `/api/inspector*` behind **Cloudflare Access** (app "AutoClarity Private Tools", owner-only policy, one-time PIN). Dev key refused in production. Staging = local `ppi-ui-test` server (preview bindings). |
 | D1 | `autoclarity_ppi` (`0ae44d57…af26`), migrations 0001+0002 applied |
-| R2 | **Still not enabled on the account** (re-verified: API error 10042, dashboard-only). Feature-flagged off; honest `uploads_disabled`. Steps: `docs/PPI_R2_SETUP.md` |
+| R2 | Still not enabled on the account; feature-flagged off; honest `uploads_disabled`. Steps: `docs/PPI_R2_SETUP.md` |
 | Stripe | test/sandbox only; `STRIPE_ENV=test`, `PAYMENTS_ENABLED=false` |
-| Email | **Adapter complete + proven vs mock provider (tests)**; hosted = `recorded` until owner connects Resend — exact steps in launch checklist §B. `ADMIN_NOTIFY_EMAIL` set on hosted preview this session. |
-| Admin/inspector security | Preview: `ADMIN_DEV_KEY`. Production: Cloudflare Access required — full owner walkthrough + test + rollback in `docs/PPI_ACCESS_SETUP.md`; fail-closed matrix covered by `tests/unit/auth.test.ts` |
-| Tests | **186 pass** — 114 unit + 72 integration; `tsc` clean; 20 links OK; header checks pass |
-| Rollback tags | `pre-ppi-production` → `15a121c` (GitHub Pages prod); `ppi-preview-verified-2026-07-23` |
+| Email | Adapter complete + proven vs mock provider; live messages record honestly (`recorded`) until owner connects Resend — checklist §B. **No delivery claimed.** |
+| Turnstile | Still always-pass TEST keys (form works; bot protection reduced) — real keys = checklist §D14 |
+| Tests | **190 pass** — 118 unit + 72 integration; `tsc` clean; 20 links OK; header checks pass |
+| Rollback | `docs/domain-cutover-2026-07-23/PRE_CHANGE_CHECKPOINT.md` (DNS restore) + tags `pre-ppi-production` → `15a121c`, GitHub Pages `main`=`a907ebf` intact |
 
 ## THIS SESSION (2026-07-23, third pass — neon grid + cutover prep)
 

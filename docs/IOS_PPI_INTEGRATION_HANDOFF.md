@@ -11,7 +11,7 @@
 
 - **Title:** Las Vegas Pre-Purchase Inspection
 - **Subtitle:** Have an experienced technician inspect the vehicle before you buy it.
-- **Badge:** Now Serving Las Vegas
+- **Badge:** Launching Soon in Las Vegas
 - **Button:** Request an Inspection
 - Small caption: "In-person service · Las Vegas, NV · separately priced"
 
@@ -75,7 +75,7 @@ home screen. Requirements:
 2. Card content:
    - Title: "Las Vegas Pre-Purchase Inspection"
    - Subtitle: "Have an experienced technician inspect the vehicle before you buy it."
-   - Badge: "Now Serving Las Vegas"
+   - Badge: "Launching Soon in Las Vegas"
    - Button: "Request an Inspection"
    - Caption: "In-person service · Las Vegas, NV · separately priced"
    Match the app's existing card styling; do not put it inside any paywall/IAP view.

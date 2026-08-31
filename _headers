@@ -1,11 +1,12 @@
-# Cloudflare Pages security headers (inert on GitHub Pages).
+# Cloudflare Pages security headers for static responses.
 # Dynamic API responses get their headers from functions/_middleware.ts.
 
 /*
+  X-AutoClarity-Build: ac-prod-20260831-r1
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
-  Permissions-Policy: geolocation=(), microphone=(), payment=(), usb=(), interest-cohort=()
+  Permissions-Policy: geolocation=(), microphone=(), payment=(), usb=(), interest-cohort=(), camera=(self)
   Strict-Transport-Security: max-age=31536000
   Cross-Origin-Opener-Policy: same-origin
 
@@ -16,7 +17,6 @@
 # PPI landing page — allows Turnstile and the camera-assisted VIN scan.
 /las-vegas-pre-purchase-inspection/*
   Content-Security-Policy: default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-src https://challenges.cloudflare.com; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests
-  Permissions-Policy: geolocation=(), microphone=(), payment=(), usb=(), interest-cohort=(), camera=(self)
 
 # Customer portal and admin — first-party only.
 /ppi/*

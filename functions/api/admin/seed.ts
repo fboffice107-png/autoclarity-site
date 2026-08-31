@@ -116,22 +116,28 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           const [hh, mm] = hhmm.split(':').map(Number);
           const start = new Date(Date.now() + (2 + i) * dayMs);
           start.setUTCHours((hh ?? 9) + 7, mm ?? 0, 0, 0); // approx Vegas summer offset
-          await db.prepare(`INSERT INTO appointment_slots (id, request_id, starts_at, ends_at, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'offered', ?, ?)`)
-            .bind(newId('slt'), requestId, start.toISOString(), new Date(start.getTime() + config.scheduling.durationMin * 60_000).toISOString(), now, now)
+          const end = new Date(start.getTime() + config.scheduling.durationMin * 60_000);
+          const blockedStart = new Date(start.getTime() - config.scheduling.travelBufferMin * 60_000);
+          const blockedEnd = new Date(end.getTime() + config.scheduling.reportBufferMin * 60_000);
+          await db.prepare(`INSERT INTO appointment_slots (id, request_id, starts_at, ends_at, blocked_starts_at, blocked_ends_at, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'offered', ?, ?)`)
+            .bind(newId('slt'), requestId, start.toISOString(), end.toISOString(), blockedStart.toISOString(), blockedEnd.toISOString(), now, now)
             .run();
         }
       }
 
       if (f.refSuffix === 'PAIDOK' || f.refSuffix === 'CANCEL') {
-        const start = new Date(Date.now() + (f.refSuffix === 'PAIDOK' ? 3 : -2) * 86_400_000);
+        const start = new Date(Date.now() + (f.refSuffix === 'PAIDOK' ? 6 : -2) * 86_400_000);
         start.setUTCHours(16, 0, 0, 0);
+        const end = new Date(start.getTime() + config.scheduling.durationMin * 60_000);
+        const blockedStart = new Date(start.getTime() - config.scheduling.travelBufferMin * 60_000);
+        const blockedEnd = new Date(end.getTime() + config.scheduling.reportBufferMin * 60_000);
         const slotId = newId('slt');
         const bookingId = newId('bkg');
         const paymentId = newId('pay');
         const isPaid = f.refSuffix === 'PAIDOK';
         await db.batch([
-          db.prepare(`INSERT INTO appointment_slots (id, request_id, starts_at, ends_at, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-            .bind(slotId, requestId, start.toISOString(), new Date(start.getTime() + config.scheduling.durationMin * 60_000).toISOString(), isPaid ? 'confirmed' : 'cancelled', now, now),
+          db.prepare(`INSERT INTO appointment_slots (id, request_id, starts_at, ends_at, blocked_starts_at, blocked_ends_at, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+            .bind(slotId, requestId, start.toISOString(), end.toISOString(), blockedStart.toISOString(), blockedEnd.toISOString(), isPaid ? 'confirmed' : 'cancelled', now, now),
           db.prepare(`INSERT INTO bookings (id, request_id, quote_id, slot_id, status, confirmed_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
             .bind(bookingId, requestId, quoteId, slotId, isPaid ? 'confirmed' : 'refunded', now, now, now),
           db.prepare(`INSERT INTO payments (id, request_id, quote_id, booking_id, stripe_session_id, stripe_payment_intent, amount_cents, status, refunded_cents, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)

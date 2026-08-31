@@ -4,21 +4,21 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
-  <title>AutoClarity — Know what’s wrong before you pay a shop</title>
-  <meta name="description" content="AutoClarity is an iPhone app that turns your car’s symptoms into a clear, mechanic-style report — likely causes, urgency guidance, and what to consider doing next. Built by a real mechanic." />
+  <title>AutoClarity — Car guidance &amp; Las Vegas inspections</title>
+  <meta name="description" content="Understand car symptoms with the AutoClarity iPhone app, or request a founder-led mobile pre-purchase vehicle inspection in Las Vegas. Built by a real mechanic." />
   <link rel="canonical" href="https://getautoclarity.com/" />
 
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="AutoClarity" />
-  <meta property="og:title" content="AutoClarity — Know what’s wrong before you pay a shop" />
-  <meta property="og:description" content="Answer guided questions about your car’s symptoms and get a mechanic-style report: likely causes, urgency guidance, and next steps. Built by a real mechanic." />
+  <meta property="og:title" content="AutoClarity — Car guidance &amp; Las Vegas inspections" />
+  <meta property="og:description" content="Use the iPhone app for mechanic-style symptom guidance, or request a founder-led mobile pre-purchase inspection in Las Vegas." />
   <meta property="og:url" content="https://getautoclarity.com/" />
   <meta property="og:image" content="https://getautoclarity.com/assets/img/og-image.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="AutoClarity — Know what’s wrong before you pay a shop" />
-  <meta name="twitter:description" content="Answer guided questions about your car’s symptoms and get a mechanic-style report: likely causes, urgency guidance, and next steps." />
+  <meta name="twitter:title" content="AutoClarity — Car guidance &amp; Las Vegas inspections" />
+  <meta name="twitter:description" content="Mechanic-style iPhone guidance for car symptoms, plus founder-led mobile pre-purchase inspections in Las Vegas." />
   <meta name="twitter:image" content="https://getautoclarity.com/assets/img/og-image.png" />
 
   <meta name="theme-color" content="#060b18" />
@@ -30,23 +30,46 @@
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
-    "@type": "SoftwareApplication",
-    "name": "AutoClarity",
-    "operatingSystem": "iOS",
-    "applicationCategory": "UtilitiesApplication",
-    "description": "AutoClarity guides you through questions about your vehicle’s symptoms and creates a clear, mechanic-style report — likely causes, urgency guidance, and recommended next steps.",
-    "url": "https://getautoclarity.com/",
-    "installUrl": "https://apps.apple.com/us/app/autoclarity/id6761438602",
-    "offers": {
-      "@type": "Offer",
-      "price": "0",
-      "priceCurrency": "USD"
-    }
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://getautoclarity.com/#app",
+        "name": "AutoClarity",
+        "operatingSystem": "iOS",
+        "applicationCategory": "UtilitiesApplication",
+        "description": "AutoClarity guides you through questions about your vehicle’s symptoms and creates a clear, mechanic-style report — likely causes, urgency guidance, and recommended next steps.",
+        "url": "https://getautoclarity.com/",
+        "installUrl": "https://apps.apple.com/us/app/autoclarity/id6761438602",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        }
+      },
+      {
+        "@type": "Service",
+        "@id": "https://getautoclarity.com/las-vegas-pre-purchase-inspection/#service",
+        "name": "Las Vegas Mobile Pre-Purchase Vehicle Inspection",
+        "serviceType": "Pre-purchase car inspection",
+        "url": "https://getautoclarity.com/las-vegas-pre-purchase-inspection/",
+        "description": "Independent mobile pre-purchase inspections for used vehicles in the Las Vegas area, performed by AutoClarity founder and lead technician Faheb Brown.",
+        "provider": {
+          "@type": "Organization",
+          "name": "AutoClarity",
+          "url": "https://getautoclarity.com/"
+        },
+        "areaServed": {
+          "@type": "City",
+          "name": "Las Vegas",
+          "containedInPlace": { "@type": "State", "name": "Nevada" }
+        }
+      }
+    ]
   }
   </script>
 </head>
 
-<body>
+<body data-page="home" data-fx-full>
   <a class="skip-link" href="#main">Skip to content</a>
 
   <header class="nav" id="top">
@@ -58,17 +81,30 @@
       <nav class="nav-links" aria-label="Primary">
         <a href="#how-it-works">How it works</a>
         <a href="#report">Your report</a>
-        <a href="/las-vegas-pre-purchase-inspection">Las Vegas PPI</a>
+        <a href="/las-vegas-pre-purchase-inspection/">Las Vegas PPI</a>
         <a href="#support">Support</a>
       </nav>
-      <a class="btn btn-primary btn-nav" href="https://apps.apple.com/us/app/autoclarity/id6761438602" target="_blank" rel="noopener noreferrer" aria-label="Download AutoClarity on the App Store">Get the app</a>
+      <div class="nav-actions">
+        <a
+          class="btn btn-service btn-nav nav-ppi-cta"
+          href="/las-vegas-pre-purchase-inspection/#request"
+          aria-label="Request a Las Vegas pre-purchase inspection"
+          data-analytics="ppi_cta_click"
+          data-step="home_nav"
+        >
+          <span class="status-dot" aria-hidden="true"></span>
+          <span class="nav-ppi-full">Request inspection</span>
+          <span class="nav-ppi-short" aria-hidden="true">Inspection</span>
+        </a>
+        <a class="btn btn-primary btn-nav" href="https://apps.apple.com/us/app/autoclarity/id6761438602" target="_blank" rel="noopener noreferrer" aria-label="Download AutoClarity on the App Store">Get the app</a>
+      </div>
     </div>
   </header>
 
   <main id="main">
 
     <!-- ============ HERO ============ -->
-    <section class="hero">
+    <section class="hero home-hero">
       <div class="hero-bg" aria-hidden="true">
         <div class="hero-glow hero-glow-1"></div>
         <div class="hero-glow hero-glow-2"></div>
@@ -77,19 +113,20 @@
 
       <div class="hero-inner">
         <div class="hero-copy">
-          <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Built by a real mechanic</p>
-          <h1>Know what’s wrong <em>before</em> you pay a shop.</h1>
+          <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Mechanic-built clarity</p>
+          <h1>Know more <em>before</em> you pay a shop—or a seller.</h1>
           <p class="lede">
-            AutoClarity is an iPhone app that turns your car’s symptoms into a clear,
-            mechanic-style report — likely causes, urgency guidance, and what to
-            consider doing next. No scanner, no jargon.
+            Use the AutoClarity iPhone app for mechanic-style guidance on your car’s
+            symptoms. Buying used in Las Vegas? Request an independent mobile inspection
+            before you commit.
           </p>
 
-          <div class="hero-ctas">
+          <p class="app-path-label">For mechanic-style symptom guidance</p>
+          <div class="hero-ctas app-ctas">
             <a class="btn btn-primary btn-lg" href="https://apps.apple.com/us/app/autoclarity/id6761438602" target="_blank" rel="noopener noreferrer">
-              Download on the App&nbsp;Store
+              Get the iPhone app
             </a>
-            <a class="btn btn-ghost btn-lg" href="#how-it-works">See how it works</a>
+            <a class="btn btn-ghost btn-lg" href="#how-it-works">See how the app works</a>
           </div>
           <p class="hero-fineprint">Free to download for iPhone · In-app purchases available</p>
 
@@ -98,6 +135,10 @@
             <li>11+ years of shop experience behind it</li>
             <li>Safety guidance is never paywalled</li>
           </ul>
+
+          <a class="scroll-cue" href="#mechanic" aria-label="Continue to meet the technician behind AutoClarity">
+            <span aria-hidden="true"></span>
+          </a>
         </div>
 
         <div class="hero-visual" id="heroVisual">
@@ -161,6 +202,86 @@
           </div>
           <p class="visual-note">Example result — screens are illustrative recreations of the current app. Every report depends on your vehicle and answers.</p>
         </div>
+      </div>
+    </section>
+
+    <!-- ============ FOUNDER + SERVICE BRIDGE ============ -->
+    <section class="section expertise-section" id="mechanic" aria-labelledby="mechanic-title">
+      <div class="section-inner">
+        <div class="founder-story">
+          <div class="founder-story-copy reveal">
+            <p class="kicker">Built from real shop experience</p>
+            <h2 id="mechanic-title">Meet the technician behind AutoClarity</h2>
+            <p class="founder-identity">Faheb Brown <span aria-hidden="true">·</span> Founder &amp; Lead Technician</p>
+            <p class="mechanic-body">
+              Faheb created AutoClarity after more than 11 years of hands-on automotive
+              work across everyday, European, luxury, performance, and exotic vehicles.
+            </p>
+            <p class="mechanic-body">
+              That real-world experience shapes the app’s guided questions, urgency cues,
+              likely-cause explanations, and practical next steps—so drivers can better
+              understand what may be happening before they walk into a shop.
+            </p>
+            <ul class="mechanic-chips" aria-label="Experience behind AutoClarity">
+              <li>11+ years hands-on</li>
+              <li>Real diagnostic experience</li>
+              <li>Plain-English guidance</li>
+              <li>Safety guidance always free</li>
+            </ul>
+            <a class="btn btn-ghost founder-story-cta" href="#how-it-works">See how the app works</a>
+          </div>
+
+          <figure class="founder-story-media reveal">
+            <picture>
+              <source type="image/avif" srcset="assets/img/faheb-founder-460.avif 460w, assets/img/faheb-founder-640.avif 640w, assets/img/faheb-founder-834.avif 834w" sizes="(max-width: 820px) 300px, 400px" />
+              <source type="image/webp" srcset="assets/img/faheb-founder-460.webp 460w, assets/img/faheb-founder-640.webp 640w, assets/img/faheb-founder-834.webp 834w" sizes="(max-width: 820px) 300px, 400px" />
+              <img
+                src="assets/img/faheb-founder-640.jpg"
+                srcset="assets/img/faheb-founder-460.jpg 460w, assets/img/faheb-founder-640.jpg 640w, assets/img/faheb-founder-834.jpg 834w"
+                sizes="(max-width: 820px) 300px, 400px"
+                width="834" height="1049"
+                alt="Faheb Brown, founder and lead technician of AutoClarity"
+                loading="lazy" decoding="async" />
+            </picture>
+            <figcaption>
+              <strong>Faheb Brown</strong>
+              <span>Founder &amp; Lead Technician</span>
+            </figcaption>
+          </figure>
+        </div>
+
+        <aside class="hero-ppi-card ppi-bridge reveal" id="ppi" aria-labelledby="ppi-home-title">
+          <div class="ppi-bridge-copy">
+            <p class="ppi-availability">
+              <span class="status-dot" aria-hidden="true"></span>
+              Las Vegas · Mobile service
+            </p>
+            <h2 id="ppi-home-title">Need a real technician to inspect the vehicle for you?</h2>
+            <p class="ppi-summary">
+              For used-car purchases in the Las Vegas area, AutoClarity also offers
+              founder-led mobile pre-purchase inspections with photographs, written
+              findings, repair priorities, and a clear Proceed / Negotiate / Do Not
+              Proceed recommendation.
+            </p>
+            <ul class="ppi-proof" aria-label="Inspection highlights">
+              <li>We come to the vehicle</li>
+              <li>No repair upsell</li>
+              <li>Exact price before you pay</li>
+            </ul>
+          </div>
+          <div class="ppi-bridge-action">
+            <div class="hero-ppi-actions">
+              <a
+                class="btn btn-service btn-lg"
+                href="/las-vegas-pre-purchase-inspection/#request"
+                data-analytics="ppi_cta_click"
+                data-step="home_bridge"
+              >Request an Inspection</a>
+              <a class="btn btn-ghost btn-lg" href="/las-vegas-pre-purchase-inspection/#whats-inspected">See What’s Included</a>
+            </div>
+            <p class="ppi-separation">A separately priced in-person service. You do not need the app to request one.</p>
+          </div>
+        </aside>
       </div>
     </section>
 
@@ -347,30 +468,6 @@
       </div>
     </section>
 
-    <!-- ============ MECHANIC ============ -->
-    <section class="section" id="mechanic" aria-labelledby="mechanic-title">
-      <div class="section-inner section-narrow">
-        <div class="mechanic-card reveal">
-          <p class="kicker">Why trust it</p>
-          <h2 id="mechanic-title">Built from real mechanic logic</h2>
-          <p class="mechanic-body">
-            AutoClarity was created by a professional automotive technician with over
-            11 years of hands-on experience working on everyday, European, luxury,
-            exotic, and high-performance vehicles.
-          </p>
-          <p class="mechanic-body">
-            The goal is simple: help everyday drivers stop guessing, better understand
-            the likely problem, and walk into the repair shop with more confidence.
-          </p>
-          <ul class="mechanic-chips" aria-label="Product principles">
-            <li>No tools required</li>
-            <li>Plain English</li>
-            <li>Mechanic-style reports</li>
-          </ul>
-        </div>
-      </div>
-    </section>
-
     <!-- ============ VIDEO ============ -->
     <section class="section section-alt" id="video" aria-labelledby="video-title">
       <div class="section-inner section-narrow">
@@ -401,35 +498,6 @@
             Download on the App&nbsp;Store
           </a>
         </div>
-      </div>
-    </section>
-
-    <!-- ============ LAS VEGAS PPI ============ -->
-    <section class="section section-alt" id="ppi" aria-labelledby="ppi-home-title">
-      <div class="section-inner section-narrow">
-        <header class="section-head reveal">
-          <p class="kicker">New · Las Vegas</p>
-          <h2 id="ppi-home-title">Buying a used car in Las Vegas?</h2>
-          <p class="section-sub">
-            Beyond the app, AutoClarity now offers in-person mobile pre-purchase
-            inspections for Las&nbsp;Vegas-area buyers — performed personally by
-            founder and lead technician Faheb Brown.
-          </p>
-        </header>
-        <div class="coverage reveal" aria-label="What a pre-purchase inspection gives you">
-          <ul class="coverage-list">
-            <li>Independent, buyer-focused inspection</li>
-            <li>Clear photographs and written findings</li>
-            <li>Overall 1–10 condition score</li>
-            <li>Repair priorities and cost ranges</li>
-            <li>Proceed, negotiate, or reconsider guidance</li>
-            <li>Mobile — at the dealership or seller’s location</li>
-          </ul>
-        </div>
-        <div class="video-cta reveal">
-          <a class="btn btn-primary btn-lg" href="/las-vegas-pre-purchase-inspection">Explore Las Vegas PPI</a>
-        </div>
-        <p class="hero-fineprint" style="text-align:center;">A separately priced in-person service — not included with the app subscription.</p>
       </div>
     </section>
 
@@ -467,8 +535,8 @@
         </div>
         <div class="footer-col">
           <h3>Legal</h3>
-          <p><a href="privacy.html">Privacy Policy</a></p>
-          <p><a href="terms.html">Terms of Use</a></p>
+          <p><a href="/privacy">Privacy Policy</a></p>
+          <p><a href="/terms">Terms of Use</a></p>
         </div>
       </div>
 

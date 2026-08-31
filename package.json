@@ -4,9 +4,8 @@
   "type": "module",
   "description": "getautoclarity.com — static marketing site plus the Las Vegas PPI portal (Cloudflare Pages Functions + D1 + R2).",
   "scripts": {
-    "dev": "wrangler pages dev . --port 8788",
-    "db:migrate:local": "wrangler d1 migrations apply autoclarity_ppi --local",
-    "db:migrate:preview": "wrangler d1 migrations apply autoclarity_ppi --remote",
+    "dev": "wrangler pages dev . --port 8788 --compatibility-date 2026-07-01 --d1 DB=00000000-0000-0000-0000-000000000000 --r2 UPLOADS=autoclarity-ppi-uploads --binding PPI_ENV=preview --binding PPI_MODE=request --binding PAYMENTS_ENABLED=false --binding STRIPE_ENV=test --binding BOOKING_ENABLED=true --binding UPLOADS_ENABLED=true --binding SMS_ENABLED=false --binding TURNSTILE_SITE_KEY=1x00000000000000000000AA --binding PUBLIC_BASE_URL=http://127.0.0.1:8788 --binding SUPPORT_EMAIL=support@getautoclarity.com",
+    "db:migrate:local": "wrangler d1 migrations apply autoclarity_ppi --config wrangler.local.toml --local",
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "vitest run",
     "test:integration": "vitest run -c vitest.integration.config.ts",

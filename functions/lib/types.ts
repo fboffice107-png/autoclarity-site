@@ -11,6 +11,7 @@ export interface Env {
   STRIPE_ENV?: string; // 'test' | 'live'
   BOOKING_ENABLED?: string;
   UPLOADS_ENABLED?: string;
+  SMS_ENABLED?: string; // disabled unless explicitly true and a queue is bound
   TURNSTILE_SITE_KEY?: string;
   PUBLIC_BASE_URL?: string;
   SUPPORT_EMAIL?: string;
@@ -27,6 +28,10 @@ export interface Env {
   ADMIN_DEV_KEY?: string;
   CF_ACCESS_TEAM_DOMAIN?: string;
   CF_ACCESS_AUD?: string;
+
+  // Optional provider-neutral transactional SMS handoff. No consumer/provider
+  // is shipped; production remains email-only unless this is later bound.
+  SMS_QUEUE?: Queue<import('./sms.ts').TransactionalSmsJob>;
 }
 
 export type Ctx = EventContext<Env, string, Record<string, unknown>>;

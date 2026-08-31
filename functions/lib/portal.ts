@@ -1,7 +1,7 @@
 // Shared helpers for the customer portal: token auth, lazy hold expiry, and
 // the customer-visible view of a request (never internal notes or risk data).
 
-import type { Env } from './types.ts';
+import { modeFlags, type Env } from './types.ts';
 import type { PpiConfig } from './config.ts';
 import { verifyMagicToken } from './magic.ts';
 import { rateLimit } from './ratelimit.ts';
@@ -24,8 +24,8 @@ export async function requirePortal(request: Request, env: Env): Promise<PortalA
   if (!result.ok) {
     const messages = {
       invalid: 'This link is not valid. Check the most recent email from AutoClarity or contact support.',
-      expired: 'This link has expired. Contact support and a fresh link will be sent.',
-      revoked: 'This link was replaced by a newer one. Use the most recent email from AutoClarity.',
+      expired: 'This link has expired. Contact AutoClarity support for help accessing your request.',
+      revoked: 'This link was replaced. Use the most recent secure link from AutoClarity or contact support.',
     } as const;
     return { ok: false, response: errorJson(`link_${result.reason}`, messages[result.reason], 401) };
   }
@@ -34,10 +34,56 @@ export async function requirePortal(request: Request, env: Env): Promise<PortalA
 
 /** Release held slots whose hold window lapsed (lazy — no cron needed). */
 export async function releaseExpiredHolds(db: D1Database): Promise<void> {
-  await db
-    .prepare(`UPDATE appointment_slots SET status = 'offered', hold_expires_at = NULL, updated_at = ? WHERE status = 'held' AND hold_expires_at < ?`)
-    .bind(nowIso(), nowIso())
-    .run();
+  const now = nowIso();
+  // D1 batch is transactional. History/state, any pending booking, and the
+  // slot move together, so the portal never strands a request in checkout
+  // after its hold has become selectable again.
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO status_history (id, request_id, from_status, to_status, actor, reason, related_id, created_at)
+         SELECT 'sh_' || lower(hex(randomblob(16))), r.id, r.status, 'awaiting_time_selection',
+                'system:hold-expiry', 'Appointment hold expired',
+                (SELECT s.id FROM appointment_slots s
+                 WHERE s.request_id = r.id AND s.status = 'held' AND s.hold_expires_at < ?
+                 ORDER BY s.hold_expires_at LIMIT 1), ?
+         FROM ppi_requests r
+         WHERE r.status IN ('awaiting_agreement','awaiting_payment')
+           AND r.deleted_at IS NULL
+           AND EXISTS (
+             SELECT 1 FROM appointment_slots s
+             WHERE s.request_id = r.id AND s.status = 'held' AND s.hold_expires_at < ?
+           )`,
+      )
+      .bind(now, now, now),
+    db
+      .prepare(
+        `UPDATE ppi_requests SET status = 'awaiting_time_selection', updated_at = ?
+         WHERE status IN ('awaiting_agreement','awaiting_payment') AND deleted_at IS NULL
+           AND EXISTS (
+             SELECT 1 FROM appointment_slots s
+             WHERE s.request_id = ppi_requests.id AND s.status = 'held' AND s.hold_expires_at < ?
+           )`,
+      )
+      .bind(now, now),
+    db
+      .prepare(
+        `UPDATE bookings SET slot_id = NULL, status = 'pending_payment', updated_at = ?
+         WHERE status = 'pending_payment'
+           AND EXISTS (
+             SELECT 1 FROM appointment_slots s
+             WHERE s.id = bookings.slot_id AND s.status = 'held' AND s.hold_expires_at < ?
+           )`,
+      )
+      .bind(now, now),
+    db
+      .prepare(
+        `UPDATE appointment_slots
+         SET status = 'offered', hold_expires_at = NULL, updated_at = ?
+         WHERE status = 'held' AND hold_expires_at < ?`,
+      )
+      .bind(now, now),
+  ]);
 }
 
 export interface PortalView {
@@ -67,6 +113,7 @@ export interface PortalView {
   uploads: Array<{ id: string; name: string; kind: string }>;
   messages: Array<{ direction: string; body: string; createdAt: string }>;
   supportEmail: string;
+  paymentsEnabled: boolean;
 }
 
 export async function loadPortalView(env: Env, config: PpiConfig, requestId: string): Promise<PortalView | null> {
@@ -188,5 +235,6 @@ export async function loadPortalView(env: Env, config: PpiConfig, requestId: str
     uploads: (uploads.results ?? []).map((u) => ({ id: u.id, name: u.original_name, kind: u.kind })),
     messages: (messages.results ?? []).map((m) => ({ direction: m.direction, body: m.body_text, createdAt: m.created_at })),
     supportEmail: config.supportEmail,
+    paymentsEnabled: modeFlags(env).paymentsEnabled,
   };
 }

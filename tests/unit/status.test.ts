@@ -27,6 +27,9 @@ describe('status state machine', () => {
 
   it('allows refunds and disputes where money moved', () => {
     expect(canTransition('confirmed', 'refunded')).toBe(true);
+    expect(canTransition('confirmed', 'disputed')).toBe(true);
+    expect(canTransition('awaiting_time_selection', 'refunded')).toBe(true);
+    expect(canTransition('awaiting_time_selection', 'disputed')).toBe(true);
     expect(canTransition('completed', 'disputed')).toBe(true);
     expect(canTransition('customer_cancelled', 'refunded')).toBe(true);
   });

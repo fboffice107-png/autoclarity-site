@@ -17,6 +17,20 @@ function apiBase(env: Env): string {
 
 export class StripeConfigError extends Error {}
 
+export class StripeApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+  }
+
+  /** A 4xx response proves Stripe rejected the operation before success. */
+  get definitiveFailure(): boolean {
+    return this.status >= 400 && this.status < 500;
+  }
+}
+
 /**
  * Returns the Stripe secret key after safety checks:
  * - payments must be enabled
@@ -39,21 +53,38 @@ export function stripeKey(env: Env): string {
   return key;
 }
 
-async function stripePost(env: Env, key: string, path: string, params: Record<string, string>): Promise<Record<string, unknown>> {
+async function stripePost(
+  env: Env,
+  key: string,
+  path: string,
+  params: Record<string, string>,
+  idempotencyKey?: string,
+): Promise<Record<string, unknown>> {
+  const headers: Record<string, string> = {
+    authorization: `Bearer ${key}`,
+    'content-type': 'application/x-www-form-urlencoded',
+    'stripe-version': '2024-06-20',
+    'user-agent': 'AutoClarity-PPI/1.0',
+  };
+  if (idempotencyKey) headers['idempotency-key'] = idempotencyKey.slice(0, 255);
   const res = await fetch(`${apiBase(env)}${path}`, {
     method: 'POST',
-    headers: {
-      authorization: `Bearer ${key}`,
-      'content-type': 'application/x-www-form-urlencoded',
-      'stripe-version': '2024-06-20',
-    },
+    headers,
     body: new URLSearchParams(params),
     signal: AbortSignal.timeout(15000),
   });
-  const body = (await res.json()) as Record<string, unknown>;
+  let body: Record<string, unknown>;
+  try {
+    body = (await res.json()) as Record<string, unknown>;
+  } catch {
+    if (!res.ok) {
+      throw new StripeApiError(`Stripe ${path} failed (${res.status}): invalid provider response`, res.status);
+    }
+    throw new Error(`Stripe ${path} returned an invalid success response.`);
+  }
   if (!res.ok) {
     const err = (body as { error?: { message?: string; type?: string } }).error;
-    throw new Error(`Stripe ${path} failed (${res.status}): ${err?.message ?? 'unknown error'}`);
+    throw new StripeApiError(`Stripe ${path} failed (${res.status}): ${err?.message ?? 'unknown error'}`, res.status);
   }
   return body;
 }
@@ -66,6 +97,7 @@ export interface CheckoutInput {
   amountCents: number;
   customerEmail: string;
   publicBaseUrl: string;
+  attempt: number;
 }
 
 export interface CheckoutSession {
@@ -74,9 +106,40 @@ export interface CheckoutSession {
   expiresAt: number;
 }
 
+export type CheckoutAttemptDecision =
+  | { kind: 'new'; attempt: number }
+  | { kind: 'reuse'; attempt: number }
+  | { kind: 'already_paid' }
+  | { kind: 'reconciliation_required' };
+
 /**
- * Fresh Checkout Session per attempt. Metadata carries ONLY internal ids —
- * never VIN, address, notes or diagnostics.
+ * Chooses whether checkout may be opened without risking another charge.
+ * Locally ageing an attempt is not proof that Stripe expired it, so an
+ * ambiguous/stale attempt fails closed until a verified webhook resolves it.
+ */
+export function decideCheckoutAttempt(
+  total: number,
+  activeCount: number,
+  activeCreatedAt: string | null,
+  succeededCount: number,
+  nowMs = Date.now(),
+): CheckoutAttemptDecision {
+  const safeTotal = Number.isInteger(total) && total > 0 ? total : 0;
+  if (succeededCount > 0) return { kind: 'already_paid' };
+  if (activeCount > 1) return { kind: 'reconciliation_required' };
+  if (activeCount === 1) {
+    const createdMs = activeCreatedAt ? Date.parse(activeCreatedAt) : Number.NaN;
+    if (!Number.isFinite(createdMs) || createdMs > nowMs || nowMs - createdMs >= 30 * 60_000) {
+      return { kind: 'reconciliation_required' };
+    }
+    return { kind: 'reuse', attempt: Math.max(1, safeTotal) };
+  }
+  return { kind: 'new', attempt: safeTotal + 1 };
+}
+
+/**
+ * One Stripe-idempotent Checkout Session per database attempt. Metadata
+ * carries ONLY internal ids — never VIN, address, notes or diagnostics.
  */
 export async function createCheckoutSession(env: Env, input: CheckoutInput): Promise<CheckoutSession> {
   const key = stripeKey(env);
@@ -96,8 +159,9 @@ export async function createCheckoutSession(env: Env, input: CheckoutInput): Pro
     'payment_intent_data[metadata][booking_id]': input.bookingId,
     success_url: `${base}/ppi/portal/?checkout=success`,
     cancel_url: `${base}/ppi/portal/?checkout=cancelled`,
-    expires_at: String(Math.floor(Date.now() / 1000) + 1800), // 30 min minimum
-  });
+    // Stripe's lower bound is 30 minutes; leave margin for request latency.
+    expires_at: String(Math.floor(Date.now() / 1000) + 31 * 60),
+  }, `checkout/${input.bookingId}/${input.quoteId}/${input.attempt}`);
   return {
     id: String(session['id']),
     url: String(session['url']),
@@ -105,11 +169,61 @@ export async function createCheckoutSession(env: Env, input: CheckoutInput): Pro
   };
 }
 
-export async function createRefund(env: Env, paymentIntent: string, amountCents?: number): Promise<Record<string, unknown>> {
+export type StripeRefundProviderStatus =
+  | 'pending'
+  | 'succeeded'
+  | 'requires_action'
+  | 'failed'
+  | 'canceled'
+  | 'unknown';
+
+/**
+ * Classifies the explicit status on a Stripe Refund object. Stripe can return
+ * a Refund object with a non-success terminal or action-required status from
+ * a successful API request, so HTTP success alone must not drive local state.
+ */
+export function classifyStripeRefundStatus(refund: unknown): StripeRefundProviderStatus {
+  if (refund === null || typeof refund !== 'object' || Array.isArray(refund)) return 'unknown';
+  const status = (refund as { status?: unknown }).status;
+  switch (status) {
+    case 'pending':
+    case 'succeeded':
+    case 'requires_action':
+    case 'failed':
+    case 'canceled':
+      return status;
+    default:
+      return 'unknown';
+  }
+}
+
+export async function createRefund(
+  env: Env,
+  paymentIntent: string,
+  amountCents?: number,
+  idempotencyKey?: string,
+  metadata?: { operationId: string; attemptNo: number },
+): Promise<Record<string, unknown>> {
   const key = stripeKey(env);
   const params: Record<string, string> = { payment_intent: paymentIntent };
   if (amountCents !== undefined) params['amount'] = String(amountCents);
-  return stripePost(env, key, '/refunds', params);
+  if (metadata) {
+    params['metadata[refund_operation_id]'] = metadata.operationId.slice(0, 255);
+    params['metadata[refund_attempt_no]'] = String(metadata.attemptNo);
+  }
+  return stripePost(env, key, '/refunds', params, idempotencyKey);
+}
+
+/**
+ * Expires an open Checkout Session. Restrict the provider id to Stripe's
+ * ASCII `cs_` shape before interpolating it into the request path.
+ */
+export async function expireCheckoutSession(env: Env, sessionId: string): Promise<Record<string, unknown>> {
+  if (sessionId.length < 6 || sessionId.length > 255 || !/^cs_[A-Za-z0-9_]+$/.test(sessionId)) {
+    throw new TypeError('Invalid Stripe Checkout Session id.');
+  }
+  const key = stripeKey(env);
+  return stripePost(env, key, `/checkout/sessions/${encodeURIComponent(sessionId)}/expire`, {});
 }
 
 // ------------------------------------------------------------------ webhooks
@@ -160,15 +274,29 @@ export async function verifyStripeSignature(
 }
 
 /**
- * Idempotency guard: records the event id; returns false when the event was
- * already processed (replay), true when this call owns processing.
+ * Idempotency guard: records the event id; returns false for a processed or
+ * currently-owned replay. An unprocessed claim older than five minutes can be
+ * reclaimed, recovering a Worker termination between claim and completion.
  */
 export async function claimStripeEvent(db: D1Database, eventId: string, type: string, payloadSha256: string): Promise<boolean> {
+  const now = new Date();
+  const receivedAt = now.toISOString();
   const result = await db
     .prepare(`INSERT OR IGNORE INTO stripe_events (event_id, type, payload_sha256, received_at) VALUES (?, ?, ?, ?)`)
-    .bind(eventId, type, payloadSha256, new Date().toISOString())
+    .bind(eventId, type, payloadSha256, receivedAt)
     .run();
-  return (result.meta?.changes ?? 0) === 1;
+  if ((result.meta?.changes ?? 0) === 1) return true;
+
+  const staleBefore = new Date(now.getTime() - 5 * 60_000).toISOString();
+  const reclaimed = await db
+    .prepare(
+      `UPDATE stripe_events SET received_at = ?
+       WHERE event_id = ? AND type = ? AND payload_sha256 = ?
+         AND processed_at IS NULL AND received_at < ?`,
+    )
+    .bind(receivedAt, eventId, type, payloadSha256, staleBefore)
+    .run();
+  return (reclaimed.meta?.changes ?? 0) === 1;
 }
 
 export async function markStripeEventProcessed(db: D1Database, eventId: string): Promise<void> {

@@ -4,6 +4,8 @@
 (function () {
   "use strict";
 
+  var reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
   var KEY_STORE = "ppi-admin-key";
   var content = document.getElementById("adminContent");
   var nav = document.getElementById("adminNav");
@@ -11,6 +13,22 @@
   var currentView = "overview";
   var currentRequestId = null;
   var detailCache = null;
+  var requestListNotice = "";
+  var requestedRequestId = (function () {
+    try {
+      var value = new URL(window.location.href).searchParams.get("request") || "";
+      return /^[a-zA-Z0-9_-]{1,80}$/.test(value) ? value : "";
+    } catch (e) { return ""; }
+  })();
+
+  function setRequestUrl(id) {
+    try {
+      var url = new URL(window.location.href);
+      if (id) url.searchParams.set("request", id);
+      else url.searchParams.delete("request");
+      window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+    } catch (e) {}
+  }
 
   function adminKey() {
     try { return sessionStorage.getItem(KEY_STORE) || ""; } catch (e) { return ""; }
@@ -49,6 +67,7 @@
       nav.querySelectorAll(".tab-btn").forEach(function (b) { b.classList.remove("active"); });
       btn.classList.add("active");
       currentRequestId = null;
+      setRequestUrl("");
       show(btn.getAttribute("data-view"));
     });
   });
@@ -60,7 +79,16 @@
       if (!r.ok) { showLogin(); return; }
       loginPanel.hidden = true;
       nav.hidden = false;
-      show("overview", r.body);
+      if (requestedRequestId) {
+        var id = requestedRequestId;
+        requestedRequestId = "";
+        nav.querySelectorAll(".tab-btn").forEach(function (b) {
+          b.classList.toggle("active", b.getAttribute("data-view") === "requests");
+        });
+        openDetail(id);
+      } else {
+        show("overview", r.body);
+      }
     }).catch(function () {});
   }
 
@@ -87,6 +115,17 @@
     return new Date(iso).toLocaleString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   }
 
+  function refundStatusGuidance(status) {
+    if (status === "requested" || status === "pending") return "Stripe is still processing this refund. Do not retry while it is pending.";
+    if (status === "requires_action") return "Action required in Stripe. Review the refund there before retrying.";
+    if (status === "failed") return "Failed in Stripe. Verify the failure, then use Refund… to explicitly retry this operation.";
+    if (status === "canceled") return "Canceled in Stripe. Verify it was not paid out, then use Refund… to explicitly retry.";
+    if (status === "reconciliation_required") return "Manual reconciliation required. Check Stripe before taking any further refund action.";
+    if (status === "confirmed") return "Confirmed by Stripe. No further action is needed.";
+    if (status === "provider_accepted") return "Accepted by Stripe; confirmation is still pending. Do not retry.";
+    return "Unknown refund state. Review Stripe before taking further action.";
+  }
+
   /* ================= Overview ================= */
   function renderOverview(preloaded) {
     var proceed = function (data) {
@@ -102,8 +141,26 @@
         stat(c(["awaiting_agreement", "awaiting_payment"]), "Awaiting payment") +
         stat(c(["confirmed"]), "Confirmed") +
         stat(c(["completed"]), "Completed") +
+        notificationStat(data.notificationIssues || 0) +
         stat(money(data.revenue30d.cents), "Revenue (30d)") +
         "</div>";
+
+      var notificationRequests = data.notificationIssueRequests || [];
+      if (notificationRequests.length) {
+        html += '<section class="portal-card" id="notificationIssuesPanel" tabindex="-1">' +
+          '<h2>Notifications needing attention</h2>' +
+          '<p style="color:var(--text-2);">Open an affected request and review its Messages section to retry delivery. ' +
+          'If no failed email row appears, the message or secure link was never queued; verify contact manually and send a fresh message from the request.</p>' +
+          '<table class="admin-table"><thead><tr><th>Request</th><th>Issue</th><th>Source</th><th>Latest</th></tr></thead><tbody>';
+        notificationRequests.forEach(function (issue) {
+          var kinds = (issue.kinds || []).join(", ");
+          var sources = (issue.sourceActions || []).map(function (source) { return String(source).replace(/_/g, " "); }).join(", ");
+          html += '<tr data-req="' + esc(issue.requestId) + '"><td><strong>' + esc(issue.ref || issue.requestId) + '</strong></td>' +
+            '<td>' + esc(kinds || "notification failure") + (issue.issueCount > 1 ? " · " + esc(issue.issueCount) + " signals" : "") + '</td>' +
+            '<td>' + esc(sources || "email") + '</td><td class="mono">' + esc(when(issue.latestAt)) + "</td></tr>";
+        });
+        html += "</tbody></table></section>";
+      }
 
       html += '<section class="portal-card"><h2>Upcoming appointments</h2>';
       if ((data.upcoming || []).length === 0) html += '<p style="color:var(--text-3);">None scheduled.</p>';
@@ -118,7 +175,7 @@
       html += "</section>";
 
       html += '<section class="portal-card"><h2>Funnel (30 days)</h2><div class="admin-grid">';
-      var funnelOrder = ["ppi_page_view", "ppi_form_started", "ppi_request_submitted", "ppi_quote_sent", "ppi_slot_selected", "ppi_agreement_accepted", "ppi_checkout_started", "ppi_booking_confirmed"];
+      var funnelOrder = ["ppi_page_view", "ppi_form_started", "ppi_form_completed", "ppi_request_submitted", "request_confirmation_viewed", "ppi_quote_sent", "ppi_slot_selected", "ppi_agreement_accepted", "ppi_checkout_started", "ppi_booking_confirmed"];
       var fmap = {};
       (data.funnel30d || []).forEach(function (f) { fmap[f.event] = f.n; });
       funnelOrder.forEach(function (ev) {
@@ -139,6 +196,24 @@
         ' <span class="form-status" id="seedStatus"></span></section>';
 
       content.innerHTML = html;
+      var notificationBtn = document.getElementById("notificationIssuesBtn");
+      if (notificationBtn) notificationBtn.addEventListener("click", function () {
+        var panel = document.getElementById("notificationIssuesPanel");
+        if (panel) {
+          panel.scrollIntoView({ behavior: reducedMotion.matches ? "auto" : "smooth", block: "start" });
+          panel.focus();
+          return;
+        }
+        requestListNotice = (data.notificationIssues || 0) + " recent request " +
+          ((data.notificationIssues || 0) === 1 ? "needs" : "need") +
+          " notification attention. Open a recent request and review its Messages section to retry delivery.";
+        nav.querySelectorAll(".tab-btn").forEach(function (b) {
+          b.classList.toggle("active", b.getAttribute("data-view") === "requests");
+        });
+        currentRequestId = null;
+        setRequestUrl("");
+        show("requests");
+      });
       content.querySelectorAll("[data-req]").forEach(function (tr) {
         tr.addEventListener("click", function () { openDetail(tr.getAttribute("data-req")); });
       });
@@ -158,9 +233,19 @@
     return '<div class="stat-card"><div class="stat-num">' + esc(num) + '</div><div class="stat-label">' + esc(label) + "</div></div>";
   }
 
+  function notificationStat(count) {
+    if (!count) return stat(0, "Notification issues");
+    return '<button class="stat-card stat-card-action stat-card-alert" id="notificationIssuesBtn" type="button" ' +
+      'aria-label="Review ' + esc(count) + ' notification issues in recent requests">' +
+      '<span class="stat-num">' + esc(count) + '</span><span class="stat-label">Notification issues</span>' +
+      '<span class="stat-hint">Review recent requests →</span></button>';
+  }
+
   /* ================= Requests list ================= */
   function renderRequests() {
-    var html = '<div class="admin-toolbar"><label for="statusFilter" class="sr-only">Filter by status</label>' +
+    var html = requestListNotice ? '<div class="notice warn">' + esc(requestListNotice) + "</div>" : "";
+    requestListNotice = "";
+    html += '<div class="admin-toolbar"><label for="statusFilter" class="sr-only">Filter by status</label>' +
       '<select id="statusFilter"><option value="">All statuses</option>' +
       ["submitted", "needs_info", "seller_access_pending", "ready_for_review", "quote_prepared", "quote_sent", "awaiting_time_selection", "awaiting_agreement", "awaiting_payment", "confirmed", "inspection_in_progress", "report_in_progress", "completed", "customer_cancelled", "admin_cancelled", "expired", "refunded", "disputed"]
         .map(function (s) { return '<option value="' + s + '">' + s.replace(/_/g, " ") + "</option>"; }).join("") +
@@ -198,11 +283,22 @@
   /* ================= Request detail ================= */
   function openDetail(id) {
     currentRequestId = id;
+    setRequestUrl(id);
     api("/api/admin/requests/" + encodeURIComponent(id)).then(function (r) {
-      if (!r.ok) return;
+      if (!r.ok) {
+        currentRequestId = null;
+        setRequestUrl("");
+        nav.querySelectorAll(".tab-btn").forEach(function (b) {
+          b.classList.toggle("active", b.getAttribute("data-view") === "requests");
+        });
+        show("requests");
+        return;
+      }
       detailCache = r.body;
       renderDetail();
-    }).catch(function () {});
+    }).catch(function () {
+      content.innerHTML = '<div class="notice warn">We could not load this request. Refresh the page or return to the request list.</div>';
+    });
   }
 
   function act(payload, cb) {
@@ -211,10 +307,14 @@
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload)
     }).then(function (r) {
-      if (cb) cb(r);
+      var handled = cb ? cb(r) === true : false;
       if (r.ok) openDetail(currentRequestId);
-      else alert((r.body.error && r.body.error.message) || "Action failed");
-    }).catch(function () {});
+      else if (!handled) alert((r.body.error && r.body.error.message) || "Action failed");
+    }).catch(function () {
+      var failure = { ok: false, body: { error: { message: "Network problem — the action was not confirmed. Please try again." } } };
+      if (cb) cb(failure);
+      alert(failure.body.error.message);
+    });
   }
 
   function renderDetail() {
@@ -323,6 +423,47 @@
     } else {
       html += '<p style="color:var(--text-3);">No payments.</p>';
     }
+
+    // ----- refund tracking -----
+    var refundOperations = d.refundOperations || [];
+    var refundAttempts = d.refundAttempts || [];
+    html += '<h3>Refund operations</h3>';
+    if (refundOperations.length) {
+      html += '<p class="field-hint">The operation status below is the current source of truth for the next action. Provider attempts remain visible as immutable history.</p>' +
+        '<div style="overflow-x:auto;"><table class="admin-table"><thead><tr><th>Operation</th><th>Amount</th><th>Status</th><th>Attempts</th><th>Stripe refund</th><th>Updated</th><th>Next step</th></tr></thead><tbody>';
+      refundOperations.forEach(function (refundOperation) {
+        var operationStatus = String(refundOperation.status || "unknown");
+        html += '<tr><td class="mono">' + esc(refundOperation.id || "—") + "</td>" +
+          "<td>" + esc(money(Number(refundOperation.requested_amount_cents || 0))) + "</td>" +
+          "<td>" + esc(operationStatus.replace(/_/g, " ")) + "</td>" +
+          "<td>" + esc(refundOperation.attempt_count == null ? "—" : refundOperation.attempt_count) + "</td>" +
+          '<td class="mono">' + esc(refundOperation.provider_refund_id || "—") + "</td>" +
+          '<td class="mono">' + esc(when(refundOperation.updated_at)) + "</td>" +
+          "<td>" + esc(refundStatusGuidance(operationStatus)) +
+          (refundOperation.last_error ? '<span class="msg-meta">Last error: ' + esc(refundOperation.last_error) + "</span>" : "") +
+          "</td></tr>";
+      });
+      html += "</tbody></table></div>";
+    } else {
+      html += '<p style="color:var(--text-3);">No refund operations.</p>';
+    }
+
+    html += '<h3>Refund attempts</h3>';
+    if (refundAttempts.length) {
+      html += '<div style="overflow-x:auto;"><table class="admin-table"><thead><tr><th>Operation</th><th>Attempt</th><th>Outcome</th><th>Provider status</th><th>Stripe refund</th><th>Updated</th><th>Error</th></tr></thead><tbody>';
+      refundAttempts.forEach(function (refundAttempt) {
+        html += '<tr><td class="mono">' + esc(refundAttempt.operation_id || "—") + "</td>" +
+          "<td>" + esc(refundAttempt.attempt_no == null ? "—" : refundAttempt.attempt_no) + "</td>" +
+          "<td>" + esc(String(refundAttempt.outcome_status || "unknown").replace(/_/g, " ")) + "</td>" +
+          "<td>" + esc(refundAttempt.provider_status || "—") + "</td>" +
+          '<td class="mono">' + esc(refundAttempt.provider_refund_id || "—") + "</td>" +
+          '<td class="mono">' + esc(when(refundAttempt.updated_at)) + "</td>" +
+          "<td>" + esc(refundAttempt.error || "—") + "</td></tr>";
+      });
+      html += "</tbody></table></div>";
+    } else {
+      html += '<p style="color:var(--text-3);">No refund attempts.</p>';
+    }
     html += "</section>";
 
     // ----- agreements -----
@@ -338,10 +479,13 @@
     // ----- messages -----
     html += '<section class="portal-card"><h2>Messages</h2><ul class="msg-list">';
     (d.messages || []).forEach(function (m) {
+      var retry = m.channel === "email" && (m.status === "failed" || m.status === "recorded")
+        ? ' <button class="btn btn-ghost btn-sm" data-retry-email="' + esc(m.id) + '">Retry email</button>'
+        : "";
       html += '<li class="' + (m.direction === "inbound" ? "inbound" : "") + '">' +
         "<strong>" + esc(m.direction) + (m.template ? " · " + esc(m.template) : "") + (m.channel === "email" ? " · " + esc(m.status) : "") + ":</strong> " +
         esc((m.subject ? m.subject + " — " : "") + (m.body_text || "").slice(0, 400)) +
-        '<span class="msg-meta">' + esc(when(m.created_at)) + "</span></li>";
+        retry + '<span class="msg-meta">' + esc(when(m.created_at)) + "</span></li>";
     });
     html += "</ul><div class='admin-toolbar' style='margin-top:12px;'>" +
       '<input id="adminMsg" placeholder="Message to customer (portal + email)" style="flex:1;min-width:220px;" />' +
@@ -376,7 +520,11 @@
   }
 
   function bindDetail() {
-    document.getElementById("backToList").addEventListener("click", function () { show("requests"); });
+    document.getElementById("backToList").addEventListener("click", function () {
+      currentRequestId = null;
+      setRequestUrl("");
+      show("requests");
+    });
 
     // upload thumbnails require the auth header → fetch to blob URLs
     content.querySelectorAll("[data-upload]").forEach(function (img) {
@@ -439,13 +587,64 @@
         var cents = dollarsToCents(amt);
         if (amt && cents === null) { alert("Invalid amount"); return; }
         if (!confirm("Submit " + (cents ? "$" + (cents / 100).toFixed(2) : "FULL") + " refund via Stripe?")) return;
-        act({ action: "refund", paymentId: btn.getAttribute("data-refund"), amountCents: cents || undefined });
+        function submitRefund(refundOperationId) {
+          act({
+            action: "refund",
+            paymentId: btn.getAttribute("data-refund"),
+            amountCents: cents || undefined,
+            refundOperationId: refundOperationId || undefined
+          }, function (r) {
+            var error = r.body && r.body.error;
+            if (!r.ok && error && error.code === "refund_retry_available" && error.retryAllowed && !refundOperationId) {
+              var approved = confirm(
+                "Stripe definitively failed the prior refund. The failed attempt is recorded.\n\n" +
+                "Retry that same refund amount as a new, separately tracked provider attempt?"
+              );
+              if (approved) submitRefund(error.operationId);
+              return true;
+            }
+            return false;
+          });
+        }
+        submitRefund(null);
       });
     });
 
     document.getElementById("adminMsgGo").addEventListener("click", function () {
       var note = document.getElementById("adminMsg").value.trim();
       if (note) act({ action: "send_message", note: note });
+    });
+
+    content.querySelectorAll("[data-retry-email]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var messageId = btn.getAttribute("data-retry-email");
+        function runRetry(confirmFresh) {
+          btn.disabled = true;
+          btn.textContent = confirmFresh ? "Preparing fresh copy…" : "Retrying…";
+          act({ action: "retry_email", messageId: messageId, confirmFresh: confirmFresh === true }, function (r) {
+            var error = r.body && r.body.error;
+            if (!r.ok && error && error.code === "email_retry_window_expired" && error.requiresFreshConfirmation && !confirmFresh) {
+              var approved = window.confirm(
+                "This email is more than 24 hours old, so delivery is ambiguous and the provider’s duplicate protection has expired.\n\n" +
+                "Review the provider delivery history first. Send a new copy only if the customer still needs it.\n\n" +
+                "Create and send a fresh copy now?"
+              );
+              if (approved) runRetry(true);
+              else {
+                btn.disabled = false;
+                btn.textContent = "Retry email";
+              }
+              return true;
+            }
+            if (!r.ok) {
+              btn.disabled = false;
+              btn.textContent = "Retry email";
+            }
+            return false;
+          });
+        }
+        runRetry(false);
+      });
     });
 
     document.getElementById("saveNotes").addEventListener("click", function () {

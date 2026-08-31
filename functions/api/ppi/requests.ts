@@ -12,8 +12,47 @@ import { suggestTier, estimateTravel } from '../../lib/pricing.ts';
 import { verifyTurnstile } from '../../lib/turnstile.ts';
 import { rateLimit } from '../../lib/ratelimit.ts';
 import { issueMagicLink, portalUrl } from '../../lib/magic.ts';
-import { sendTemplate } from '../../lib/email.ts';
-import { clientIp, errorJson, json, newId, newRef, nowIso, originAllowed, toCents } from '../../lib/util.ts';
+import { queueTemplate, type EmailResult } from '../../lib/email.ts';
+import { persistNotificationIssue } from '../../lib/notification-issues.ts';
+import { queueTransactionalSms } from '../../lib/sms.ts';
+import { clientIp, errorJson, json, newId, newRef, nowIso, originAllowed, sha256Hex, toCents } from '../../lib/util.ts';
+
+const SUBMISSION_KEY_RE = /^[A-Za-z0-9_-]{16,128}$/;
+
+function duplicateAcknowledgement(): Response {
+  return json({
+    ok: true,
+    duplicate: true,
+    emailStatus: 'not_sent',
+    message: 'This request is already in our system. Please use the secure link in your original confirmation email or contact AutoClarity for help.',
+  });
+}
+
+async function surfaceIntakeNotificationFailure(
+  db: D1Database,
+  requestId: string,
+  result: EmailResult,
+  sourceAction: 'request_received' | 'owner_new_request',
+  dedupeKey: string,
+): Promise<void> {
+  if (result.status !== 'failed') return;
+  console.error(JSON.stringify({
+    event: 'intake_notification_failed',
+    requestId,
+    sourceAction,
+    failure: result.failure ?? null,
+  }));
+  await persistNotificationIssue(db, {
+    actor: 'system:intake',
+    requestId,
+    issueKey: result.issueKey ?? `outbox:${dedupeKey}`,
+    kind: 'record_failed',
+    sourceAction,
+    template: sourceAction,
+    dedupeKey,
+    error: result.failure,
+  });
+}
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { request, env } = context;
@@ -50,6 +89,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   const { payload, errors } = parseIntake(raw);
+  const rawSubmissionKey = typeof raw['submissionKey'] === 'string' ? raw['submissionKey'].trim() : '';
+  const submissionKey = rawSubmissionKey || null;
+  if (submissionKey && !SUBMISSION_KEY_RE.test(submissionKey)) {
+    errors['submissionKey'] = 'Refresh the form and try again. Your saved answers will remain available.';
+  }
 
   // VIN: optional at submission, but must be plausible when provided.
   let vinNormalized: string | null = null;
@@ -66,8 +110,19 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return json({ error: { code: 'validation', message: 'Please correct the highlighted fields.' }, fields: errors }, 422);
   }
 
+  // A stable client key handles exact retries. The email + vehicle fingerprint
+  // is a 24-hour server-side fallback for cached clients and simultaneous tabs
+  // that generated different keys. Only hashes are stored in the claim table.
+  const vehicleIdentity = vinNormalized
+    ? `vin:${vinNormalized}`
+    : `vehicle:${payload.year ?? ''}|${payload.make.trim().toLowerCase()}|${payload.model.trim().toLowerCase()}`;
+  const intakeFingerprint = await sha256Hex(`ppi-intake-v1|${payload.email}|${vehicleIdentity}`);
+  const claimCutoff = nowIso();
+  await env.DB.prepare(`DELETE FROM intake_submission_claims WHERE expires_at <= ?`).bind(claimCutoff).run();
+
   // Duplicate damper: same email + same VIN (or same vehicle) with an open
-  // request in the last 24h returns the existing reference instead of a copy.
+  // request in the last 24h returns a generic acknowledgement instead of a
+  // copy. Never rotate or expose the existing request's portal credentials.
   const existing = await env.DB
     .prepare(
       `SELECT r.id, r.ref FROM ppi_requests r
@@ -90,23 +145,19 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     )
     .first<{ id: string; ref: string }>();
 
-  const config = await getConfig(env.DB);
-
   if (existing) {
-    const { token } = await issueMagicLink(env.DB, existing.id, config);
-    return json({
-      duplicate: true,
-      ref: existing.ref,
-      portalToken: token,
-      message: 'We already have an open request for this vehicle — here is your existing reference.',
-    });
+    return duplicateAcknowledgement();
   }
+
+  const config = await getConfig(env.DB);
 
   const now = nowIso();
   const customerId = newId('cus');
   const vehicleId = newId('veh');
   const requestId = newId('req');
   const ref = newRef();
+  const claimId = newId('ic');
+  const claimExpiresAt = new Date(Date.now() + 24 * 3600_000).toISOString();
 
   const tierSuggestion = suggestTier({
     year: payload.year,
@@ -119,8 +170,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   });
   const travel = estimateTravel(payload.locZip, config);
 
-  await env.DB.batch([
-    env.DB
+  try {
+    await env.DB.batch([
+      env.DB
       .prepare(
         `INSERT INTO customers (id, full_name, email, phone, preferred_contact, transactional_consent, marketing_consent, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -136,7 +188,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         now,
         now,
       ),
-    env.DB
+      env.DB
       .prepare(
         `INSERT INTO vehicles (id, year, make, model, trim, mileage, vin, asking_price_cents, expected_price_cents, listing_url,
                                mod_status, warning_lights, known_issues, title_status, starts_drives, created_at, updated_at)
@@ -161,23 +213,24 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         now,
         now,
       ),
-    env.DB
+      env.DB
       .prepare(
         `INSERT INTO ppi_requests (
-           id, ref, customer_id, vehicle_id, status,
+           id, ref, customer_id, vehicle_id, submission_key, status,
            loc_street, loc_unit, loc_city, loc_state, loc_zip, seller_type, seller_name, seller_phone,
            loc_notes, access_notes, lift_available, level_surface,
            perm_inspection, perm_scan, perm_road_test, perm_photos, perm_underbody, ack_access_dependent,
            decision_timeline, preferred_dates, time_window, same_day_priority, customer_notes,
            travel_miles, travel_estimate_basis, suggested_tier, manual_review_reasons,
            created_at, updated_at
-         ) VALUES (?, ?, ?, ?, 'submitted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, 'submitted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         requestId,
         ref,
         customerId,
         vehicleId,
+        submissionKey,
         payload.locStreet || null,
         payload.locUnit || null,
         payload.locCity,
@@ -208,47 +261,140 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         now,
         now,
       ),
-    env.DB
+      env.DB
       .prepare(
         `INSERT INTO status_history (id, request_id, from_status, to_status, actor, reason, created_at)
          VALUES (?, ?, NULL, 'submitted', 'customer', 'Intake form submitted', ?)`,
       )
       .bind(newId('sh'), requestId, now),
-  ]);
+      env.DB
+        .prepare(
+          `INSERT INTO intake_submission_claims (id, request_id, fingerprint, expires_at, created_at)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .bind(claimId, requestId, intakeFingerprint, claimExpiresAt, now),
+    ]);
+  } catch (e) {
+    // Both uniqueness claims live in the same D1 transaction as the workflow.
+    // A concurrent loser therefore creates no orphan customer/vehicle rows and
+    // receives the same non-enumerating acknowledgement as a normal duplicate.
+    const claimed = await env.DB
+      .prepare(
+        `SELECT request_id FROM intake_submission_claims
+         WHERE fingerprint = ? AND expires_at > ?
+         UNION ALL
+         SELECT id AS request_id FROM ppi_requests
+         WHERE submission_key = ? AND submission_key IS NOT NULL
+         LIMIT 1`,
+      )
+      .bind(intakeFingerprint, nowIso(), submissionKey)
+      .first<{ request_id: string }>();
+    if (claimed) return duplicateAcknowledgement();
+    throw e;
+  }
 
-  const { token } = await issueMagicLink(env.DB, requestId, config);
-  const link = portalUrl(env.PUBLIC_BASE_URL ?? new URL(request.url).origin, token);
+  const base = (env.PUBLIC_BASE_URL ?? new URL(request.url).origin).replace(/\/$/, '');
+  let token: string | undefined;
+  let link: string | undefined;
+  try {
+    const magic = await issueMagicLink(env.DB, requestId, config);
+    token = magic.token;
+    link = portalUrl(base, magic.token);
+  } catch (e) {
+    // The lead is already durably stored. A link/notification outage must not
+    // invite a duplicate form submission by turning this response into a 500.
+    console.error('intake_magic_link_failed', requestId, String(e).slice(0, 240));
+  }
 
-  // Emails are best-effort; the stored request is the source of truth.
-  await sendTemplate(env, env.DB, requestId, 'request_received', payload.email, {
+  const vehicle = `${payload.year ?? ''} ${payload.make} ${payload.model}${payload.trim ? ` ${payload.trim}` : ''}`.trim();
+  const location = [payload.locStreet, payload.locUnit, payload.locCity, payload.locState || 'NV', payload.locZip].filter(Boolean).join(', ');
+  const seller = [payload.sellerType, payload.sellerName, payload.sellerPhone].filter(Boolean).join(' · ');
+  const timing = [payload.preferredDates, payload.decisionTimeline, payload.timeWindow, payload.sameDayPriority ? 'same-day priority requested' : ''].filter(Boolean).join(' · ');
+  const concerns = [payload.knownIssues, payload.warningLights, payload.customerNotes].filter(Boolean).join(' · ');
+  const access = [
+    payload.locNotes,
+    payload.accessNotes,
+    `scan ${payload.permScan ? 'allowed' : 'not allowed'}`,
+    `road test ${payload.permRoadTest}`,
+    `photos ${payload.permPhotos}`,
+    `underbody ${payload.permUnderbody}`,
+    `lift ${payload.liftAvailable}`,
+    `level surface ${payload.levelSurface}`,
+  ].filter(Boolean).join(' · ');
+  const waitUntil = (promise: Promise<unknown>) => context.waitUntil(promise);
+
+  // Recording is awaited; provider delivery runs after the response. The
+  // returned status is therefore honest (`recorded`, never prematurely sent).
+  const customerEmailDedupeKey = `request_received:${requestId}`;
+  const customerEmail = await queueTemplate(env, env.DB, requestId, 'request_received', payload.email, {
     ref,
     portalUrl: link,
     supportEmail: config.supportEmail,
-  });
+    extra: {
+      name: payload.fullName,
+      vehicle,
+      vin: vinNormalized || 'Not provided',
+      email: payload.email,
+      phone: payload.phone,
+      preferredContact: payload.preferredContact,
+      location,
+      seller: seller || 'Not provided',
+      timing: timing || 'Flexible',
+      concerns: concerns || 'None provided',
+      access,
+    },
+  }, waitUntil, undefined, customerEmailDedupeKey);
+  await surfaceIntakeNotificationFailure(env.DB, requestId, customerEmail, 'request_received', customerEmailDedupeKey);
   if (env.ADMIN_NOTIFY_EMAIL) {
-    await sendTemplate(
+    const ownerEmailDedupeKey = `owner_new_request:${requestId}`;
+    const ownerEmail = await queueTemplate(
       env,
       env.DB,
       requestId,
-      'owner_notify',
+      'owner_new_request',
       env.ADMIN_NOTIFY_EMAIL,
       {
         ref,
         supportEmail: config.supportEmail,
         extra: {
-          kind: 'new request',
-          detail: `${payload.year ?? '?'} ${payload.make} ${payload.model} — ${payload.locCity} ${payload.locZip} — suggested tier ${tierSuggestion.tier}${tierSuggestion.manualReview ? ' (MANUAL REVIEW)' : ''}`,
-          adminUrl: `${(env.PUBLIC_BASE_URL ?? '').replace(/\/$/, '')}/ppi/admin/`,
+          name: payload.fullName,
+          email: payload.email,
+          phone: payload.phone,
+          preferredContact: payload.preferredContact,
+          vehicle,
+          vin: vinNormalized || 'Not provided',
+          location,
+          seller: seller || 'Not provided',
+          timing: timing || 'Flexible',
+          concerns: concerns || 'None provided',
+          access,
+          tier: `${tierSuggestion.tier}${tierSuggestion.manualReview ? ' — MANUAL REVIEW' : ''}`,
+          adminUrl: `${base}/ppi/admin/?request=${encodeURIComponent(requestId)}`,
         },
       },
+      waitUntil,
       payload.email,
+      ownerEmailDedupeKey,
     );
+    await surfaceIntakeNotificationFailure(env.DB, requestId, ownerEmail, 'owner_new_request', ownerEmailDedupeKey);
   }
+
+  const smsStatus = await queueTransactionalSms(env, {
+    requestId,
+    template: 'request_received',
+    to: payload.phone,
+    body: `AutoClarity inspection update: we received request ${ref}. ${link ? `Track it securely: ${link}` : 'We will follow up by email.'}`,
+    transactionalConsent: payload.transactionalConsent,
+    requestedByCustomer: payload.preferredContact === 'text',
+  });
 
   return json({
     ok: true,
     ref,
-    portalToken: token,
-    reviewWindow: 'You will normally receive a response the same day and no later than 24 hours.',
+    requestRef: ref,
+    ...(token ? { portalToken: token } : {}),
+    emailStatus: customerEmail.status,
+    smsStatus,
+    reviewWindow: 'AutoClarity typically responds within 24 hours with scheduling details.',
   });
 };

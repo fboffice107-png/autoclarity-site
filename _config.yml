@@ -1,6 +1,6 @@
-# GitHub Pages (legacy Jekyll) configuration.
-#
-# getautoclarity.com is served from the `main` branch root by GitHub Pages.
+# Legacy GitHub Pages/Jekyll safety configuration retained for the repository's
+# static mirror. Production and production rollback both use Cloudflare Pages;
+# this file is neither a deployment authority nor the release rollback path.
 # This file prevents repository scaffolding (backend source, config, tests,
 # docs, tooling) from being published as static files. Only the website's
 # own assets are served. On Cloudflare Pages these are additionally 404'd by
@@ -14,6 +14,7 @@ exclude:
   - legal
   - node_modules
   - wrangler.toml
+  - wrangler.local.toml
   - package.json
   - package-lock.json
   - tsconfig.json

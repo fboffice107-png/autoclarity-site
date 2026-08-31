@@ -1,4 +1,9 @@
-# Cloudflare Setup — exact steps
+# Cloudflare Setup — reference for a new isolated environment
+
+> The AutoClarity production Pages project, domains, D1 database, R2 bucket,
+> Turnstile, email secrets, and Access configuration already exist. Do not run
+> the bootstrap script against production. This guide is retained for creating
+> an isolated preview or disaster-recovery environment.
 
 The repo is ready; Cloudflare needs one-time resource creation. Everything here
 happens in the Cloudflare account that already runs DNS for getautoclarity.com.
@@ -7,32 +12,40 @@ happens in the Cloudflare account that already runs DNS for getautoclarity.com.
 
 ```bash
 cd autoclarity-site
-npx wrangler login        # opens the browser; approve access
+npx --no-install wrangler login   # opens the browser; approve access
 ```
 
-## 1. Create resources + first preview deploy (scripted)
+## 1. Create isolated resources + first preview deploy
 
 ```bash
+AC_PREVIEW_PROJECT=autoclarity-site-preview \
+AC_PREVIEW_DB=autoclarity-ppi-preview \
+AC_PREVIEW_BUCKET=autoclarity-ppi-uploads-preview \
+AC_PREVIEW_BRANCH=review \
+AC_PREVIEW_PUBLIC_BASE_URL=https://review.autoclarity-site-preview.pages.dev \
+CONFIRM_ISOLATED_PREVIEW=YES \
 ./scripts/cloudflare-setup.sh
 ```
 
 The script:
-1. creates the D1 database `autoclarity_ppi` and patches `wrangler.toml` with
-   the real `database_id`,
-2. creates the private R2 bucket `autoclarity-ppi-uploads`,
-3. creates the Pages project `autoclarity-site` (production branch `main` — we
-   never deploy it; previews come from the feature branch),
-4. applies migrations to the remote preview DB,
-5. deploys the current branch as a **preview** (`--branch feature/las-vegas-ppi-portal`),
-6. prints the `https://<hash>.autoclarity-site.pages.dev` preview URL.
+1. requires lowercase resource names ending in `-preview`, a non-production
+   branch, an exact matching `*.pages.dev` URL, and explicit confirmation,
+2. creates or locates the distinctly named preview D1/R2/Pages resources,
+3. writes a gitignored generated config under `.wrangler/preview/`, leaving
+   `wrangler.local.toml` untouched,
+4. applies migrations only to the named preview D1,
+5. deploys only the named preview project and branch.
+
+Run the same command with `--validate-only` to exercise every local guard without
+writing the generated config, contacting Cloudflare, or changing any resource.
 
 Manual equivalents are inside the script if you prefer clicking the dashboard.
 
 ## 2. Preview secrets
 
-Preview needs only test-grade values. In the dashboard (Pages → autoclarity-site
+Preview needs only test-grade values. In the dashboard (Pages → your preview project
 → Settings → Environment variables → **Preview**) or via
-`npx wrangler pages secret put NAME --project-name autoclarity-site`:
+`npx --no-install wrangler pages secret put NAME --project-name <preview-project>`:
 
 | Name | Preview value |
 |---|---|
@@ -45,7 +58,9 @@ Preview needs only test-grade values. In the dashboard (Pages → autoclarity-si
 | `ADMIN_NOTIFY_EMAIL` | your inbox |
 
 Also set the **Preview** plain variable `PUBLIC_BASE_URL` to the branch preview
-URL once known (e.g. `https://feature-las-vegas-ppi-portal.autoclarity-site.pages.dev`).
+URL once known (e.g. `https://review.autoclarity-site-preview.pages.dev`). The
+host must belong to the isolated preview project, never the production Pages
+project.
 
 ## 3. Turnstile (production-grade bot protection)
 
@@ -60,7 +75,7 @@ challenge — fine for preview, never for production.
 Two applications (Zero Trust → Access → Applications → Self-hosted):
 
 1. **Preview lock (recommended):** application on
-   `autoclarity-site.pages.dev` covering `/*` — policy: allow only your email.
+   the preview project's `*.pages.dev` hostname covering `/*` — policy: allow only your email.
    This makes the whole preview owner-only. (Pages → Settings → also enable
    "Access policy" toggle for preview deployments if offered — same effect,
    one click.)
@@ -75,18 +90,14 @@ configured, production admin fails closed (503) rather than open.
 
 ## 5. Branch previews
 
-Pages → autoclarity-site → Settings → Builds & deployments: preview branch
-`feature/las-vegas-ppi-portal` (or "all non-production branches"). If the
-project was created by the script (direct upload), previews are produced by
-`npx wrangler pages deploy . --branch feature/las-vegas-ppi-portal` instead —
-same URL shape. Preview deployments automatically send
+The isolated project created by the script is direct-upload. Repeat deployments
+must use its generated `.wrangler/preview/wrangler.toml` configuration, never
+`wrangler.local.toml` and never the production project. Preview deployments send
 `X-Robots-Tag: noindex` from Cloudflare, and the app adds its own noindex
 whenever `PPI_ENV != production`.
 
-## 6. What stays untouched
+## 6. What stays untouched in a new preview
 
-- GitHub Pages keeps serving getautoclarity.com from `main`.
-- DNS records are NOT changed by any of this.
-- Moving production to Cloudflare Pages later = add the custom domain to the
-  Pages project and flip the DNS record — documented in PPI_DEPLOYMENT.md,
-  owner-gated.
+- The existing production Pages deployment and custom domains.
+- Production D1/R2 data and production secrets.
+- DNS records. A preview needs only its `*.pages.dev` hostname.

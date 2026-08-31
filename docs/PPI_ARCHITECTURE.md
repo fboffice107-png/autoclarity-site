@@ -2,24 +2,21 @@
 
 ## The one-paragraph version
 
-getautoclarity.com is a static site currently served by **GitHub Pages** (repo
-`fboffice107-png/autoclarity-site`, `main` branch, CNAME file) with DNS on
-**Cloudflare**. The PPI portal extends this same repository into a **Cloudflare
-Pages** project: the static files are served unchanged, and the server side is
-added as Pages Functions (`/functions`) with **D1** (SQLite) for data, **R2**
-for private image uploads, **Turnstile** for bot protection, **Stripe Checkout**
-for payments, and **Cloudflare Access** for the admin. Nothing was migrated and
-no framework was introduced — GitHub Pages production keeps working because it
-simply ignores `functions/`, `wrangler.toml`, `_headers` and `_redirects`.
+getautoclarity.com is served by an existing **Cloudflare Pages** direct-upload
+project from the `fboffice107-png/autoclarity-site` repository. Pages serves the
+static HTML/CSS/JavaScript and Pages Functions (`/functions`) together. The PPI
+system uses **D1** (SQLite) for durable request data, **R2** for private uploads,
+**Turnstile** for bot protection, **Resend** for transactional email, **Stripe
+Checkout** for the owner-gated payment path, and **Cloudflare Access** for the
+admin. No frontend framework was introduced.
 
 ## Why this shape
 
 - **Least disruption:** the existing site is plain HTML/CSS/JS; the PPI pages
   are too. Same design tokens (`assets/css/site.css`), same nav/footer.
 - **One deployment story:** Cloudflare Pages serves *both* the static site and
-  the API. When the owner is ready, pointing DNS at Pages replaces GitHub Pages
-  with a strict superset (see PPI_DEPLOYMENT.md). Until then, previews run on
-  `*.pages.dev` and production is untouched.
+  API. Direct uploads produce immutable deployments; production promotion and
+  rollback are described in `PPI_DEPLOYMENT.md`.
 - **No heavy dependencies:** the Worker runtime code has zero npm runtime
   dependencies. Stripe is called through its REST API with WebCrypto signature
   verification; Turnstile and NHTSA vPIC are plain fetches.
@@ -64,13 +61,15 @@ simply ignores `functions/`, `wrangler.toml`, `_headers` and `_redirects`.
 ## The money path (the part that must never lie)
 
 1. Admin sends a versioned quote → customer picks an offered slot.
-2. Slot hold is atomic: `UPDATE … WHERE status='offered'` + a **partial unique
-   index** on `appointment_slots(starts_at) WHERE status IN ('held','confirmed')`
-   makes double-booking impossible at the database level.
+2. Slot hold is atomic. The original exact-start partial index is supplemented
+   by database triggers that reject any overlap between offered, held, or
+   confirmed windows after travel and report buffers are applied.
 3. Agreements accepted (per-document rows, doc hash + typed name).
 4. `checkout` re-validates everything (quote unexpired, hold alive, agreements
-   complete, payments enabled) and creates a fresh Checkout Session; the hold is
-   extended to cover Stripe's 30-minute session window.
+   complete, payments enabled), creates a durable D1 attempt claim, then calls
+   Stripe with a stable idempotency key. A recoverable retry resumes that claim;
+   cancellation fails closed while provider state is unresolved. The hold is
+   extended to cover Stripe's 30-minute Session window.
 5. **Only the signature-verified, replay-guarded webhook confirms anything**:
    payment → slot confirmed → siblings released → booking confirmed → emails.
    The browser success page just polls the portal until the webhook lands.
@@ -80,9 +79,9 @@ simply ignores `functions/`, `wrangler.toml`, `_headers` and `_redirects`.
 ## Scheduled work
 
 There is no cron in v1 by design. Holds and quote expiries are enforced
-**lazily** (checked on every read/mutation that cares). Appointment reminder
-emails are admin-triggered; a dedicated Cron Worker is documented as an
-optional enhancement in PPI_DEPLOYMENT.md and is not required for correctness.
+**lazily** (checked on every read/mutation that cares). No appointment-reminder
+job or admin reminder action is shipped. A dedicated Cron Worker would be a
+separately reviewed future enhancement and is not required for correctness.
 
 ## What would change at scale
 

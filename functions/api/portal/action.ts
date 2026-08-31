@@ -12,8 +12,11 @@ import { requirePortal, releaseExpiredHolds } from '../../lib/portal.ts';
 import { applyStatus, isStatus, type Status } from '../../lib/status.ts';
 import { quoteExpired, cancellationOutcome } from '../../lib/pricing.ts';
 import { latestAgreements } from '../../lib/agreements.ts';
-import { createCheckoutSession, StripeConfigError } from '../../lib/stripe.ts';
+import { createCheckoutSession, expireCheckoutSession, StripeApiError, StripeConfigError } from '../../lib/stripe.ts';
+import { expireOpenCheckoutAttempts } from '../../lib/payment-lifecycle.ts';
+import { applyTerminalLifecycle } from '../../lib/lifecycle.ts';
 import { sendTemplate } from '../../lib/email.ts';
+import { portalUrl } from '../../lib/magic.ts';
 import { clampStr, clientIp, errorJson, formatCents, json, newId, nowIso, originAllowed } from '../../lib/util.ts';
 import { rateLimit } from '../../lib/ratelimit.ts';
 
@@ -57,6 +60,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return errorJson('bad_json', 'Request body must be JSON.', 400);
   }
 
+  // Run before loading the request so every action sees the selectable state
+  // produced by an expired hold, rather than acting on a stale checkout state.
+  await releaseExpiredHolds(db);
+
   const req = await db
     .prepare(
       `SELECT r.id, r.ref, r.status, c.email, c.full_name FROM ppi_requests r
@@ -74,35 +81,92 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       if (status !== 'quote_sent' && status !== 'awaiting_time_selection') {
         return errorJson('wrong_state', 'Appointment selection is not available for this request right now.', 409);
       }
-      await releaseExpiredHolds(db);
-
+      const paid = status === 'awaiting_time_selection'
+        ? await db
+            .prepare(
+              `SELECT id, booking_id, amount_cents, status FROM payments
+               WHERE request_id = ? AND status IN ('succeeded','partially_refunded') ORDER BY updated_at DESC LIMIT 1`,
+            )
+            .bind(requestId)
+            .first<{ id: string; booking_id: string | null; amount_cents: number; status: 'succeeded' | 'partially_refunded' }>()
+        : null;
       const quote = await db
-        .prepare(`SELECT id, expires_at FROM quotes WHERE request_id = ? AND status = 'sent' ORDER BY version DESC LIMIT 1`)
+        .prepare(
+          `SELECT id, expires_at FROM quotes
+           WHERE request_id = ? AND status ${paid ? "IN ('sent','accepted')" : "= 'sent'"}
+           ORDER BY version DESC LIMIT 1`,
+        )
         .bind(requestId)
         .first<{ id: string; expires_at: string }>();
       if (!quote) return errorJson('no_quote', 'There is no active quote for this request.', 409);
-      if (quoteExpired(quote.expires_at)) {
+      if (!paid && quoteExpired(quote.expires_at)) {
         return errorJson('quote_expired', 'This quote has expired. AutoClarity will send you a refreshed quote.', 409);
+      }
+      if (paid && !paid.booking_id) {
+        return errorJson(
+          'payment_reconciliation_required',
+          'Your payment is recorded, but scheduling needs AutoClarity support. No new charge was started.',
+          409,
+        );
       }
 
       const slotId = clampStr(body.slotId, 60);
-      const holdUntil = new Date(Date.now() + config.scheduling.holdMinutes * 60_000).toISOString();
+      const selectionNow = Date.now();
+      const earliest = new Date(selectionNow + config.scheduling.minLeadHours * 3600_000 - 60_000).toISOString();
+      const latest = new Date(selectionNow + config.scheduling.maxAdvanceDays * 86_400_000 + 60_000).toISOString();
+      const slot = await db
+        .prepare(
+          `SELECT starts_at, ends_at, COALESCE(blocked_starts_at, starts_at) AS blocked_starts_at,
+                  COALESCE(blocked_ends_at, ends_at) AS blocked_ends_at
+           FROM appointment_slots
+           WHERE id = ? AND request_id = ? AND status = 'offered'`,
+        )
+        .bind(slotId, requestId)
+        .first<{ starts_at: string; ends_at: string; blocked_starts_at: string; blocked_ends_at: string }>();
+      if (!slot) return errorJson('slot_unavailable', 'That time is no longer available. Please pick another window.', 409);
+      if (slot.starts_at < earliest || slot.starts_at > latest || slot.ends_at <= slot.starts_at) {
+        return errorJson('slot_invalid', 'That time is outside the current scheduling window. Please pick another option.', 409);
+      }
 
-      // A request may hold only one slot at a time. Release any slot this same
-      // request is already holding before placing the new hold, so two portal
-      // tokens racing on different slots can't leave the request double-held.
-      await db
-        .prepare(`UPDATE appointment_slots SET status = 'offered', hold_expires_at = NULL, updated_at = ? WHERE request_id = ? AND status = 'held'`)
-        .bind(nowIso(), requestId)
-        .run();
+      if (paid?.booking_id) {
+        const paidBooking = await db
+          .prepare(`SELECT id FROM bookings WHERE id = ? AND request_id = ? AND status = 'pending_payment'`)
+          .bind(paid.booking_id, requestId)
+          .first<{ id: string }>();
+        if (!paidBooking) {
+          return errorJson(
+            'payment_reconciliation_required',
+            'Your payment is recorded, but scheduling needs AutoClarity support. No new charge was started.',
+            409,
+          );
+        }
+      }
+
+      const holdUntil = new Date(Date.now() + config.scheduling.holdMinutes * 60_000).toISOString();
 
       try {
         const upd = await db
           .prepare(
             `UPDATE appointment_slots SET status = 'held', hold_expires_at = ?, updated_at = ?
-             WHERE id = ? AND request_id = ? AND status = 'offered'`,
+             WHERE id = ? AND request_id = ? AND status = 'offered'
+               AND starts_at >= ? AND starts_at <= ? AND ends_at > starts_at
+               AND EXISTS (
+                 SELECT 1 FROM ppi_requests
+                 WHERE id = ? AND status IN ('quote_sent','awaiting_time_selection') AND deleted_at IS NULL
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM appointment_slots held
+                 WHERE held.request_id = ? AND held.status = 'held'
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM appointment_slots other
+                 WHERE other.id != appointment_slots.id
+                   AND other.status IN ('offered','held','confirmed')
+                   AND COALESCE(other.blocked_starts_at, other.starts_at) < COALESCE(appointment_slots.blocked_ends_at, appointment_slots.ends_at)
+                   AND COALESCE(other.blocked_ends_at, other.ends_at) > COALESCE(appointment_slots.blocked_starts_at, appointment_slots.starts_at)
+               )`,
           )
-          .bind(holdUntil, nowIso(), slotId, requestId)
+          .bind(holdUntil, nowIso(), slotId, requestId, earliest, latest, requestId, requestId)
           .run();
         if ((upd.meta?.changes ?? 0) !== 1) {
           return errorJson('slot_unavailable', 'That time is no longer available. Please pick another window.', 409);
@@ -110,6 +174,91 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       } catch {
         // Partial unique index tripped: same start time already held/confirmed.
         return errorJson('slot_taken', 'That time was just taken. Please pick another window.', 409);
+      }
+
+      // A paid request whose original hold lapsed must never enter checkout a
+      // second time. Selecting a replacement confirms it against the existing
+      // succeeded payment and records the whole state change transactionally.
+      if (paid?.booking_id) {
+        const confirmedAt = nowIso();
+        const results = await db.batch([
+          db
+            .prepare(
+              `UPDATE appointment_slots SET status = 'confirmed', hold_expires_at = NULL, updated_at = ?
+               WHERE id = ? AND request_id = ? AND status = 'held'
+                 AND EXISTS (SELECT 1 FROM ppi_requests WHERE id = ? AND status = 'awaiting_time_selection')
+                 AND EXISTS (SELECT 1 FROM payments WHERE id = ? AND status IN ('succeeded','partially_refunded'))
+                 AND EXISTS (SELECT 1 FROM bookings WHERE id = ? AND request_id = ? AND status = 'pending_payment')`,
+            )
+            .bind(confirmedAt, slotId, requestId, requestId, paid.id, paid.booking_id, requestId),
+          db
+            .prepare(
+              `UPDATE bookings SET slot_id = ?, status = 'confirmed', confirmed_at = COALESCE(confirmed_at, ?), updated_at = ?
+               WHERE id = ? AND request_id = ? AND status = 'pending_payment'
+                 AND EXISTS (SELECT 1 FROM ppi_requests WHERE id = ? AND status = 'awaiting_time_selection')
+                 AND EXISTS (SELECT 1 FROM appointment_slots WHERE id = ? AND status = 'confirmed')
+                 AND EXISTS (SELECT 1 FROM payments WHERE id = ? AND status IN ('succeeded','partially_refunded'))`,
+            )
+            .bind(slotId, confirmedAt, confirmedAt, paid.booking_id, requestId, requestId, slotId, paid.id),
+          db
+            .prepare(
+              `UPDATE ppi_requests SET status = 'confirmed', updated_at = ?
+               WHERE id = ? AND status = 'awaiting_time_selection' AND deleted_at IS NULL
+                 AND EXISTS (SELECT 1 FROM payments WHERE id = ? AND status IN ('succeeded','partially_refunded'))
+                 AND EXISTS (SELECT 1 FROM bookings WHERE id = ? AND request_id = ? AND slot_id = ? AND status = 'confirmed')
+                 AND EXISTS (SELECT 1 FROM appointment_slots WHERE id = ? AND status = 'confirmed')`,
+            )
+            .bind(confirmedAt, requestId, paid.id, paid.booking_id, requestId, slotId, slotId),
+          db
+            .prepare(
+              `UPDATE quotes SET status = 'accepted', updated_at = ? WHERE id = ?
+               AND EXISTS (SELECT 1 FROM ppi_requests WHERE id = ? AND status = 'confirmed')`,
+            )
+            .bind(confirmedAt, quote.id, requestId),
+          db
+            .prepare(
+              `UPDATE appointment_slots SET status = 'released', hold_expires_at = NULL, updated_at = ?
+               WHERE request_id = ? AND id != ? AND status IN ('offered','held')
+                 AND EXISTS (SELECT 1 FROM ppi_requests WHERE id = ? AND status = 'confirmed')`,
+            )
+            .bind(confirmedAt, requestId, slotId, requestId),
+          db
+            .prepare(
+              `INSERT OR IGNORE INTO status_history
+                 (id, request_id, from_status, to_status, actor, reason, related_id, created_at)
+               SELECT ?, ?, 'awaiting_time_selection', 'confirmed', 'customer',
+                      'Replacement time selected for existing payment', ?, ?
+               WHERE EXISTS (
+                 SELECT 1 FROM bookings b JOIN appointment_slots s ON s.id = b.slot_id
+                 WHERE b.id = ? AND b.status = 'confirmed' AND s.id = ? AND s.status = 'confirmed'
+               )`,
+            )
+            .bind(`sh_paid_reselect_${paid.id}`, requestId, paid.id, confirmedAt, paid.booking_id, slotId),
+        ]);
+        const completed = [results[0], results[1], results[2]].every((result) => (result?.meta?.changes ?? 0) === 1);
+        if (!completed) {
+          return errorJson('conflict', 'This request changed a moment ago — reload to see its current booking state.', 409);
+        }
+
+        const secureUrl = portalUrl((env.PUBLIC_BASE_URL ?? new URL(request.url).origin).replace(/\/$/, ''), auth.token);
+        await sendTemplate(env, db, requestId, 'appointment_confirmed', req.email, {
+          ref: req.ref,
+          portalUrl: secureUrl,
+          supportEmail: config.supportEmail,
+          extra: { slot: slot ? fmtSlot(slot.starts_at, config.scheduling.timezone) : '' },
+        }, undefined, `appointment_confirmed:${paid.id}`);
+        if (env.ADMIN_NOTIFY_EMAIL) {
+          await sendTemplate(env, db, requestId, 'owner_notify', env.ADMIN_NOTIFY_EMAIL, {
+            ref: req.ref,
+            supportEmail: config.supportEmail,
+            extra: {
+              kind: 'BOOKING CONFIRMED AFTER PAID RESELECTION',
+              detail: `${formatCents(paid.amount_cents)} already paid — ${slot ? fmtSlot(slot.starts_at, config.scheduling.timezone) : 'replacement time selected'}`,
+              adminUrl: `${(env.PUBLIC_BASE_URL ?? new URL(request.url).origin).replace(/\/$/, '')}/ppi/admin/?request=${encodeURIComponent(requestId)}`,
+            },
+          }, req.email, `owner_booking_confirmed:${paid.id}`);
+        }
+        return json({ ok: true, confirmed: true, paymentStatus: paid.status });
       }
 
       // Advance the request state, checking each hop. If the compare-and-swap
@@ -128,10 +277,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         return errorJson('conflict', 'This request changed a moment ago — reload the page and pick your time again.', 409);
       }
 
-      const slot = await db
-        .prepare(`SELECT starts_at FROM appointment_slots WHERE id = ?`)
-        .bind(slotId)
-        .first<{ starts_at: string }>();
       await sendTemplate(env, db, requestId, 'hold_created', req.email, {
         ref: req.ref,
         supportEmail: config.supportEmail,
@@ -183,10 +328,23 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     // --------------------------------------------------------------- checkout
     case 'checkout': {
+      const priorPayment = await db
+        .prepare(
+          `SELECT id FROM payments
+           WHERE request_id = ? AND status IN ('succeeded','partially_refunded','refunded','disputed') LIMIT 1`,
+        )
+        .bind(requestId)
+        .first<{ id: string }>();
+      if (priorPayment) {
+        return errorJson(
+          'payment_already_received',
+          'Payment has already been received for this request. No new charge was started; choose a replacement time or contact AutoClarity.',
+          409,
+        );
+      }
       if (status !== 'awaiting_payment') {
         return errorJson('wrong_state', 'Payment is not available for this request yet.', 409);
       }
-      await releaseExpiredHolds(db);
 
       const quote = await db
         .prepare(`SELECT id, expires_at, total_cents FROM quotes WHERE request_id = ? AND status = 'sent' ORDER BY version DESC LIMIT 1`)
@@ -215,11 +373,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       }
 
       if (!flags.paymentsEnabled) {
-        return json({
-          paymentsDisabled: true,
-          message:
-            'Payment is switched off in this preview environment, so the booking stops here by design. In live mode this button opens secure Stripe Checkout.',
-        });
+        return errorJson(
+          'payments_unavailable',
+          'Online payment is currently unavailable. Contact AutoClarity to finish scheduling; no charge was started.',
+          503,
+          { paymentsDisabled: true },
+        );
       }
 
       // Booking row (one per request) — created/reused before the session.
@@ -230,29 +389,177 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         .first<{ id: string }>();
       if (!booking) {
         const bookingId = newId('bkg');
-        await db
-          .prepare(
-            `INSERT INTO bookings (id, request_id, quote_id, slot_id, status, created_at, updated_at)
-             VALUES (?, ?, ?, ?, 'pending_payment', ?, ?)`,
-          )
-          .bind(bookingId, requestId, quote.id, slot.id, now, now)
-          .run();
-        booking = { id: bookingId };
+        try {
+          await db
+            .prepare(
+              `INSERT INTO bookings (id, request_id, quote_id, slot_id, status, created_at, updated_at)
+               SELECT ?, ?, ?, ?, 'pending_payment', ?, ?
+               WHERE EXISTS (SELECT 1 FROM ppi_requests WHERE id = ? AND status = 'awaiting_payment')
+                 AND EXISTS (SELECT 1 FROM appointment_slots WHERE id = ? AND request_id = ? AND status = 'held')`,
+            )
+            .bind(bookingId, requestId, quote.id, slot.id, now, now, requestId, slot.id, requestId)
+            .run();
+        } catch {
+          // A concurrent checkout may have created the one-per-request row.
+        }
+        booking = await db.prepare(`SELECT id FROM bookings WHERE request_id = ?`).bind(requestId).first<{ id: string }>();
+        if (!booking) {
+          return errorJson('conflict', 'This request changed before checkout could start. Reload before trying again.', 409);
+        }
       } else {
-        await db
-          .prepare(`UPDATE bookings SET quote_id = ?, slot_id = ?, status = 'pending_payment', updated_at = ? WHERE id = ?`)
-          .bind(quote.id, slot.id, now, booking.id)
+        const bookingUpdate = await db
+          .prepare(
+            `UPDATE bookings SET quote_id = ?, slot_id = ?, status = 'pending_payment', updated_at = ?
+             WHERE id = ?
+               AND EXISTS (SELECT 1 FROM ppi_requests WHERE id = ? AND status = 'awaiting_payment')
+               AND EXISTS (SELECT 1 FROM appointment_slots WHERE id = ? AND request_id = ? AND status = 'held')`,
+          )
+          .bind(quote.id, slot.id, now, booking.id, requestId, slot.id, requestId)
           .run();
+        if ((bookingUpdate.meta?.changes ?? 0) !== 1) {
+          return errorJson('conflict', 'This request changed before checkout could start. Reload before trying again.', 409);
+        }
       }
 
-      // Extend the hold to cover the 30-minute Checkout window + webhook lag.
-      const extended = new Date(Date.now() + Math.max(config.scheduling.holdMinutes, 45) * 60_000).toISOString();
-      await db
-        .prepare(`UPDATE appointment_slots SET hold_expires_at = ?, updated_at = ? WHERE id = ? AND status = 'held'`)
-        .bind(extended, now, slot.id)
-        .run();
-
+      type AttemptRow = {
+        id: string;
+        status: string;
+        stripe_session_id: string | null;
+        checkout_attempt: number | null;
+        created_at: string;
+      };
+      let claim: AttemptRow | null = null;
+      let claimWasPending = false;
       try {
+        const attempts = await db
+          .prepare(
+            `SELECT id, status, stripe_session_id, checkout_attempt, created_at
+             FROM payments WHERE request_id = ? AND quote_id = ? AND booking_id = ?
+             ORDER BY created_at DESC`,
+          )
+          .bind(requestId, quote.id, booking.id)
+          .all<AttemptRow>();
+        const rows = attempts.results ?? [];
+        const active = rows.filter((row) => row.status === 'created' || row.status === 'pending');
+        if (active.length > 1) {
+          return errorJson(
+            'payment_reconciliation_required',
+            'Multiple checkout attempts need provider verification. No new charge was started; contact AutoClarity.',
+            409,
+          );
+        }
+
+        const existing = active[0];
+        if (existing) {
+          const createdMs = Date.parse(existing.created_at);
+          if (
+            !existing.checkout_attempt ||
+            !Number.isFinite(createdMs) ||
+            Date.now() - createdMs >= 30 * 60_000
+          ) {
+            return errorJson(
+              'payment_reconciliation_required',
+              'A prior Checkout Session needs provider verification. No new charge was started.',
+              409,
+            );
+          }
+          if (existing.status === 'created' && !existing.stripe_session_id) {
+            return errorJson(
+              'payment_reconciliation_required',
+              'A prior Checkout Session needs provider verification. No new charge was started.',
+              409,
+            );
+          }
+          claim = existing;
+          claimWasPending = existing.status === 'pending';
+        } else {
+          const reusable = rows.find(
+            (row) => row.status === 'failed' && !row.stripe_session_id && Number.isInteger(row.checkout_attempt),
+          );
+          if (reusable) {
+            const reclaimed = await db
+              .prepare(
+                `UPDATE payments SET status = 'pending', updated_at = ?
+                 WHERE id = ? AND status = 'failed' AND stripe_session_id IS NULL
+                   AND NOT EXISTS (
+                     SELECT 1 FROM payments other
+                     WHERE other.request_id = ? AND other.status IN ('created','pending')
+                   )
+                   AND EXISTS (SELECT 1 FROM ppi_requests WHERE id = ? AND status = 'awaiting_payment')`,
+              )
+              .bind(nowIso(), reusable.id, requestId, requestId)
+              .run();
+            if ((reclaimed.meta?.changes ?? 0) !== 1) {
+              return errorJson('payment_reconciliation_required', 'Another checkout attempt started first. No new charge was started.', 409);
+            }
+            claim = { ...reusable, status: 'pending' };
+          } else {
+            const attempt = Math.max(0, ...rows.map((row) => row.checkout_attempt ?? 0)) + 1;
+            const paymentId = newId('pay');
+            const inserted = await db
+              .prepare(
+                `INSERT INTO payments
+                   (id, request_id, quote_id, booking_id, amount_cents, status, checkout_attempt, created_at, updated_at)
+                 SELECT ?, ?, ?, ?, ?, 'pending', ?, ?, ?
+                 WHERE EXISTS (SELECT 1 FROM ppi_requests WHERE id = ? AND status = 'awaiting_payment')
+                   AND EXISTS (SELECT 1 FROM bookings WHERE id = ? AND request_id = ? AND slot_id = ? AND status = 'pending_payment')
+                   AND EXISTS (SELECT 1 FROM appointment_slots WHERE id = ? AND request_id = ? AND status = 'held')
+                   AND NOT EXISTS (
+                     SELECT 1 FROM payments other
+                     WHERE other.request_id = ? AND other.status IN ('created','pending','succeeded','partially_refunded','refunded','disputed')
+                   )`,
+              )
+              .bind(
+                paymentId,
+                requestId,
+                quote.id,
+                booking.id,
+                quote.total_cents,
+                attempt,
+                now,
+                now,
+                requestId,
+                booking.id,
+                requestId,
+                slot.id,
+                slot.id,
+                requestId,
+                requestId,
+              )
+              .run();
+            if ((inserted.meta?.changes ?? 0) !== 1) {
+              return errorJson('payment_reconciliation_required', 'This request changed or another checkout started first. No new charge was started.', 409);
+            }
+            claim = {
+              id: paymentId,
+              status: 'pending',
+              stripe_session_id: null,
+              checkout_attempt: attempt,
+              created_at: now,
+            };
+          }
+          claimWasPending = true;
+        }
+
+        // The durable pending row above is the cancellation gate. Only after
+        // it is visible do we make the provider call.
+        const extended = new Date(Date.now() + Math.max(config.scheduling.holdMinutes, 45) * 60_000).toISOString();
+        const extendedHold = await db
+          .prepare(
+            `UPDATE appointment_slots SET hold_expires_at = ?, updated_at = ?
+             WHERE id = ? AND request_id = ? AND status = 'held'
+               AND EXISTS (SELECT 1 FROM ppi_requests WHERE id = ? AND status = 'awaiting_payment')
+               AND EXISTS (SELECT 1 FROM payments WHERE id = ? AND status IN ('pending','created'))`,
+          )
+          .bind(extended, nowIso(), slot.id, requestId, requestId, claim.id)
+          .run();
+        if ((extendedHold.meta?.changes ?? 0) !== 1) {
+          if (claimWasPending) {
+            await db.prepare(`UPDATE payments SET status = 'failed', updated_at = ? WHERE id = ? AND status = 'pending'`).bind(nowIso(), claim.id).run();
+          }
+          return errorJson('conflict', 'The held time or request changed before Checkout could start.', 409);
+        }
+
         const session = await createCheckoutSession(env, {
           requestId,
           requestRef: req.ref,
@@ -261,16 +568,69 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           amountCents: quote.total_cents,
           customerEmail: req.email,
           publicBaseUrl: env.PUBLIC_BASE_URL ?? new URL(request.url).origin,
+          attempt: claim.checkout_attempt ?? 1,
         });
-        await db
+        if (!session.id.startsWith('cs_') || !session.url.startsWith('http')) {
+          throw new Error('Stripe returned a malformed Checkout Session.');
+        }
+
+        // Persist the provider id even before the validity CAS. If request
+        // state was lost, cancellation/reconciliation can still see and expire
+        // the exact payable Session.
+        if (claimWasPending) {
+          const recorded = await db
+            .prepare(
+              `UPDATE payments SET stripe_session_id = ?, updated_at = ?
+               WHERE id = ? AND status = 'pending'
+                 AND (stripe_session_id IS NULL OR stripe_session_id = ?)`,
+            )
+            .bind(session.id, nowIso(), claim.id, session.id)
+            .run();
+          if ((recorded.meta?.changes ?? 0) !== 1) {
+            throw new Error('Checkout claim changed before its provider Session could be recorded.');
+          }
+        } else if (claim.stripe_session_id !== session.id) {
+          try { await expireCheckoutSession(env, session.id); } catch { /* retained below as reconciliation */ }
+          return errorJson('payment_reconciliation_required', 'Stripe returned a different Session for an existing attempt. Contact AutoClarity.', 409);
+        }
+
+        const finalized = await db
           .prepare(
-            `INSERT INTO payments (id, request_id, quote_id, booking_id, stripe_session_id, amount_cents, status, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, 'created', ?, ?)`,
+            `UPDATE payments SET status = 'created', updated_at = ?
+             WHERE id = ? AND status IN ('pending','created') AND stripe_session_id = ?
+               AND EXISTS (SELECT 1 FROM ppi_requests WHERE id = ? AND status = 'awaiting_payment')
+               AND EXISTS (SELECT 1 FROM bookings WHERE id = ? AND request_id = ? AND slot_id = ? AND status = 'pending_payment')
+               AND EXISTS (SELECT 1 FROM appointment_slots WHERE id = ? AND request_id = ? AND status = 'held')`,
           )
-          .bind(newId('pay'), requestId, quote.id, booking.id, session.id, quote.total_cents, now, now)
+          .bind(nowIso(), claim.id, session.id, requestId, booking.id, requestId, slot.id, slot.id, requestId)
           .run();
+        if ((finalized.meta?.changes ?? 0) !== 1) {
+          try {
+            await expireCheckoutSession(env, session.id);
+            await db
+              .prepare(`UPDATE payments SET status = 'expired', updated_at = ? WHERE id = ? AND status IN ('pending','created')`)
+              .bind(nowIso(), claim.id)
+              .run();
+            return errorJson('checkout_state_changed', 'The request changed before Checkout finished, so the payment Session was expired.', 409);
+          } catch (expiryError) {
+            console.error('checkout_lost_cas_expiry_failed', claim.id, String(expiryError).slice(0, 240));
+            return errorJson('payment_reconciliation_required', 'The request changed while Checkout was opening. The payment Session requires support review.', 502);
+          }
+        }
         return json({ ok: true, checkoutUrl: session.url });
       } catch (e) {
+        // Only a pre-network configuration failure or explicit Stripe 4xx is
+        // definitive. A timeout/5xx/malformed success may have created a live
+        // Session, so leave the durable pending claim resumable with the same
+        // idempotency key and keep cancellation fail-closed.
+        const definitelyFailed = e instanceof StripeConfigError
+          || (e instanceof StripeApiError && e.definitiveFailure);
+        if (claimWasPending && claim && definitelyFailed) {
+          await db
+            .prepare(`UPDATE payments SET status = 'failed', updated_at = ? WHERE id = ? AND status = 'pending' AND stripe_session_id IS NULL`)
+            .bind(nowIso(), claim.id)
+            .run();
+        }
         if (e instanceof StripeConfigError) {
           return errorJson('payments_unavailable', 'Payments are not configured in this environment.', 503);
         }
@@ -296,7 +656,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         await sendTemplate(env, db, requestId, 'owner_notify', env.ADMIN_NOTIFY_EMAIL, {
           ref: req.ref,
           supportEmail: config.supportEmail,
-          extra: { kind: 'customer message', detail: text.slice(0, 300), adminUrl: `${(env.PUBLIC_BASE_URL ?? '').replace(/\/$/, '')}/ppi/admin/` },
+          extra: { kind: 'customer message', detail: text.slice(0, 300), adminUrl: `${(env.PUBLIC_BASE_URL ?? new URL(request.url).origin).replace(/\/$/, '')}/ppi/admin/?request=${encodeURIComponent(requestId)}` },
         }, req.email);
       }
       return json({ ok: true });
@@ -306,7 +666,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     case 'cancel': {
       const reason = clampStr(body.reason, 500);
       const paid = await db
-        .prepare(`SELECT id FROM payments WHERE request_id = ? AND status = 'succeeded' LIMIT 1`)
+        .prepare(`SELECT id FROM payments WHERE request_id = ? AND status IN ('succeeded','partially_refunded','refunded','disputed') LIMIT 1`)
         .bind(requestId)
         .first<{ id: string }>();
 
@@ -319,11 +679,30 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         if (!cancellable.includes(status)) {
           return errorJson('wrong_state', 'This request can no longer be cancelled from the portal — contact support.', 409);
         }
-        await applyStatus(db, requestId, status, 'customer_cancelled', 'customer', reason || 'Customer cancelled before payment');
-        await db
-          .prepare(`UPDATE appointment_slots SET status = 'released', hold_expires_at = NULL, updated_at = ? WHERE request_id = ? AND status IN ('offered','held')`)
-          .bind(nowIso(), requestId)
-          .run();
+        const checkoutExpiry = await expireOpenCheckoutAttempts(env, requestId);
+        if (!checkoutExpiry.ok) {
+          return errorJson(
+            checkoutExpiry.code,
+            'Cancellation was not applied because an open payment attempt could not be proven expired. Contact AutoClarity; no second payment attempt was started.',
+            checkoutExpiry.code === 'payments_unavailable' ? 503 : 409,
+          );
+        }
+        const cancelled = await applyTerminalLifecycle(db, {
+          requestId,
+          to: 'customer_cancelled',
+          actor: 'customer',
+          reason: reason || 'Customer cancelled before payment',
+          relatedId: requestId,
+        });
+        if (!cancelled.ok) {
+          return cancelled.blockedByOpenPaymentClaim
+            ? errorJson(
+                'reconciliation_required',
+                'A Checkout attempt started while cancellation was being applied. The request remains active; contact AutoClarity before trying again.',
+                409,
+              )
+            : errorJson('conflict', 'This request changed while cancellation was being applied. Reload before trying again.', 409);
+        }
         await sendTemplate(env, db, requestId, 'cancellation_confirmed', req.email, {
           ref: req.ref,
           supportEmail: config.supportEmail,
@@ -355,7 +734,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           extra: {
             kind: 'PAID cancellation request',
             detail: `${reason || '(no reason)'} — ${outcome?.label ?? ''}`,
-            adminUrl: `${(env.PUBLIC_BASE_URL ?? '').replace(/\/$/, '')}/ppi/admin/`,
+            adminUrl: `${(env.PUBLIC_BASE_URL ?? new URL(request.url).origin).replace(/\/$/, '')}/ppi/admin/?request=${encodeURIComponent(requestId)}`,
           },
         }, req.email);
       }

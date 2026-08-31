@@ -54,7 +54,11 @@
       view = r.body;
       if (pollTimer && view.payment && view.payment.status === "succeeded") {
         clearInterval(pollTimer); pollTimer = null;
-        notice("good", "Payment confirmed — your appointment is booked. A confirmation email is on its way.");
+        if (view.status === "confirmed" && view.booking && view.booking.status === "confirmed") {
+          notice("good", "Payment confirmed — your appointment is booked. Check your email for confirmation details.");
+        } else {
+          notice("warn", "Payment received, but no appointment time was booked. Choose another available time below; you will not be charged again.");
+        }
       }
       render();
     }).catch(function () {
@@ -110,6 +114,7 @@
 
     var v = view;
     var html = "";
+    var paidReselection = v.status === "awaiting_time_selection" && v.payment && ["succeeded", "partially_refunded"].indexOf(v.payment.status) !== -1;
 
     html += '<div class="portal-topbar">' +
       "<h1>Request " + esc(v.ref) + "</h1>" +
@@ -125,7 +130,7 @@
 
     // ---------- status-specific guidance ----------
     var guidance = {
-      submitted: "AutoClarity is reviewing your request. You’ll normally hear back the same day, and never later than 24 hours.",
+      submitted: "AutoClarity typically responds within 24 hours with scheduling details.",
       needs_info: "AutoClarity needs a little more information — check the messages below and reply there.",
       seller_access_pending: "Waiting on the seller to confirm access to the vehicle. You’ll be notified the moment it’s cleared.",
       ready_for_review: "Your request is in review — your exact quote is on its way.",
@@ -133,7 +138,7 @@
       quote_sent: "Your exact price is ready below. Choose an appointment window to continue.",
       awaiting_time_selection: "Choose one of the offered appointment windows below.",
       awaiting_agreement: "Almost there — review and accept the service agreements below.",
-      awaiting_payment: "Last step: secure payment reserves your appointment time.",
+      awaiting_payment: v.paymentsEnabled ? "Last step: secure payment reserves your appointment time." : "Online payment is currently unavailable. Contact AutoClarity to finish scheduling; your appointment is not confirmed.",
       confirmed: "You’re booked. The technician will meet the vehicle at the scheduled time.",
       inspection_in_progress: "Your inspection is underway.",
       report_in_progress: "The inspection is done — your written results are being prepared.",
@@ -152,7 +157,9 @@
     if (v.quote) {
       html += '<section class="portal-card"><h2>Your quote</h2>';
       if (v.quote.expired && v.status !== "confirmed" && v.status !== "completed") {
-        html += '<div class="notice warn">This quote expired ' + esc(fmtWhen(v.quote.expiresAt)) + ". AutoClarity will refresh it — no action needed.</div>";
+        html += paidReselection
+          ? '<div class="notice info">Your payment is already recorded. The old quote date does not block choosing a replacement time, and you will not be charged again.</div>'
+          : '<div class="notice warn">This quote expired ' + esc(fmtWhen(v.quote.expiresAt)) + ". AutoClarity will refresh it — no action needed.</div>";
       }
       html += '<table class="line-items">';
       v.quote.lines.forEach(function (l) {
@@ -160,7 +167,7 @@
       });
       html += '<tr class="total"><td>Total</td><td>' + money(v.quote.totalCents) + "</td></tr></table>";
       if (v.quote.customerNote) html += '<p style="margin-top:12px;color:var(--text-2);font-size:14.5px;">' + esc(v.quote.customerNote) + "</p>";
-      if (!v.quote.expired && (v.status === "quote_sent" || v.status === "awaiting_time_selection")) {
+      if (!v.quote.expired && !paidReselection && (v.status === "quote_sent" || v.status === "awaiting_time_selection")) {
         html += '<p class="field-hint">Quote valid until ' + esc(fmtWhen(v.quote.expiresAt)) + ".</p>";
       }
       html += "</section>";
@@ -171,11 +178,11 @@
     var held = v.slots.filter(function (s) { return s.status === "held"; })[0];
     var confirmedSlot = v.slots.filter(function (s) { return s.status === "confirmed"; })[0];
 
-    if ((v.status === "quote_sent" || v.status === "awaiting_time_selection") && offered.length > 0 && v.quote && !v.quote.expired) {
+    if ((v.status === "quote_sent" || v.status === "awaiting_time_selection") && offered.length > 0 && v.quote && (!v.quote.expired || paidReselection)) {
       html += '<section class="portal-card"><h2>Choose your appointment</h2><div class="slot-list">';
       offered.forEach(function (s) {
         html += '<button type="button" class="slot-btn" data-slot="' + esc(s.id) + '">' + esc(fmtWhen(s.startsAt)) +
-          '<span class="slot-sub">Selecting holds this time for you while you finish booking</span></button>';
+          '<span class="slot-sub">' + (paidReselection ? "Choose this replacement time — no additional charge" : "Selecting holds this time for you while you finish booking") + "</span></button>";
       });
       html += "</div></section>";
     }
@@ -203,16 +210,19 @@
     }
 
     // ---------- payment ----------
-    if (v.status === "awaiting_payment") {
+    if (v.status === "awaiting_payment" && v.paymentsEnabled) {
       html += '<section class="portal-card"><h2>Payment</h2>' +
         '<p style="color:var(--text-2);font-size:15px;">Full payment reserves the approved appointment time. Your appointment is not confirmed until payment is successfully completed.</p>' +
         '<button class="btn btn-primary btn-lg" id="checkoutBtn" style="width:100%;margin-top:14px;">Pay securely with Stripe' +
         (v.quote ? " — " + money(v.quote.totalCents) : "") + "</button>" +
         '<p class="form-status" id="checkoutStatus" role="status" aria-live="polite"></p></section>';
+    } else if (v.status === "awaiting_payment") {
+      html += '<section class="portal-card"><h2>Payment unavailable</h2>' +
+        '<div class="notice warn">Online payment is currently unavailable. Contact AutoClarity to finish scheduling. No charge has been started, and your appointment is not confirmed.</div></section>';
     }
 
     // ---------- confirmed booking ----------
-    if (v.booking && v.booking.status === "confirmed" && confirmedSlot) {
+    if (v.booking && v.booking.status === "confirmed" && confirmedSlot && ["confirmed", "inspection_in_progress", "report_in_progress", "completed"].indexOf(v.status) !== -1) {
       html += '<section class="portal-card"><h2>Your appointment</h2><dl class="kv">' +
         "<dt>When</dt><dd>" + esc(fmtWhen(confirmedSlot.startsAt)) + "</dd>" +
         "<dt>Where</dt><dd>" + esc([v.location.street, v.location.city].filter(Boolean).join(", ")) + "</dd></dl>" +

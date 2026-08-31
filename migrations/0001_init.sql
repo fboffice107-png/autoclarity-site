@@ -238,7 +238,10 @@ CREATE TABLE messages (
     CHECK (status IN ('recorded','sent','failed')),
   provider_id TEXT,
   error TEXT,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  -- Included in the baseline because production already has this additive
+  -- field. Migration 0002 creates its partial unique index idempotently.
+  dedupe_key TEXT
 );
 CREATE INDEX idx_messages_request ON messages(request_id);
 

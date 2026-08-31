@@ -1,9 +1,15 @@
-# Production Checklist — Las Vegas PPI
+# Production Operations Checklist — Las Vegas PPI
 
-**Nothing goes live until every box is checked and the owner explicitly
-states: `APPROVE PRODUCTION DEPLOYMENT`.** Technical readiness of the website
-does NOT imply legal or insurance readiness — those are real-world facts only
-the owner can confirm.
+The request-mode PPI funnel is already live on Cloudflare Pages and production
+payments remain disabled. Use this checklist for production releases and for
+any later decision to enable Stripe. Technical readiness does NOT imply legal
+or insurance readiness — those are real-world facts only the owner can confirm.
+
+> **RELEASE BLOCKER:** the currently published privacy policy and terms are
+> app-oriented and do not cover the PPI service; their professional-service
+> framing also conflicts with the PPI offer. Do not deploy this release until
+> the owner and counsel approve and publish the required PPI privacy and service
+> terms. Engineering must not invent or publish substitute legal language.
 
 ## Business & legal (owner + counsel)
 
@@ -24,13 +30,33 @@ the owner can confirm.
 ## Payments
 
 - [ ] Stripe account fully activated (identity, bank account)
-- [ ] Live webhook endpoint configured + `STRIPE_WEBHOOK_SECRET` (live) set
+- [ ] Live webhook endpoint configured with the eight events in
+      `PPI_STRIPE_SETUP.md`, including `refund.updated` and `refund.failed`, a
+      compatible webhook API version, and `STRIPE_WEBHOOK_SECRET` (live)
 - [ ] `STRIPE_SECRET_KEY` (live) set in the **production** environment only
 - [ ] One controlled live-payment test completed and refunded (owner-approved)
 
 ## Infrastructure
 
-- [ ] Production D1 database created, migrations applied, binding verified
+- [ ] Audited production Pages configuration obtained outside the repository;
+      project, branch, variables, compatibility settings, D1/R2 binding names
+      and resource IDs independently reviewed. Neither `wrangler.local.toml`
+      nor `.wrangler/preview/wrangler.toml` is approved for production.
+- [ ] Production D1 backup/export captured before schema work
+- [ ] Production D1 migration history reviewed: if `0002` is absent, exact live
+      report table columns/constraints/foreign keys/indexes/trigger and
+      `messages.dedupe_key` match source, with no duplicate non-null dedupe keys.
+      Any drift blocks migration; do not edit `d1_migrations` directly.
+- [ ] After `0002` reconciliation, `0003_intake_idempotency.sql` applied and its
+      request column, unique index, claim table, and expiry index verified before
+      application deployment
+- [ ] `0004_payment_slot_integrity.sql` applied only after `0003`; any buffered
+      active-slot overlap reported by its preflight explicitly resolved before
+      retry; stored PPI configuration JSON validated; both buffered columns,
+      both overlap triggers, checkout-attempt unique index, both refund tables,
+      and both refund lookup indexes verified
+- [ ] Production D1 binding verified and migrations applied only through the
+      independently reviewed production configuration
 - [ ] Production R2 bucket created, binding verified
 - [ ] Turnstile production keys set (site + secret) and verified on the form
 - [ ] Cloudflare Access protecting `/ppi/admin*` and `/api/admin*`
@@ -52,10 +78,10 @@ the owner can confirm.
 - [ ] Automated tests green (`npm test`), typecheck green (`npm run typecheck`)
 - [ ] Monitoring active (Cloudflare Pages analytics + Stripe email alerts at
       minimum; optional: healthcheck on `/api/ppi/runtime-config`)
-- [ ] Backup/rollback documented and understood (DNS back to GitHub Pages;
-      D1 `wrangler d1 export` snapshot taken pre-launch)
+- [ ] Backup/rollback documented and understood (previous successful Cloudflare
+      Pages deployment recorded; D1 export snapshot taken before schema work)
 
-## Launch order (after approval)
+## Payment enablement order (after separate owner approval)
 
 1. `PPI_MODE=request`, `PAYMENTS_ENABLED=false` — collect real requests, quote
    manually, no money movement.

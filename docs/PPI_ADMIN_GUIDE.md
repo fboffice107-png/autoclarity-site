@@ -47,7 +47,18 @@ All money values are **cents**. Common edits:
 
 Every save is audit-logged. Unknown keys are ignored; broken JSON is rejected.
 
-## Useful SQL (via `npx wrangler d1 execute autoclarity_ppi --remote --command "..."`)
+## Production data operations (owner-approved window only)
+
+Do not let Wrangler infer a default configuration for production. Back up D1,
+verify the approved database name and ID, and run any production SQL only with
+the independently reviewed production configuration, for example:
+
+```bash
+npx --no-install wrangler d1 execute PRODUCTION_DB_BINDING --remote \
+  --config /absolute/path/to/audited-production-config.toml --command "..."
+```
+
+The examples below are data-policy sketches, not unattended runbooks.
 
 - Deletion request (after removing uploads in the UI):
   `UPDATE ppi_requests SET deleted_at = datetime('now') WHERE ref = 'PPI-...';`

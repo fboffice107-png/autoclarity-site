@@ -40,7 +40,7 @@
   only the public Turnstile site key. Logs redact: no VINs, addresses or
   customer names are logged; webhook/API errors log truncated technical detail.
 - **Repo files are never served**: `functions/_middleware.ts` returns 404 for
-  `.dev.vars`, `.env*`, `wrangler.toml`, `package.json`, `tsconfig.json`,
+  `.dev.vars`, `.env*`, `wrangler.toml`, `wrangler.local.toml`, `package.json`, `tsconfig.json`,
   `functions/`, `migrations/`, `tests/`, `scripts/`, `docs/`, `legal/`,
   `node_modules/`, etc. This runs before static-asset serving on both
   `wrangler pages dev` and hosted Pages, so it holds regardless of deploy
@@ -70,8 +70,8 @@
   validation UI yet.
 - Magic-link tokens live in email; email account compromise = request access.
   This is inherent to passwordless email links.
-- No WAF custom rules shipped; Cloudflare's default WAF applies once traffic
-  moves to Cloudflare.
+- No custom WAF rules are tracked in this repository; Cloudflare edge controls
+  are configured and reviewed separately from application releases.
 
 ## Dependency posture
 

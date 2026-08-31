@@ -8,13 +8,18 @@ those on is an owner decision gated by the production checklist.**
 
 1. Create/log into the Stripe account → toggle **Test mode**.
 2. Developers → API keys → copy the **Secret key** (`sk_test_...`).
-   - Set it: `npx wrangler pages secret put STRIPE_SECRET_KEY --project-name autoclarity-site`
-     (choose the Preview environment when prompted, or set it in the dashboard).
+   - Set it only on the isolated `autoclarity-site-preview` Pages project, either
+     in that project's dashboard or with:
+     `npx --no-install wrangler pages secret put STRIPE_SECRET_KEY --project-name autoclarity-site-preview`.
+     Never target the production `autoclarity-site` project during preview setup.
 3. Developers → Webhooks → Add endpoint:
    - URL: `https://<preview-host>/api/stripe/webhook`
    - Events: `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
      `checkout.session.async_payment_failed`, `checkout.session.expired`,
-     `charge.refunded`, `charge.dispute.created`
+     `charge.refunded`, `charge.dispute.created`, `refund.updated`, and
+     `refund.failed`
+   - Set the webhook endpoint to Stripe API version `2024-10-28.acacia` or a
+     later compatible version, then exercise the refund tests before rollout.
    - Copy the **Signing secret** (`whsec_...`) → secret `STRIPE_WEBHOOK_SECRET`.
 4. Set Pages env var `PAYMENTS_ENABLED=true` for the preview environment when
    you want to exercise the full checkout (default is `false`; the portal then
@@ -23,14 +28,17 @@ those on is an owner decision gated by the production checklist.**
 
 ## What the integration does (for reference)
 
-- Fresh Checkout Session per attempt; `client_reference_id` = internal booking id.
+- A durable D1 checkout claim is created before Stripe is called. Retries after
+  a recoverable interruption reuse the same provider idempotency key;
+  `client_reference_id` remains the internal booking id.
 - Metadata carries internal ids only — never VIN, address, notes.
 - Success/cancel URLs come from `PUBLIC_BASE_URL` (allowlisted), not request headers.
 - The **webhook** is the only thing that confirms bookings. Signatures are
   HMAC-verified with a 5-minute tolerance; event ids are recorded in
   `stripe_events` so replays are acknowledged but never reprocessed.
-- Refunds are initiated from the admin dashboard; the final refund state is
-  recorded when Stripe's `charge.refunded` webhook arrives.
+- Refund attempts are recorded and reconciled from `refund.updated` and
+  `refund.failed`; Stripe's `charge.refunded` remains the final refunded-balance
+  authority.
 - No card data ever touches the AutoClarity database.
 
 ## Going live (LATER — owner-gated)
@@ -41,7 +49,8 @@ explicitly approved production deployment:
 1. Activate the Stripe account (business details, bank account).
 2. Live mode → API keys → `sk_live_...` → set as the **Production** secret.
 3. Live webhook endpoint at `https://getautoclarity.com/api/stripe/webhook`
-   with the same six events → live `whsec_...` secret.
+   with the same eight events and a compatible webhook API version → live
+   `whsec_...` secret.
 4. Production env vars: `STRIPE_ENV=live`, `PAYMENTS_ENABLED=true`,
    `PPI_MODE=live`, `PPI_ENV=production`.
 5. One small controlled live payment test with immediate refund (checklist item).

@@ -1,13 +1,14 @@
-# Cloudflare Pages configuration for the AutoClarity PPI portal.
+# Local-development defaults only. The nonstandard filename is intentional:
+# Wrangler will not silently treat these preview/test values as the deployment
+# source of truth for the production Pages project. D1 migration commands and
+# the guarded preview-config generator use this file. Current Pages dev rejects
+# custom config paths, so `npm run dev` passes the matching local bindings
+# explicitly instead.
 #
-# Production today is GitHub Pages (static only). This file makes the same
-# repository deployable to Cloudflare Pages, which adds the server side of the
-# PPI portal (Pages Functions + D1 + R2). Nothing here affects GitHub Pages.
-#
-# The database_id below is a placeholder. Local dev does not need a real one
-# (`wrangler pages dev` uses a local SQLite database). Before the first hosted
-# preview deploy, run scripts/cloudflare-setup.sh which creates the real
-# resources and patches this file. See docs/PPI_CLOUDFLARE_SETUP.md.
+# The database_id below is intentionally a placeholder. Local Pages development
+# uses local D1 state. Before a hosted preview that can write data, bind a
+# preview-only D1/R2 pair rather than reusing production customer storage. See
+# docs/PPI_DEPLOYMENT.md.
 
 name = "autoclarity-site"
 pages_build_output_dir = "."
@@ -22,6 +23,9 @@ PAYMENTS_ENABLED = "false"
 STRIPE_ENV = "test"
 BOOKING_ENABLED = "true"
 UPLOADS_ENABLED = "true"
+# Transactional SMS is intentionally inactive until a consent-aware queue
+# consumer and provider are separately reviewed and configured.
+SMS_ENABLED = "false"
 # Public site key only — never the secret. This is Cloudflare's always-passing
 # visible test key; replace with the real site key via the Pages dashboard.
 TURNSTILE_SITE_KEY = "1x00000000000000000000AA"

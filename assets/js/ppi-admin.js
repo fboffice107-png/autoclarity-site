@@ -247,7 +247,7 @@
     requestListNotice = "";
     html += '<div class="admin-toolbar"><label for="statusFilter" class="sr-only">Filter by status</label>' +
       '<select id="statusFilter"><option value="">All statuses</option>' +
-      ["submitted", "needs_info", "seller_access_pending", "ready_for_review", "quote_prepared", "quote_sent", "awaiting_time_selection", "awaiting_agreement", "awaiting_payment", "confirmed", "inspection_in_progress", "report_in_progress", "completed", "customer_cancelled", "admin_cancelled", "expired", "refunded", "disputed"]
+      ["submitted", "needs_info", "seller_access_pending", "ready_for_review", "quote_prepared", "quote_sent", "awaiting_time_selection", "awaiting_agreement", "awaiting_payment", "confirmed", "inspection_in_progress", "report_in_progress", "completed", "customer_cancelled", "admin_cancelled", "expired", "refunded", "refund_reconciliation_needed", "disputed"]
         .map(function (s) { return '<option value="' + s + '">' + s.replace(/_/g, " ") + "</option>"; }).join("") +
       '</select></div><div id="requestsTable"></div>';
     content.innerHTML = html;
@@ -379,12 +379,17 @@
       });
       html += "</tbody></table><hr style='border-color:var(--line-soft);margin:16px 0;' />";
     }
-    html += '<h3>New quote version</h3><div class="admin-toolbar">' +
-      '<select id="qTier"><option value="standard">Standard — suggested: ' + esc(req.suggested_tier || "?") + "</option>" +
-      '<option value="euro_luxury_performance">European/Luxury/Performance</option>' +
-      '<option value="exotic_collector">Exotic/Collector/Modified</option></select>' +
+    var suggestedTier = ["standard", "euro_luxury_performance", "exotic_collector"].indexOf(req.suggested_tier) >= 0
+      ? req.suggested_tier
+      : "standard";
+    html += '<h3>New quote version</h3>' +
+      '<p class="field-hint">System suggestion: <strong>' + esc(suggestedTier.replace(/_/g, " ")) + '</strong>. Review the vehicle, location and scope before approving the final tier and amount.</p>' +
+      '<div class="admin-toolbar">' +
+      '<select id="qTier"><option value="standard"' + (suggestedTier === "standard" ? " selected" : "") + '>Standard</option>' +
+      '<option value="euro_luxury_performance"' + (suggestedTier === "euro_luxury_performance" ? " selected" : "") + '>European/Luxury/Performance</option>' +
+      '<option value="exotic_collector"' + (suggestedTier === "exotic_collector" ? " selected" : "") + '>Exotic/Collector/Modified</option></select>' +
       '<input id="qBase" placeholder="Base $ (blank = tier price)" inputmode="decimal" style="width:170px;" />' +
-      '<input id="qTravel" placeholder="Travel $ (blank = suggested)" inputmode="decimal" style="width:180px;" />' +
+      '<input id="qTravel" placeholder="Travel $ (required if custom)" inputmode="decimal" style="width:210px;" />' +
       '<input id="qAddonLabel" placeholder="Add-on label" style="width:150px;" />' +
       '<input id="qAddon" placeholder="Add-on $" inputmode="decimal" style="width:110px;" />' +
       '<input id="qDiscount" placeholder="Discount $" inputmode="decimal" style="width:110px;" />' +
@@ -427,6 +432,7 @@
     // ----- refund tracking -----
     var refundOperations = d.refundOperations || [];
     var refundAttempts = d.refundAttempts || [];
+    var providerRefunds = d.providerRefunds || [];
     html += '<h3>Refund operations</h3>';
     if (refundOperations.length) {
       html += '<p class="field-hint">The operation status below is the current source of truth for the next action. Provider attempts remain visible as immutable history.</p>' +
@@ -463,6 +469,47 @@
       html += "</tbody></table></div>";
     } else {
       html += '<p style="color:var(--text-3);">No refund attempts.</p>';
+    }
+
+    html += '<h3>Stripe refund ledger</h3>';
+    if (providerRefunds.length) {
+      html += '<p class="field-hint">Each Stripe Refund object is tracked independently. The payment balance is the sum of entries currently marked succeeded.</p>' +
+        '<div style="overflow-x:auto;"><table class="admin-table"><thead><tr><th>Stripe refund</th><th>Amount</th><th>Status</th><th>Operation</th><th>Last event</th><th>Updated</th></tr></thead><tbody>';
+      providerRefunds.forEach(function (providerRefund) {
+        html += '<tr><td class="mono">' + esc(providerRefund.provider_refund_id || "—") + '</td>' +
+          '<td>' + esc(money(Number(providerRefund.amount_cents || 0))) + '</td>' +
+          '<td>' + esc(String(providerRefund.status || "unknown").replace(/_/g, " ")) + '</td>' +
+          '<td class="mono">' + esc(providerRefund.operation_id || "external / unmatched") + '</td>' +
+          '<td><span class="mono">' + esc(providerRefund.last_event_id || "—") + '</span>' +
+          (providerRefund.last_event_created == null ? '' : '<span class="msg-meta">' + esc(new Date(Number(providerRefund.last_event_created) * 1000).toLocaleString()) + '</span>') + '</td>' +
+          '<td class="mono">' + esc(when(providerRefund.updated_at)) + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+    } else {
+      html += '<p style="color:var(--text-3);">No Stripe Refund objects recorded.</p>';
+    }
+
+    // ----- dispute tracking -----
+    var paymentDisputes = d.paymentDisputes || [];
+    html += '<h3>Stripe dispute ledger</h3>';
+    if (paymentDisputes.length) {
+      html += '<p class="field-hint">Stripe dispute status and funds movement are tracked independently. A won/closed dispute never reopens the request, booking, or capacity automatically.</p>' +
+        '<div style="overflow-x:auto;"><table class="admin-table"><thead><tr><th>Stripe dispute</th><th>Amount</th><th>Status</th><th>Funds</th><th>Payment / charge</th><th>Status event</th><th>Funds event</th><th>Updated</th></tr></thead><tbody>';
+      paymentDisputes.forEach(function (dispute) {
+        html += '<tr><td class="mono">' + esc(dispute.provider_dispute_id || "—") + '</td>' +
+          '<td>' + esc(money(Number(dispute.amount_cents || 0))) + '</td>' +
+          '<td>' + esc(String(dispute.provider_status || "unknown").replace(/_/g, " ")) + '</td>' +
+          '<td>' + esc(String(dispute.funds_state || "unknown").replace(/_/g, " ")) + '</td>' +
+          '<td><span class="mono">' + esc(dispute.payment_intent || "—") + '</span><span class="msg-meta">' + esc(dispute.provider_charge_id || "—") + '</span></td>' +
+          '<td><span class="mono">' + esc(dispute.status_event_id || "—") + '</span>' +
+          (dispute.status_event_created == null ? '' : '<span class="msg-meta">' + esc(new Date(Number(dispute.status_event_created) * 1000).toLocaleString()) + '</span>') + '</td>' +
+          '<td><span class="mono">' + esc(dispute.funds_event_id || "—") + '</span>' +
+          (dispute.funds_event_created == null ? '' : '<span class="msg-meta">' + esc(new Date(Number(dispute.funds_event_created) * 1000).toLocaleString()) + '</span>') + '</td>' +
+          '<td class="mono">' + esc(when(dispute.updated_at)) + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+    } else {
+      html += '<p style="color:var(--text-3);">No Stripe Dispute objects recorded.</p>';
     }
     html += "</section>";
 
@@ -513,9 +560,11 @@
 
   function yn(v) { return Number(v) === 1 ? "yes" : "no"; }
 
-  function dollarsToCents(str) {
-    var n = Number(String(str || "").replace(/[$,\s]/g, ""));
-    if (!isFinite(n) || n <= 0) return null;
+  function dollarsToCents(str, allowZero) {
+    var raw = String(str == null ? "" : str).replace(/[$,\s]/g, "");
+    if (!raw) return null;
+    var n = Number(raw);
+    if (!isFinite(n) || n < 0 || (!allowZero && n === 0)) return null;
     return Math.round(n * 100);
   }
 
@@ -550,12 +599,13 @@
     document.getElementById("qCreate").addEventListener("click", function () {
       var addons = [];
       var addonCents = dollarsToCents(document.getElementById("qAddon").value);
+      var travelCents = dollarsToCents(document.getElementById("qTravel").value, true);
       if (addonCents) addons.push({ label: document.getElementById("qAddonLabel").value || "Add-on", amountCents: addonCents });
       act({
         action: "create_quote",
         tier: document.getElementById("qTier").value,
         basePriceCents: dollarsToCents(document.getElementById("qBase").value) || undefined,
-        travelCents: dollarsToCents(document.getElementById("qTravel").value) !== null ? dollarsToCents(document.getElementById("qTravel").value) : undefined,
+        travelCents: travelCents !== null ? travelCents : undefined,
         addons: addons,
         discountCents: dollarsToCents(document.getElementById("qDiscount").value) || undefined,
         customerNote: document.getElementById("qNote").value,

@@ -37,8 +37,10 @@ you'll sign in through Cloudflare Access with your email instead.
 All money values are **cents**. Common edits:
 
 - Prices: `pricing.tiers.standard.priceCents` (19900 = $199), etc.
-- Launch promo: `pricing.promo.enabled: true`, `priceCents: 14900`,
-  `endsAt: "2026-08-31"` — shows a truthful time-limited price on the page.
+- Launch pricing: enable `pricing.launch`, set a real future `endsAt`, and set
+  each tier's lower `launchPriceCents` as needed. The legacy Standard-only
+  `pricing.promo` path also requires a real future `endsAt`; either active path
+  is reflected on the public page and in the server-owned quote suggestion.
 - Travel: `travel.bands` (`maxMiles`/`feeCents`), origin lat/lng (keep it the
   public central-Vegas point, never your home).
 - Schedule: `scheduling.slotTemplates`, `daysOfOperation` (0=Sun…6=Sat),

@@ -28,8 +28,8 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/img/favicon-32.png" />
   <link rel="apple-touch-icon" href="/assets/img/icon-180.png" />
 
-  <link rel="stylesheet" href="/assets/css/site.css?v=ac-prod-20260831-r1" />
-  <link rel="stylesheet" href="/assets/css/ppi.css?v=ac-prod-20260831-r1" />
+  <link rel="stylesheet" href="/assets/css/site.css?v=ac-prod-20260901-r1" />
+  <link rel="stylesheet" href="/assets/css/ppi.css?v=ac-prod-20260901-r1" />
 
   <script type="application/ld+json">
   {
@@ -73,8 +73,8 @@
     "url": "https://getautoclarity.com/las-vegas-pre-purchase-inspection/",
     "description": "Independent mobile pre-purchase inspections for used vehicles in the Las Vegas area, performed by an automotive technician with more than 11 years of hands-on experience.",
     "offers": [
-      { "@type": "Offer", "name": "Standard Vehicle PPI", "priceSpecification": { "@type": "PriceSpecification", "price": "199", "priceCurrency": "USD", "valueAddedTaxIncluded": false } },
-      { "@type": "Offer", "name": "European, Luxury or Performance PPI", "priceSpecification": { "@type": "PriceSpecification", "price": "299", "priceCurrency": "USD" } },
+      { "@type": "Offer", "name": "Standard Vehicle PPI", "description": "Starting at $199; the exact quote is confirmed after reviewing the vehicle, location and scope.", "priceSpecification": { "@type": "PriceSpecification", "price": "199", "priceCurrency": "USD", "valueAddedTaxIncluded": false } },
+      { "@type": "Offer", "name": "European, Luxury or Performance PPI", "description": "Starting at $299; the exact quote is confirmed after reviewing the vehicle, location and scope.", "priceSpecification": { "@type": "PriceSpecification", "price": "299", "priceCurrency": "USD" } },
       { "@type": "Offer", "name": "Exotic, Collector or Heavily Modified PPI", "description": "Starting at $399; the exact quote is confirmed after reviewing the vehicle, location and scope.", "priceSpecification": { "@type": "PriceSpecification", "price": "399", "priceCurrency": "USD" } }
     ]
   }
@@ -87,9 +87,9 @@
       { "@type": "Question", "name": "How long does an inspection take?", "acceptedAnswer": { "@type": "Answer", "text": "Typically 60–120 minutes on site depending on the vehicle and access, plus time afterward to prepare the written results. Same-day digital findings are provided when applicable." } },
       { "@type": "Question", "name": "Do I need the seller’s permission?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. The seller controls access to the vehicle. Confirming that they allow an independent inspection before booking avoids wasted trips." } },
       { "@type": "Question", "name": "Does the inspection guarantee the vehicle?", "acceptedAnswer": { "@type": "Answer", "text": "No. A pre-purchase inspection is a professional opinion about the vehicle’s observable condition at the time of inspection — not a warranty. Hidden or intermittent problems may not be detectable." } },
-      { "@type": "Question", "name": "When do I pay?", "acceptedAnswer": { "@type": "Answer", "text": "Submitting is free. After review, AutoClarity confirms the exact quote and available timing. If online payment is offered, completing it reserves the appointment." } },
-      { "@type": "Question", "name": "What areas do you serve?", "acceptedAnswer": { "@type": "Answer", "text": "Las Vegas, North Las Vegas, Henderson, Boulder City and the surrounding Clark County area. Travel within 15 miles of central Las Vegas is included; beyond that a small mobile-service charge applies, and anything past 40 miles is quoted individually." } },
-      { "@type": "Question", "name": "Do I need the VIN to request an inspection?", "acceptedAnswer": { "@type": "Answer", "text": "No — you can submit without it. The VIN is confirmed before the appointment is finalized so the inspection matches the exact vehicle." } }
+      { "@type": "Question", "name": "When do I pay?", "acceptedAnswer": { "@type": "Answer", "text": "Submitting is free. After review, AutoClarity sends your exact quote and available times. Choose a time, accept the current service agreements, and pay the exact approved amount securely through Stripe. The appointment is confirmed only after successful payment." } },
+      { "@type": "Question", "name": "What areas do you serve?", "acceptedAnswer": { "@type": "Answer", "text": "Las Vegas, North Las Vegas, Henderson, Boulder City and the surrounding Clark County area. Travel within 15 miles of central Las Vegas is included; 16–25 miles adds $25, 26–40 miles adds $50, and anything beyond 40 miles is quoted individually." } },
+      { "@type": "Question", "name": "Do I need the VIN to request an inspection?", "acceptedAnswer": { "@type": "Answer", "text": "No — you can submit without it. Share the VIN with AutoClarity before the inspection when it becomes available so the stored request matches the vehicle presented." } }
     ]
   }
   </script>
@@ -248,10 +248,10 @@
         <ol class="ppi-steps">
           <li class="reveal"><strong>Submit the vehicle and location.</strong> Tell us what you’re looking at and where it is — it takes a few minutes.</li>
           <li class="reveal"><strong>AutoClarity reviews the request.</strong> Vehicle, location and seller access are checked personally. AutoClarity typically responds within 24 hours with scheduling details.</li>
-          <li class="reveal"><strong>Receive your exact price and available times.</strong> No surprises — the full price is shown before you commit to anything.</li>
+          <li class="reveal"><strong>Receive your exact price and available times.</strong> AutoClarity reviews and approves the quote before it is sent, and the full price is shown before you commit to anything.</li>
           <li class="reveal">
-            <div data-payment="off"><strong>Confirm the quote and scheduling details.</strong> Submitting is free. If online payment is offered after review, completing it reserves the appointment.</div>
-            <div data-payment="on" hidden><strong>Select a time, accept the agreement, and pay securely.</strong> Payment through Stripe reserves your appointment.</div>
+            <div data-payment="off"><strong>Confirm the quote and scheduling details.</strong> Submitting is free. If online payment is unavailable, contact AutoClarity to finish scheduling; the request itself does not confirm an appointment.</div>
+            <div data-payment="on" hidden><strong>Select a time, accept the current agreements, and pay securely.</strong> Stripe charges the exact approved quote amount, and successful payment confirms your appointment.</div>
           </li>
           <li class="reveal"><strong>The technician inspects the vehicle.</strong> At the dealership or seller’s location, including a road test where permitted and safe<span data-scan="on" hidden>, plus a diagnostic scan where included in your confirmed scope</span>.</li>
           <li class="reveal"><strong>Receive your written results.</strong> Findings, photos, repair priorities, and a clear Proceed / Negotiate / Do Not Proceed recommendation.</li>
@@ -424,19 +424,19 @@
         <div class="price-grid" id="priceGrid">
           <article class="price-card reveal" data-tier="standard">
             <h3>Standard Vehicle PPI</h3>
-            <p class="price-amount"><span class="price-prefix" data-prefix="standard">Starting at</span> <span class="price-value" data-price="standard">$199</span> <s class="price-was" data-was="standard" hidden></s></p>
+            <p class="price-amount"><span class="price-prefix">Starting at</span> <span class="price-value" data-price="standard">$199</span> <s class="price-was" data-was="standard" hidden></s></p>
             <p class="price-launch" data-launch="standard" hidden></p>
             <p class="price-blurb">Common unmodified domestic, Japanese and Korean passenger vehicles and light trucks.</p>
           </article>
           <article class="price-card price-card-mid reveal" data-tier="euro_luxury_performance">
             <h3>European, Luxury or Performance PPI</h3>
-            <p class="price-amount"><span class="price-prefix" data-prefix="euro_luxury_performance">Starting at</span> <span class="price-value" data-price="euro_luxury_performance">$299</span> <s class="price-was" data-was="euro_luxury_performance" hidden></s></p>
+            <p class="price-amount"><span class="price-prefix">Starting at</span> <span class="price-value" data-price="euro_luxury_performance">$299</span> <s class="price-was" data-was="euro_luxury_performance" hidden></s></p>
             <p class="price-launch" data-launch="euro_luxury_performance" hidden></p>
-            <p class="price-blurb">Examples include Corvette, BMW, Mercedes-Benz, Audi, Land Rover, Porsche — and modified or higher-complexity vehicles.</p>
+            <p class="price-blurb">Examples include Corvette, BMW, Mercedes-Benz, Audi, Land Rover, Porsche — and other luxury or higher-complexity vehicles.</p>
           </article>
           <article class="price-card reveal" data-tier="exotic_collector">
             <h3>Exotic, Collector or Heavily Modified PPI</h3>
-            <p class="price-amount"><span class="price-prefix" data-prefix="exotic_collector">Starting at</span> <span class="price-value" data-price="exotic_collector">$399</span></p>
+            <p class="price-amount"><span class="price-prefix">Starting at</span> <span class="price-value" data-price="exotic_collector">$399</span></p>
             <p class="price-blurb">Final quote required after reviewing the exact vehicle, location and inspection scope.</p>
           </article>
         </div>
@@ -452,15 +452,15 @@
           The AutoClarity app subscription (informational symptom guidance, billed separately by Apple)
           is a separate product. Las&nbsp;Vegas PPI services are separately scheduled and priced
           physical services — you do not need the app to request one.
-          <span data-payment="off">Submitting is free. After review, AutoClarity confirms the quote and timing; if online payment is offered, payment reserves the appointment.</span>
-          <span data-payment="on" hidden>After review, you can select a time, accept the service agreement, and pay securely through this website to reserve the appointment.</span>
+          <span data-payment="off">Submitting is free. After review, AutoClarity confirms the exact quote and timing. If online payment is unavailable, contact AutoClarity to complete scheduling.</span>
+          <span data-payment="on" hidden>After review, select a time, accept the current service agreements, and pay the exact approved quote amount securely through Stripe. Successful payment confirms the appointment.</span>
         </div>
 
         <div class="travel-card reveal" aria-labelledby="travel-title">
           <h3 id="travel-title">Mobile-service travel</h3>
           <table class="travel-table">
             <caption class="sr-only">Mobile-service charges by distance from the Las Vegas service area</caption>
-            <tbody>
+            <tbody id="travelRows">
               <tr><th scope="row">0–15 miles</th><td>Included</td></tr>
               <tr><th scope="row">16–25 miles</th><td>+$25 mobile-service charge</td></tr>
               <tr><th scope="row">26–40 miles</th><td>+$50 mobile-service charge</td></tr>
@@ -907,16 +907,16 @@
           </details>
           <details class="faq-item reveal">
             <summary>What if the seller refuses access?</summary>
-            <p>If access is refused before travel begins, you can reschedule or transfer to another vehicle at no charge. If it happens after the technician is already en route, the mobile-service portion may be retained.</p>
+            <p>If access is refused before travel begins, you can reschedule or transfer to another vehicle at no charge. If it happens after the technician is already en route, only a separately disclosed travel or mobile-service charge in your approved quote may be retained.</p>
           </details>
           <details class="faq-item reveal">
             <summary>When do I pay?</summary>
-            <p data-payment="off">Submitting is free. After review, AutoClarity confirms your exact quote and available timing. If online payment is offered, completing it reserves the appointment.</p>
-            <p data-payment="on" hidden>Only after your request is reviewed and you’ve seen your exact quote, chosen a time, and accepted the service agreement. Payment is processed securely by Stripe and reserves your appointment.</p>
+            <p data-payment="off">Submitting is free. After review, AutoClarity confirms your exact quote and available timing. If online payment is unavailable, contact AutoClarity to complete scheduling.</p>
+            <p data-payment="on" hidden>Only after your request is reviewed and you’ve seen the exact approved quote, chosen a time, and accepted the current service agreements. Stripe charges that exact quoted amount, and successful payment confirms your appointment.</p>
           </details>
           <details class="faq-item reveal">
             <summary>What areas do you serve?</summary>
-            <p>Las Vegas, North Las Vegas, Henderson, Boulder City and the surrounding Clark County area. Travel within 15 miles of central Las Vegas is included; beyond that a small mobile-service charge applies, and anything past 40 miles is quoted individually.</p>
+            <p>Las Vegas, North Las Vegas, Henderson, Boulder City and the surrounding Clark County area. Travel within 15 miles of central Las Vegas is included; 16–25 miles adds $25, 26–40 miles adds $50, and anything beyond 40 miles is quoted individually.</p>
           </details>
           <details class="faq-item reveal">
             <summary>What exactly do I receive?</summary>
@@ -924,7 +924,7 @@
           </details>
           <details class="faq-item reveal">
             <summary>Do I need the VIN to request an inspection?</summary>
-            <p>No — you can submit without it. The VIN is confirmed before the appointment is finalized so the inspection matches the exact vehicle.</p>
+            <p>No — you can submit without it. Share the VIN with AutoClarity before the inspection when it becomes available so the stored request matches the vehicle presented.</p>
           </details>
           <details class="faq-item reveal">
             <summary>Is the service available outside Las Vegas?</summary>
@@ -988,7 +988,7 @@
     </div>
   </footer>
 
-  <script src="/assets/js/main.js?v=ac-prod-20260831-r1" defer></script>
-  <script src="/assets/js/ppi-form.js?v=ac-prod-20260831-r1" defer></script>
+  <script src="/assets/js/main.js?v=ac-prod-20260901-r1" defer></script>
+  <script src="/assets/js/ppi-form.js?v=ac-prod-20260901-r1" defer></script>
 </body>
 </html>

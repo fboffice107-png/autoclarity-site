@@ -2,7 +2,7 @@
 # Dynamic API responses get their headers from functions/_middleware.ts.
 
 /*
-  X-AutoClarity-Build: ac-prod-20260831-r1
+  X-AutoClarity-Build: ac-prod-20260901-r1
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin

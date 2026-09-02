@@ -3,11 +3,13 @@
 // Confirming a booking happens HERE, never on the browser success redirect.
 
 import type { Env } from '../../lib/types.ts';
+import { modeFlags } from '../../lib/types.ts';
 import {
   classifyStripeRefundStatus,
   verifyStripeSignature,
   claimStripeEvent,
   markStripeEventProcessed,
+  STRIPE_CHECKOUT_CURRENCY,
   type StripeRefundProviderStatus,
 } from '../../lib/stripe.ts';
 import { applyStatus, isStatus, type Status } from '../../lib/status.ts';
@@ -15,11 +17,24 @@ import { getConfig } from '../../lib/config.ts';
 import { queueTemplate, requireRecordedEmail } from '../../lib/email.ts';
 import { issueMagicLink, portalUrl } from '../../lib/magic.ts';
 import { applyTerminalLifecycle } from '../../lib/lifecycle.ts';
+import {
+  recomputePaymentRefundBalance,
+  upsertProviderRefund,
+  type ProviderRefundLedgerRow,
+} from '../../lib/refunds.ts';
+import {
+  classifyProviderDisputeStatus,
+  disputeFundsStateForEvent,
+  reconcilePaymentDisputeState,
+  recordPaymentDisputeEvent,
+} from '../../lib/disputes.ts';
 import { errorJson, formatCents, json, nowIso, sha256Hex } from '../../lib/util.ts';
 
 interface StripeEvent {
   id: string;
   type: string;
+  livemode: boolean;
+  created?: number;
   data: { object: Record<string, unknown> };
 }
 
@@ -48,15 +63,23 @@ function refundWebhookOutcome(providerStatus: StripeRefundProviderStatus): Refun
   }
 }
 
-/** Preserve definitive/confirmed states when Stripe delivers stale updates. */
+/**
+ * Local lifecycle mapping only. Event ordering is enforced by provider_refunds;
+ * an authoritative later failure is therefore allowed to replace success.
+ */
 export function reconcileRefundLifecycle(
-  current: RefundLifecycleStatus,
+  _current: RefundLifecycleStatus,
   incoming: RefundLifecycleStatus,
 ): RefundLifecycleStatus {
-  if (current === 'confirmed') return 'confirmed';
-  if (current === 'provider_accepted') return 'provider_accepted';
-  if (current === 'failed' || current === 'canceled') return current;
   return incoming;
+}
+
+function stripeEventCreated(event: StripeEvent): number {
+  const value = Number(event.created);
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error('Stripe commerce event omitted a valid top-level created timestamp.');
+  }
+  return value;
 }
 
 export function stripeWebhookBase(requestUrl: string, configuredBase?: string): string {
@@ -95,29 +118,49 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   } catch {
     return errorJson('bad_json', 'Invalid JSON payload.', 400);
   }
-  if (!event.id || !event.type) return errorJson('bad_event', 'Malformed event.', 400);
+  if (!event.id || !event.type || typeof event.livemode !== 'boolean') {
+    return errorJson('bad_event', 'Malformed event.', 400);
+  }
 
-  const owns = await claimStripeEvent(db, event.id, event.type, await sha256Hex(payload));
-  if (!owns) return json({ received: true, replay: true });
+  // This check is independent of PAYMENTS_ENABLED so a late, authentic event
+  // can still reconcile an existing payment after Checkout has been disabled.
+  // It must happen before the event is claimed or any commerce row is mutated.
+  const expectedLivemode = modeFlags(env).stripeEnv === 'live';
+  if (event.livemode !== expectedLivemode) {
+    console.error('stripe_webhook_mode_mismatch', event.id, event.livemode ? 'live' : 'test');
+    return errorJson('stripe_mode_mismatch', 'Webhook mode does not match this environment.', 400);
+  }
+
+  const claim = await claimStripeEvent(db, event.id, event.type, await sha256Hex(payload));
+  if (claim === 'processed') return json({ received: true, replay: true });
+  if (claim === 'in_progress') {
+    return json(
+      { error: { code: 'event_in_progress', message: 'Event processing is already in progress; retry later.' } },
+      409,
+      { 'retry-after': '5' },
+    );
+  }
 
   const obj = event.data?.object ?? {};
   try {
     switch (event.type) {
-      case 'checkout.session.completed':
-      case 'checkout.session.async_payment_succeeded': {
-        const sessionId = String(obj['id'] ?? '');
-        const paymentStatus = String(obj['payment_status'] ?? '');
-        if (event.type === 'checkout.session.completed' && paymentStatus !== 'paid') {
-          break; // delayed method — wait for async_payment_succeeded
+      case 'checkout.session.completed': {
+        if (obj['payment_status'] === 'unpaid') {
+          // Delayed-notification methods complete Checkout before funds are
+          // available. Authenticate the complete commerce identity, then leave
+          // the active payment/booking untouched for the later async outcome.
+          await validateCheckoutSessionIdentity(env, obj, 'unpaid');
+        } else {
+          await handlePaymentSucceeded(env, obj, waitUntil, publicBase);
         }
-        await handlePaymentSucceeded(env, sessionId, String(obj['payment_intent'] ?? ''), waitUntil, publicBase);
+        break;
+      }
+      case 'checkout.session.async_payment_succeeded': {
+        await handlePaymentSucceeded(env, obj, waitUntil, publicBase);
         break;
       }
       case 'checkout.session.async_payment_failed': {
-        await db
-          .prepare(`UPDATE payments SET status = 'failed', updated_at = ? WHERE stripe_session_id = ? AND status IN ('created','pending')`)
-          .bind(nowIso(), String(obj['id'] ?? ''))
-          .run();
+        await handlePaymentFailed(env, obj);
         break;
       }
       case 'checkout.session.expired': {
@@ -127,155 +170,30 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           .run();
         break;
       }
+      case 'refund.created':
       case 'refund.updated':
       case 'refund.failed': {
-        await handleRefundStatusEvent(env, event.id, event.type, obj, waitUntil, publicBase);
+        await handleRefundStatusEvent(env, event.id, stripeEventCreated(event), event.type, obj, waitUntil, publicBase);
         break;
       }
       case 'charge.refunded': {
-        const paymentIntent = String(obj['payment_intent'] ?? '');
-        const refundedCents = Number(obj['amount_refunded'] ?? 0);
-        const fully = Boolean(obj['refunded']);
-        const payment = await db
-          .prepare(`SELECT id, request_id, amount_cents, refunded_cents, status FROM payments WHERE stripe_payment_intent = ?`)
-          .bind(paymentIntent)
-          .first<{ id: string; request_id: string; amount_cents: number; refunded_cents: number; status: string }>();
-        if (!payment) break;
-        const reportedCents = fully
-          ? payment.amount_cents
-          : Math.min(payment.amount_cents, Math.max(0, Number.isFinite(refundedCents) ? Math.trunc(refundedCents) : 0));
-        await db
-          .prepare(
-            `UPDATE payments
-             SET refunded_cents = MAX(refunded_cents, ?),
-                 status = CASE
-                   WHEN MAX(refunded_cents, ?) >= amount_cents THEN 'refunded'
-                   WHEN status IN ('refunded','disputed') THEN status
-                   WHEN MAX(refunded_cents, ?) > 0 THEN 'partially_refunded'
-                   ELSE status
-                 END,
-                 updated_at = ?
-             WHERE id = ?`,
-          )
-          .bind(reportedCents, reportedCents, reportedCents, nowIso(), payment.id)
-          .run();
-        const persisted = await db
-          .prepare(`SELECT refunded_cents, status FROM payments WHERE id = ?`)
-          .bind(payment.id)
-          .first<{ refunded_cents: number; status: string }>();
-        if (!persisted) throw new Error(`Refunded payment ${payment.id} disappeared during reconciliation.`);
-        const refundConfirmedAt = nowIso();
-        await db.batch([
-          db
-            .prepare(
-              `UPDATE refund_operations SET status = 'confirmed', last_provider_status = 'succeeded', updated_at = ?
-               WHERE payment_id = ? AND status != 'confirmed'
-                 AND starting_refunded_cents + requested_amount_cents <= ?`,
-            )
-            .bind(refundConfirmedAt, payment.id, persisted.refunded_cents),
-          db
-            .prepare(
-              `UPDATE refund_operation_attempts
-               SET outcome_status = 'confirmed', provider_status = COALESCE(provider_status, 'succeeded'), updated_at = ?
-               WHERE outcome_status != 'confirmed'
-                 AND EXISTS (
-                   SELECT 1 FROM refund_operations o
-                   WHERE o.id = refund_operation_attempts.operation_id
-                     AND o.payment_id = ? AND o.status = 'confirmed'
-                     AND o.attempt_count = refund_operation_attempts.attempt_no
-                 )`,
-            )
-            .bind(refundConfirmedAt, payment.id),
-        ]);
-
-        const req = await db
-          .prepare(
-            `SELECT r.status, r.ref, c.email
-             FROM ppi_requests r JOIN customers c ON c.id = r.customer_id WHERE r.id = ?`,
-          )
-            .bind(payment.request_id)
-            .first<{ status: string; ref: string; email: string }>();
-        if (!req || !isStatus(req.status)) throw new Error(`Refunded payment ${payment.id} has no valid request.`);
-        const isFullyRefunded = persisted.status === 'refunded' || persisted.refunded_cents >= payment.amount_cents;
-        if (isFullyRefunded) {
-          const lifecycle = await applyTerminalLifecycle(db, {
-            requestId: payment.request_id,
-            to: 'refunded',
-            actor: 'system:stripe-webhook',
-            reason: 'Full refund confirmed by Stripe',
-            relatedId: payment.id,
-          });
-          if (!lifecycle.ok) {
-            throw new Error(`Request ${payment.request_id} could not reconcile to refunded from ${req.status}.`);
-          }
-          const config = await getConfig(db);
-          requireRecordedEmail(
-            await queueTemplate(env, db, payment.request_id, 'refund_issued', req.email, {
-              ref: req.ref,
-              supportEmail: config.supportEmail,
-              extra: { amount: formatCents(persisted.refunded_cents) },
-            }, waitUntil, undefined, `refund_issued:${payment.id}:${persisted.refunded_cents}`),
-            'refund_issued',
-          );
-        }
-        if (env.ADMIN_NOTIFY_EMAIL) {
-          const config = await getConfig(db);
-          requireRecordedEmail(
-            await queueTemplate(env, db, payment.request_id, 'owner_notify', env.ADMIN_NOTIFY_EMAIL, {
-              ref: req.ref,
-              supportEmail: config.supportEmail,
-              extra: {
-                kind: isFullyRefunded ? 'FULL REFUND CONFIRMED' : 'PARTIAL REFUND CONFIRMED',
-                detail: `${formatCents(persisted.refunded_cents)} cumulative refund recorded by Stripe`,
-                adminUrl: `${publicBase}/ppi/admin/?request=${encodeURIComponent(payment.request_id)}`,
-              },
-            }, waitUntil, req.email, `owner_refund:${payment.id}:${persisted.refunded_cents}`),
-            'owner_refund',
-          );
-        }
+        await handleChargeRefunded(env, event.id, stripeEventCreated(event), obj, waitUntil, publicBase);
         break;
       }
-      case 'charge.dispute.created': {
-        const paymentIntent = String(obj['payment_intent'] ?? '');
-        const payment = await db
-          .prepare(`SELECT id, request_id, amount_cents FROM payments WHERE stripe_payment_intent = ?`)
-          .bind(paymentIntent)
-          .first<{ id: string; request_id: string; amount_cents: number }>();
-        if (!payment) break;
-        await db.prepare(`UPDATE payments SET status = 'disputed', updated_at = ? WHERE id = ?`).bind(nowIso(), payment.id).run();
-        const req = await db
-          .prepare(
-            `SELECT r.status, r.ref, c.email
-             FROM ppi_requests r JOIN customers c ON c.id = r.customer_id WHERE r.id = ?`,
-          )
-          .bind(payment.request_id)
-          .first<{ status: string; ref: string; email: string }>();
-        if (!req || !isStatus(req.status)) throw new Error(`Disputed payment ${payment.id} has no valid request.`);
-        const lifecycle = await applyTerminalLifecycle(db, {
-          requestId: payment.request_id,
-          to: 'disputed',
-          actor: 'system:stripe-webhook',
-          reason: 'Stripe dispute opened',
-          relatedId: payment.id,
-        });
-        if (!lifecycle.ok) {
-          throw new Error(`Request ${payment.request_id} could not reconcile to disputed from ${req.status}.`);
-        }
-        if (env.ADMIN_NOTIFY_EMAIL) {
-          const config = await getConfig(db);
-          requireRecordedEmail(
-            await queueTemplate(env, db, payment.request_id, 'owner_notify', env.ADMIN_NOTIFY_EMAIL, {
-              ref: req.ref,
-              supportEmail: config.supportEmail,
-              extra: {
-                kind: 'PAYMENT DISPUTE OPENED',
-                detail: `${formatCents(payment.amount_cents)} payment disputed; booking access was disabled`,
-                adminUrl: `${publicBase}/ppi/admin/?request=${encodeURIComponent(payment.request_id)}`,
-              },
-            }, waitUntil, req.email, `owner_dispute:${payment.id}`),
-            'owner_dispute',
-          );
-        }
+      case 'charge.dispute.created':
+      case 'charge.dispute.updated':
+      case 'charge.dispute.closed':
+      case 'charge.dispute.funds_reinstated':
+      case 'charge.dispute.funds_withdrawn': {
+        await handleDisputeEvent(
+          env,
+          event.id,
+          stripeEventCreated(event),
+          event.type,
+          obj,
+          waitUntil,
+          publicBase,
+        );
         break;
       }
       default:
@@ -296,146 +214,357 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 };
 
-interface RefundEventRow {
-  attempt_id: string;
-  operation_id: string;
-  attempt_no: number;
-  attempt_status: RefundLifecycleStatus;
-  attempt_error: string | null;
-  attempt_provider_status: string | null;
-  provider_refund_id: string | null;
-  operation_status: RefundLifecycleStatus;
-  operation_error: string | null;
-  operation_provider_status: string | null;
-  operation_attempt_count: number;
-  request_id: string;
+interface DisputedPaymentLink {
   payment_id: string;
-  requested_amount_cents: number;
+  request_id: string;
+  payment_amount_cents: number;
+  payment_currency: string;
+  payment_status: string;
+  request_status: string;
   ref: string;
   email: string;
 }
 
-async function handleRefundStatusEvent(
+function disputeNotificationKind(eventType: string, status: string, fundsState: string): string {
+  if (eventType === 'charge.dispute.created') return 'PAYMENT DISPUTE OPENED';
+  if (eventType === 'charge.dispute.closed') return `PAYMENT DISPUTE CLOSED — ${status.toUpperCase()}`;
+  if (eventType === 'charge.dispute.funds_reinstated') return 'DISPUTE FUNDS REINSTATED';
+  if (eventType === 'charge.dispute.funds_withdrawn') return 'DISPUTE FUNDS WITHDRAWN';
+  return `PAYMENT DISPUTE UPDATED — ${status.toUpperCase()} / ${fundsState.toUpperCase()}`;
+}
+
+/**
+ * Reconcile Stripe's independent dispute-status and funds-movement streams.
+ * A favorable provider outcome may release only the payment's economic latch;
+ * request, booking, slot, portal-link, and capacity state remain closed.
+ */
+async function handleDisputeEvent(
   env: Env,
   eventId: string,
+  eventCreated: number,
   eventType: string,
   obj: Record<string, unknown>,
   waitUntil: WaitUntil,
   publicBase: string,
 ): Promise<void> {
   const db = env.DB;
-  const providerRefundId = typeof obj['id'] === 'string' ? obj['id'] : '';
-  if (!/^re_[A-Za-z0-9_]+$/.test(providerRefundId) || providerRefundId.length > 255) {
-    throw new Error('Stripe refund status event omitted a valid Refund id.');
+  const providerDisputeId = String(obj['id'] ?? '');
+  const paymentIntent = String(obj['payment_intent'] ?? '');
+  const providerChargeId = String(obj['charge'] ?? '');
+  const amountCents = Number(obj['amount']);
+  const currency = String(obj['currency'] ?? '').toLowerCase();
+  const providerCreated = Number(obj['created']);
+  const providerStatus = classifyProviderDisputeStatus(obj['status']);
+  const fundsState = disputeFundsStateForEvent(eventType) ?? undefined;
+
+  if (!/^du_[A-Za-z0-9_]+$/.test(providerDisputeId) || providerDisputeId.length > 255) {
+    throw new Error('Stripe dispute event omitted a valid Dispute id.');
+  }
+  if (!/^pi_[A-Za-z0-9_]+$/.test(paymentIntent) || paymentIntent.length > 255) {
+    throw new Error(`Stripe Dispute ${providerDisputeId} omitted a valid PaymentIntent id.`);
+  }
+  if (!/^ch_[A-Za-z0-9_]+$/.test(providerChargeId) || providerChargeId.length > 255) {
+    throw new Error(`Stripe Dispute ${providerDisputeId} omitted a valid Charge id.`);
+  }
+  if (!Number.isSafeInteger(amountCents) || amountCents <= 0) {
+    throw new Error(`Stripe Dispute ${providerDisputeId} omitted a valid amount.`);
+  }
+  if (!/^[a-z]{3}$/.test(currency)) {
+    throw new Error(`Stripe Dispute ${providerDisputeId} omitted a valid currency.`);
+  }
+  if (!Number.isSafeInteger(providerCreated) || providerCreated < 0) {
+    throw new Error(`Stripe Dispute ${providerDisputeId} omitted a valid created timestamp.`);
+  }
+  if (
+    eventType === 'charge.dispute.closed'
+    && !['won', 'lost', 'prevented', 'warning_closed'].includes(providerStatus)
+  ) {
+    throw new Error(`Closed Stripe Dispute ${providerDisputeId} has non-terminal status ${providerStatus}.`);
   }
 
-  const metadataValue = obj['metadata'];
-  const metadata = metadataValue && typeof metadataValue === 'object' && !Array.isArray(metadataValue)
-    ? metadataValue as Record<string, unknown>
-    : {};
-  const metadataOperationId = String(metadata['refund_operation_id'] ?? '').slice(0, 80);
-  const metadataAttemptNo = Number(metadata['refund_attempt_no'] ?? 0);
-
-  const selectAttempt = `
-    SELECT a.id AS attempt_id, a.operation_id, a.attempt_no,
-           a.outcome_status AS attempt_status, a.error AS attempt_error,
-           a.provider_status AS attempt_provider_status, a.provider_refund_id,
-           o.status AS operation_status, o.last_error AS operation_error,
-           o.last_provider_status AS operation_provider_status,
-           o.attempt_count AS operation_attempt_count,
-           o.request_id, o.payment_id, o.requested_amount_cents,
-           r.ref, c.email
-    FROM refund_operation_attempts a
-    JOIN refund_operations o ON o.id = a.operation_id
-    JOIN ppi_requests r ON r.id = o.request_id
-    JOIN customers c ON c.id = r.customer_id`;
-
-  let row = await db
-    .prepare(`${selectAttempt} WHERE a.provider_refund_id = ? LIMIT 1`)
-    .bind(providerRefundId)
-    .first<RefundEventRow>();
-  if (!row && metadataOperationId && Number.isInteger(metadataAttemptNo) && metadataAttemptNo > 0) {
-    row = await db
-      .prepare(`${selectAttempt} WHERE a.operation_id = ? AND a.attempt_no = ? LIMIT 1`)
-      .bind(metadataOperationId, metadataAttemptNo)
-      .first<RefundEventRow>();
+  const matches = await db
+    .prepare(
+      `SELECT p.id AS payment_id, p.request_id,
+              p.amount_cents AS payment_amount_cents,
+              p.currency AS payment_currency, p.status AS payment_status,
+              r.status AS request_status, r.ref, c.email
+       FROM payments p
+       JOIN ppi_requests r ON r.id = p.request_id
+       JOIN customers c ON c.id = r.customer_id
+       WHERE p.stripe_payment_intent = ? AND r.deleted_at IS NULL
+       LIMIT 2`,
+    )
+    .bind(paymentIntent)
+    .all<DisputedPaymentLink>();
+  const paymentLinks = matches.results ?? [];
+  if (paymentLinks.length !== 1) {
+    throw new Error(
+      paymentLinks.length === 0
+        ? `Stripe Dispute ${providerDisputeId} cannot yet be linked to its local payment; retry after Checkout reconciliation.`
+        : `Stripe Dispute ${providerDisputeId} PaymentIntent maps to multiple local payments.`,
+    );
+  }
+  const payment = paymentLinks[0]!;
+  if (!isStatus(payment.request_status)) {
+    throw new Error(`Disputed payment ${payment.payment_id} has no valid request.`);
   }
 
-  const providerStatus = eventType === 'refund.failed' ? 'failed' : classifyStripeRefundStatus(obj);
-  const incoming = refundWebhookOutcome(providerStatus);
-  const failure = incoming === 'failed' || incoming === 'canceled' || incoming === 'requires_action' || incoming === 'reconciliation_required'
-    ? String(obj['failure_reason'] ?? obj['failure_message'] ?? `provider_status:${providerStatus}`).slice(0, 240)
+  const recorded = await recordPaymentDisputeEvent(db, {
+    providerDisputeId,
+    paymentId: payment.payment_id,
+    paymentIntent,
+    providerChargeId,
+    amountCents,
+    currency,
+    providerCreated,
+    eventCreated,
+    eventId,
+    providerStatus,
+    fundsState,
+  });
+  const reconciliation = await reconcilePaymentDisputeState(db, payment.payment_id);
+
+  // This is deliberately re-run for exact authoritative retries: if a prior
+  // attempt stopped after recording the event, the same delivery repairs all
+  // terminal request/capacity effects before Stripe receives a 2xx response.
+  const lifecycle = await applyTerminalLifecycle(db, {
+    requestId: payment.request_id,
+    to: 'disputed',
+    actor: 'system:stripe-webhook',
+    reason: `Stripe dispute ${providerDisputeId}: ${recorded.row.provider_status}; funds ${recorded.row.funds_state}`,
+    relatedId: providerDisputeId,
+  });
+  if (!lifecycle.ok) {
+    throw new Error(`Request ${payment.request_id} could not reconcile to disputed from ${payment.request_status}.`);
+  }
+
+  await db
+    .prepare(
+      `INSERT OR IGNORE INTO admin_audit_log
+         (id, actor, action, entity, entity_id, details_json, created_at)
+       VALUES (?, 'system:stripe-webhook', 'dispute_reconciled', 'payment_dispute', ?, ?, ?)`,
+    )
+    .bind(
+      `al_dispute_${eventId}_${providerDisputeId}`,
+      providerDisputeId,
+      JSON.stringify({
+        eventType,
+        eventId,
+        providerDisputeId,
+        providerStatus: recorded.row.provider_status,
+        fundsState: recorded.row.funds_state,
+        statusDisposition: recorded.statusDisposition,
+        fundsDisposition: recorded.fundsDisposition,
+        paymentDecision: reconciliation.decision,
+        paymentStatus: reconciliation.status,
+      }),
+      nowIso(),
+    )
+    .run();
+
+  if ((recorded.applied || recorded.authoritative) && env.ADMIN_NOTIFY_EMAIL) {
+    const config = await getConfig(db);
+    requireRecordedEmail(
+      await queueTemplate(env, db, payment.request_id, 'owner_dispute_update', env.ADMIN_NOTIFY_EMAIL, {
+        ref: payment.ref,
+        supportEmail: config.supportEmail,
+        extra: {
+          kind: disputeNotificationKind(eventType, recorded.row.provider_status, recorded.row.funds_state),
+          disputeId: providerDisputeId,
+          amount: formatCents(recorded.row.amount_cents),
+          status: recorded.row.provider_status,
+          fundsState: recorded.row.funds_state,
+          paymentStatus: reconciliation.status,
+          adminUrl: `${publicBase}/ppi/admin/?request=${encodeURIComponent(payment.request_id)}`,
+        },
+      }, waitUntil, payment.email, `owner_dispute:${providerDisputeId}:${eventId}`),
+      'owner_dispute_update',
+    );
+  }
+}
+
+interface RefundLinkRow {
+  attempt_id: string | null;
+  operation_id: string | null;
+  attempt_no: number | null;
+  attempt_status: RefundLifecycleStatus | null;
+  operation_status: RefundLifecycleStatus | null;
+  operation_attempt_count: number | null;
+  request_id: string;
+  payment_id: string;
+  requested_amount_cents: number | null;
+  amount_cents: number;
+  currency: string;
+  request_status: string;
+  ref: string;
+  email: string;
+}
+
+interface RecordedRefund {
+  link: RefundLinkRow;
+  ledger: ProviderRefundLedgerRow;
+  applied: boolean;
+  authoritative: boolean;
+  providerStatus: StripeRefundProviderStatus;
+  failure: string | null;
+}
+
+const REFUND_ATTEMPT_SELECT = `
+  SELECT a.id AS attempt_id, a.operation_id, a.attempt_no,
+         a.outcome_status AS attempt_status,
+         o.status AS operation_status, o.attempt_count AS operation_attempt_count,
+         o.request_id, o.payment_id, o.requested_amount_cents,
+         p.amount_cents, p.currency, r.status AS request_status, r.ref, c.email
+  FROM refund_operation_attempts a
+  JOIN refund_operations o ON o.id = a.operation_id
+  JOIN payments p ON p.id = o.payment_id
+  JOIN ppi_requests r ON r.id = o.request_id
+  JOIN customers c ON c.id = r.customer_id`;
+
+async function uniqueRefundLink(
+  statement: D1PreparedStatement,
+  ambiguousMessage: string,
+): Promise<RefundLinkRow | null> {
+  const result = await statement.all<RefundLinkRow>();
+  const rows = result.results ?? [];
+  if (rows.length > 1) throw new Error(ambiguousMessage);
+  return rows[0] ?? null;
+}
+
+function mergeRefundLink(
+  providerRefundId: string,
+  current: RefundLinkRow | null,
+  candidate: RefundLinkRow | null,
+  source: string,
+): RefundLinkRow | null {
+  if (!candidate) return current;
+  if (current && (
+    current.payment_id !== candidate.payment_id
+    || (current.operation_id && candidate.operation_id && current.operation_id !== candidate.operation_id)
+    || (current.attempt_id && candidate.attempt_id && current.attempt_id !== candidate.attempt_id)
+  )) {
+    throw new Error(`Stripe Refund ${providerRefundId} ${source} conflicts with another local link.`);
+  }
+  if (!current || (!current.attempt_id && candidate.attempt_id)) return candidate;
+  return current;
+}
+
+async function resolveRefundLink(
+  db: D1Database,
+  providerRefundId: string,
+  metadataOperationId: string | null,
+  metadataAttemptNo: number | null,
+  paymentIntent: string,
+): Promise<RefundLinkRow | null> {
+  const paymentRows = await db
+    .prepare(
+      `SELECT NULL AS attempt_id, NULL AS operation_id, NULL AS attempt_no,
+              NULL AS attempt_status, NULL AS operation_status,
+              NULL AS operation_attempt_count, p.request_id, p.id AS payment_id,
+              NULL AS requested_amount_cents, p.amount_cents, p.currency,
+              r.status AS request_status, r.ref, c.email
+       FROM payments p
+       JOIN ppi_requests r ON r.id = p.request_id
+       JOIN customers c ON c.id = r.customer_id
+       WHERE p.stripe_payment_intent = ?
+       LIMIT 2`,
+    )
+    .bind(paymentIntent)
+    .all<RefundLinkRow>();
+  const paymentLinks = paymentRows.results ?? [];
+  if (paymentLinks.length !== 1) {
+    throw new Error(
+      paymentLinks.length === 0
+        ? `Stripe Refund ${providerRefundId} cannot yet be linked to its PaymentIntent; retry after Checkout reconciliation.`
+        : `Stripe Refund ${providerRefundId} PaymentIntent maps to multiple local payments.`,
+    );
+  }
+  const paymentRow = paymentLinks[0]!;
+
+  let row = await uniqueRefundLink(
+    db.prepare(
+      `SELECT pr.attempt_id, pr.operation_id, a.attempt_no,
+              a.outcome_status AS attempt_status,
+              o.status AS operation_status, o.attempt_count AS operation_attempt_count,
+              p.request_id, p.id AS payment_id, o.requested_amount_cents,
+              p.amount_cents, p.currency, r.status AS request_status, r.ref, c.email
+       FROM provider_refunds pr
+       JOIN payments p ON p.id = pr.payment_id
+       JOIN ppi_requests r ON r.id = p.request_id
+       JOIN customers c ON c.id = r.customer_id
+       LEFT JOIN refund_operations o ON o.id = pr.operation_id
+       LEFT JOIN refund_operation_attempts a ON a.id = pr.attempt_id
+       WHERE pr.provider_refund_id = ? LIMIT 2`,
+    )
+    .bind(providerRefundId),
+    `Stripe Refund ${providerRefundId} maps to multiple provider-refund ledger rows.`,
+  );
+  const attemptProviderRow = await uniqueRefundLink(
+    db.prepare(`${REFUND_ATTEMPT_SELECT} WHERE a.provider_refund_id = ? LIMIT 2`)
+      .bind(providerRefundId),
+    `Stripe Refund ${providerRefundId} maps to multiple local refund attempts.`,
+  );
+  row = mergeRefundLink(providerRefundId, row, attemptProviderRow, 'provider-id link');
+
+  let metadataRow: RefundLinkRow | null = null;
+  if (metadataOperationId !== null && metadataAttemptNo !== null) {
+    metadataRow = await uniqueRefundLink(
+      db.prepare(`${REFUND_ATTEMPT_SELECT} WHERE a.operation_id = ? AND a.attempt_no = ? LIMIT 2`)
+        .bind(metadataOperationId, metadataAttemptNo),
+      `Stripe Refund ${providerRefundId} metadata maps to multiple local refund attempts.`,
+    );
+    if (!metadataRow) {
+      throw new Error(`Stripe Refund ${providerRefundId} metadata does not map to a local refund attempt.`);
+    }
+    row = mergeRefundLink(providerRefundId, row, metadataRow, 'metadata');
+  }
+
+  if (row && row.payment_id !== paymentRow.payment_id) {
+    throw new Error(`Stripe Refund ${providerRefundId} PaymentIntent conflicts with its local refund link.`);
+  }
+  return row ?? paymentRow;
+}
+
+function refundFailure(
+  status: StripeRefundProviderStatus,
+  obj: Record<string, unknown>,
+): string | null {
+  return status === 'failed' || status === 'canceled' || status === 'requires_action' || status === 'unknown'
+    ? String(obj['failure_reason'] ?? obj['failure_message'] ?? `provider_status:${status}`).slice(0, 240)
     : null;
+}
 
-  // A refund created outside this app has no local operation claim. It must not
-  // mutate an unrelated operation, but a matched payment still gets a durable
-  // owner alert so the provider-side action is visible.
-  if (!row) {
-    const paymentIntent = String(obj['payment_intent'] ?? '');
-    const unmatched = paymentIntent
-      ? await db
-          .prepare(
-            `SELECT p.id AS payment_id, p.request_id, p.amount_cents, r.ref, c.email
-             FROM payments p
-             JOIN ppi_requests r ON r.id = p.request_id
-             JOIN customers c ON c.id = r.customer_id
-             WHERE p.stripe_payment_intent = ? LIMIT 1`,
-          )
-          .bind(paymentIntent)
-          .first<{ payment_id: string; request_id: string; amount_cents: number; ref: string; email: string }>()
-      : null;
-    if (!unmatched) {
-      console.warn('stripe_refund_status_unmatched', eventId, providerRefundId, providerStatus);
-      return;
-    }
+async function refundIdHasLocalLink(db: D1Database, providerRefundId: string): Promise<boolean> {
+  const providerLink = await db
+    .prepare(`SELECT provider_refund_id FROM provider_refunds WHERE provider_refund_id = ? LIMIT 1`)
+    .bind(providerRefundId)
+    .first<{ provider_refund_id: string }>();
+  if (providerLink) return true;
+  const attemptLink = await db
+    .prepare(`SELECT id FROM refund_operation_attempts WHERE provider_refund_id = ? LIMIT 1`)
+    .bind(providerRefundId)
+    .first<{ id: string }>();
+  return Boolean(attemptLink);
+}
 
-    await db
-      .prepare(
-        `INSERT OR IGNORE INTO admin_audit_log
-           (id, actor, action, entity, entity_id, details_json, created_at)
-         VALUES (?, 'system:stripe-webhook', 'refund_status_unmatched', 'payment', ?, ?, ?)`,
-      )
-      .bind(
-        `al_refund_${eventId}`,
-        unmatched.payment_id,
-        JSON.stringify({ providerRefundId, providerStatus, eventType }),
-        nowIso(),
-      )
-      .run();
-    if (env.ADMIN_NOTIFY_EMAIL) {
-      const config = await getConfig(db);
-      requireRecordedEmail(
-        await queueTemplate(env, db, unmatched.request_id, 'owner_notify', env.ADMIN_NOTIFY_EMAIL, {
-          ref: unmatched.ref,
-          supportEmail: config.supportEmail,
-          extra: {
-            kind: 'UNMATCHED STRIPE REFUND STATUS — review required',
-            detail: `${formatCents(unmatched.amount_cents)} payment has provider refund status ${providerStatus}; no local refund operation matched`,
-            adminUrl: `${publicBase}/ppi/admin/?request=${encodeURIComponent(unmatched.request_id)}`,
-          },
-        }, waitUntil, unmatched.email, `owner_refund_unmatched:${providerRefundId}:${providerStatus}`),
-        'owner_refund_unmatched',
-      );
-    }
-    return;
-  }
+async function syncRefundOperation(
+  db: D1Database,
+  recorded: RecordedRefund,
+  confirmedByCharge: boolean,
+): Promise<void> {
+  const { link, ledger, failure } = recorded;
+  if (!recorded.authoritative || !link.attempt_id || !link.operation_id || link.attempt_no == null) return;
 
-  if (row.provider_refund_id && row.provider_refund_id !== providerRefundId) {
-    throw new Error(`Refund attempt ${row.attempt_id} is already bound to a different provider Refund.`);
-  }
-  const attemptStatus = reconcileRefundLifecycle(row.attempt_status, incoming);
-  const isCurrentAttempt = row.attempt_no === row.operation_attempt_count;
-  const operationStatus = isCurrentAttempt
-    ? reconcileRefundLifecycle(row.operation_status, incoming)
-    : row.operation_status;
-  const attemptFailure = attemptStatus === row.attempt_status ? row.attempt_error : failure;
-  const operationFailure = operationStatus === row.operation_status ? row.operation_error : failure;
-  const attemptProviderStatus = attemptStatus === row.attempt_status
-    ? (row.attempt_provider_status ?? providerStatus)
-    : providerStatus;
-  const operationProviderStatus = operationStatus === row.operation_status
-    ? (row.operation_provider_status ?? providerStatus)
-    : providerStatus;
+  const providerOutcome = refundWebhookOutcome(ledger.status);
+  const succeededOutcome = confirmedByCharge || link.attempt_status === 'confirmed'
+    ? 'confirmed'
+    : 'provider_accepted';
+  const attemptOutcome = ledger.status === 'succeeded' ? succeededOutcome : providerOutcome;
+  const operationOutcome = ledger.status === 'succeeded'
+    && !confirmedByCharge
+    && link.operation_status === 'confirmed'
+    ? 'confirmed'
+    : attemptOutcome;
   const reconciledAt = nowIso();
   const statements: D1PreparedStatement[] = [
     db
@@ -443,123 +572,665 @@ async function handleRefundStatusEvent(
         `UPDATE refund_operation_attempts
          SET provider_refund_id = COALESCE(provider_refund_id, ?), provider_status = ?,
              outcome_status = ?, error = ?, updated_at = ?
-         WHERE id = ? AND outcome_status = ?
-           AND (provider_refund_id IS NULL OR provider_refund_id = ?)`,
+         WHERE id = ? AND (provider_refund_id IS NULL OR provider_refund_id = ?)`,
       )
       .bind(
-        providerRefundId,
-        attemptProviderStatus,
-        attemptStatus,
-        attemptFailure,
+        ledger.provider_refund_id,
+        ledger.status,
+        attemptOutcome,
+        failure,
         reconciledAt,
-        row.attempt_id,
-        row.attempt_status,
-        providerRefundId,
+        link.attempt_id,
+        ledger.provider_refund_id,
       ),
   ];
-  if (isCurrentAttempt) {
+  if (link.attempt_no === link.operation_attempt_count) {
     statements.push(
       db
         .prepare(
           `UPDATE refund_operations
-           SET provider_refund_id = COALESCE(provider_refund_id, ?), last_provider_status = ?,
-               last_error = ?, status = ?, updated_at = ?
-           WHERE id = ? AND attempt_count = ? AND status = ?`,
+           SET provider_refund_id = COALESCE(provider_refund_id, ?),
+               last_provider_status = ?, last_error = ?, status = ?, updated_at = ?
+           WHERE id = ? AND attempt_count = ?`,
         )
         .bind(
-          providerRefundId,
-          operationProviderStatus,
-          operationFailure,
-          operationStatus,
+          ledger.provider_refund_id,
+          ledger.status,
+          failure,
+          operationOutcome,
           reconciledAt,
-          row.operation_id,
-          row.attempt_no,
-          row.operation_status,
+          link.operation_id,
+          link.attempt_no,
         ),
     );
   }
   await db.batch(statements);
+}
 
-  // Re-read after the conditional batch. If charge.refunded or another refund
-  // event won the race, its newer/terminal values are authoritative. This is a
-  // monotonic CAS: stale snapshots can no longer overwrite confirmed rows.
-  const persisted = await db
-    .prepare(`${selectAttempt} WHERE a.id = ? LIMIT 1`)
-    .bind(row.attempt_id)
-    .first<RefundEventRow>();
-  if (!persisted) throw new Error(`Refund attempt ${row.attempt_id} disappeared during reconciliation.`);
-  if (persisted.provider_refund_id && persisted.provider_refund_id !== providerRefundId) {
-    throw new Error(`Refund attempt ${row.attempt_id} changed to a different provider Refund.`);
+async function recordProviderRefund(
+  env: Env,
+  eventId: string,
+  eventCreated: number,
+  eventType: string,
+  obj: Record<string, unknown>,
+  waitUntil: WaitUntil,
+  publicBase: string,
+  confirmedByCharge = false,
+): Promise<RecordedRefund | null> {
+  const db = env.DB;
+  const providerRefundId = typeof obj['id'] === 'string' ? obj['id'] : '';
+  if (!/^re_[A-Za-z0-9_]+$/.test(providerRefundId) || providerRefundId.length > 255) {
+    throw new Error('Stripe refund event omitted a valid Refund id.');
+  }
+  const metadataValue = obj['metadata'];
+  const metadata = metadataValue && typeof metadataValue === 'object' && !Array.isArray(metadataValue)
+    ? metadataValue as Record<string, unknown>
+    : {};
+  const hasMetadataOperationId = Object.prototype.hasOwnProperty.call(metadata, 'refund_operation_id');
+  const hasMetadataAttemptNo = Object.prototype.hasOwnProperty.call(metadata, 'refund_attempt_no');
+  let metadataOperationId: string | null = null;
+  let metadataAttemptNo: number | null = null;
+  if (hasMetadataOperationId || hasMetadataAttemptNo) {
+    const rawOperationId = metadata['refund_operation_id'];
+    const rawAttemptNo = Number(metadata['refund_attempt_no']);
+    if (!hasMetadataOperationId
+      || !hasMetadataAttemptNo
+      || typeof rawOperationId !== 'string'
+      || rawOperationId.length === 0
+      || rawOperationId.length > 255
+      || !Number.isSafeInteger(rawAttemptNo)
+      || rawAttemptNo <= 0) {
+      throw new Error(`Stripe Refund ${providerRefundId} contains invalid local refund metadata.`);
+    }
+    metadataOperationId = rawOperationId;
+    metadataAttemptNo = rawAttemptNo;
+  }
+  const paymentIntent = typeof obj['payment_intent'] === 'string' ? obj['payment_intent'] : '';
+  if (!/^pi_[A-Za-z0-9_]+$/.test(paymentIntent) || paymentIntent.length > 255) {
+    // A connected Stripe account can legitimately send signed Refund events
+    // for payments outside this PPI system. A Refund with no PaymentIntent can
+    // be acknowledged only when it carries no local metadata and its Refund id
+    // has never been linked locally. Any local hint remains retryable/fail-closed.
+    if (metadataOperationId === null && !(await refundIdHasLocalLink(db, providerRefundId))) {
+      return null;
+    }
+    throw new Error(`Stripe Refund ${providerRefundId} omitted a valid PaymentIntent id.`);
+  }
+  const providerStatus = eventType === 'refund.failed' ? 'failed' : classifyStripeRefundStatus(obj);
+  const link = await resolveRefundLink(db, providerRefundId, metadataOperationId, metadataAttemptNo, paymentIntent);
+  if (!link) {
+    throw new Error(`Stripe Refund ${providerRefundId} cannot be linked to a local payment.`);
   }
 
-  const persistedIsCurrentAttempt = persisted.attempt_no === persisted.operation_attempt_count;
-  const persistedOperationStatus = persisted.operation_status;
-  const persistedOperationFailure = persisted.operation_error;
+  const rawAmount = Number(obj['amount']);
+  if (!Number.isSafeInteger(rawAmount) || rawAmount <= 0) {
+    throw new Error(`Stripe Refund ${providerRefundId} omitted a valid amount.`);
+  }
+  const amountCents = rawAmount;
+  if (link.requested_amount_cents != null && amountCents !== link.requested_amount_cents) {
+    throw new Error(`Stripe Refund ${providerRefundId} amount does not match its local operation.`);
+  }
+  const currency = String(obj['currency'] ?? '').toLowerCase();
+  if (!/^[a-z]{3}$/.test(currency) || currency !== link.currency.toLowerCase()) {
+    throw new Error(`Stripe Refund ${providerRefundId} currency does not match its local payment.`);
+  }
+  const rawProviderCreated = Number(obj['created']);
+  if (!Number.isSafeInteger(rawProviderCreated) || rawProviderCreated < 0) {
+    throw new Error(`Stripe Refund ${providerRefundId} omitted a valid created timestamp.`);
+  }
+  const providerCreated = rawProviderCreated;
+  const failure = refundFailure(providerStatus, obj);
+  const result = await upsertProviderRefund(db, {
+    providerRefundId,
+    paymentId: link.payment_id,
+    operationId: link.operation_id,
+    attemptId: link.attempt_id,
+    amountCents,
+    currency,
+    providerCreated,
+    status: providerStatus,
+    eventCreated,
+    eventId,
+  });
+  const recorded: RecordedRefund = {
+    link,
+    ledger: result.row,
+    applied: result.applied,
+    authoritative: result.authoritative,
+    providerStatus,
+    failure,
+  };
+  await syncRefundOperation(db, recorded, confirmedByCharge);
+
+  const auditEntity = link.operation_id ? 'refund_operation' : 'payment';
+  const auditEntityId = link.operation_id ?? link.payment_id;
   await db
     .prepare(
       `INSERT OR IGNORE INTO admin_audit_log
          (id, actor, action, entity, entity_id, details_json, created_at)
-       VALUES (?, 'system:stripe-webhook', 'refund_provider_status', 'refund_operation', ?, ?, ?)`,
+       VALUES (?, 'system:stripe-webhook', ?, ?, ?, ?, ?)`,
     )
     .bind(
-      `al_refund_${eventId}`,
-      row.operation_id,
+      `al_refund_${eventId}_${providerRefundId}`,
+      link.operation_id ? 'refund_provider_status' : 'refund_status_unmatched_operation',
+      auditEntity,
+      auditEntityId,
       JSON.stringify({
         providerRefundId,
-        providerStatus,
-        attemptNo: persisted.attempt_no,
-        isCurrentAttempt: persistedIsCurrentAttempt,
-        operationStatus: persistedOperationStatus,
+        providerStatus: result.row.status,
+        eventType,
+        eventCreated,
+        applied: result.applied,
+        attemptNo: link.attempt_no,
       }),
-      reconciledAt,
+      nowIso(),
     )
     .run();
 
-  if (
-    persistedIsCurrentAttempt
-    && persistedOperationStatus !== 'provider_accepted'
-    && persistedOperationStatus !== 'confirmed'
-    && env.ADMIN_NOTIFY_EMAIL
-  ) {
+  if (result.authoritative && result.row.status !== 'succeeded' && env.ADMIN_NOTIFY_EMAIL) {
     const config = await getConfig(db);
-    const kind = persistedOperationStatus === 'pending'
+    const lifecycle = refundWebhookOutcome(result.row.status);
+    const kind = lifecycle === 'pending'
       ? 'REFUND PENDING'
-      : persistedOperationStatus === 'requires_action'
+      : lifecycle === 'requires_action'
         ? 'REFUND REQUIRES ACTION'
-        : persistedOperationStatus === 'failed' || persistedOperationStatus === 'canceled'
-          ? 'REFUND FAILED — explicit retry available'
+        : lifecycle === 'failed' || lifecycle === 'canceled'
+          ? 'REFUND FAILED — review before retrying'
           : 'REFUND RECONCILIATION REQUIRED';
     requireRecordedEmail(
-      await queueTemplate(env, db, row.request_id, 'owner_notify', env.ADMIN_NOTIFY_EMAIL, {
-        ref: row.ref,
+      await queueTemplate(env, db, link.request_id, 'owner_notify', env.ADMIN_NOTIFY_EMAIL, {
+        ref: link.ref,
         supportEmail: config.supportEmail,
         extra: {
           kind,
-          detail: `${formatCents(row.requested_amount_cents)} refund attempt ${persisted.attempt_no}: ${providerStatus}${persistedOperationFailure ? ` (${persistedOperationFailure})` : ''}`,
-          adminUrl: `${publicBase}/ppi/admin/?request=${encodeURIComponent(row.request_id)}`,
+          detail: `${formatCents(result.row.amount_cents)} Stripe refund ${providerRefundId}: ${result.row.status}${failure ? ` (${failure})` : ''}`,
+          adminUrl: `${publicBase}/ppi/admin/?request=${encodeURIComponent(link.request_id)}`,
         },
-      }, waitUntil, row.email, `owner_refund_status:${row.operation_id}:${persisted.attempt_no}:${persistedOperationStatus}`),
+      }, waitUntil, link.email, link.operation_id && link.attempt_no != null
+        ? `owner_refund_status:${link.operation_id}:${link.attempt_no}:${result.row.status}`
+        : `owner_refund_status:${providerRefundId}:${result.row.last_event_created}:${result.row.status}`),
       'owner_refund_status',
     );
   }
+  return recorded;
+}
+
+async function reconcileRefundBalanceEffects(
+  env: Env,
+  paymentId: string,
+  eventId: string,
+  providerRefundId: string,
+  waitUntil: WaitUntil,
+  publicBase: string,
+): Promise<Awaited<ReturnType<typeof recomputePaymentRefundBalance>>> {
+  const db = env.DB;
+  const balance = await recomputePaymentRefundBalance(db, paymentId, { eventId, providerRefundId });
+  const req = await db
+    .prepare(
+      `SELECT r.status, r.ref, c.email
+       FROM ppi_requests r JOIN customers c ON c.id = r.customer_id WHERE r.id = ?`,
+    )
+    .bind(balance.requestId)
+    .first<{ status: string; ref: string; email: string }>();
+  if (!req || !isStatus(req.status)) throw new Error(`Refunded payment ${paymentId} has no valid request.`);
+
+  const config = await getConfig(db);
+  if (!balance.isFullyRefunded
+    && (
+      balance.wasFullyRefunded
+      || balance.refundRegressionLatched
+      || req.status === 'refunded'
+      || req.status === 'refund_reconciliation_needed'
+    )) {
+    const changedAt = nowIso();
+    await db.batch([
+      db
+        .prepare(
+          `UPDATE ppi_requests SET status = 'refund_reconciliation_needed', updated_at = ?
+           WHERE id = ? AND status = ? AND deleted_at IS NULL
+             AND ? NOT IN ('refund_reconciliation_needed','disputed')`,
+        )
+        .bind(changedAt, balance.requestId, req.status, req.status),
+      db
+        .prepare(
+          `INSERT OR IGNORE INTO status_history
+             (id, request_id, from_status, to_status, actor, reason, related_id, created_at)
+           SELECT ?, ?, ?, 'refund_reconciliation_needed', 'system:stripe-webhook',
+                  'Stripe changed a previously successful refund to a non-success state', ?, ?
+           WHERE changes() = 1`,
+        )
+        .bind(`sh_refund_reconcile_${eventId}`, balance.requestId, req.status, providerRefundId, changedAt),
+      db
+        .prepare(
+          `INSERT OR IGNORE INTO messages
+             (id, request_id, direction, channel, body_text, status, created_at, dedupe_key)
+           SELECT ?, ?, 'outbound', 'portal', ?, 'recorded', ?, ?
+           WHERE EXISTS (
+             SELECT 1 FROM ppi_requests
+             WHERE id = ? AND status IN ('refund_reconciliation_needed','disputed')
+           )`,
+        )
+        .bind(
+          `msg_refund_reconcile_${eventId}`,
+          balance.requestId,
+          `Stripe changed the status of a previously completed refund. The currently confirmed refunded amount is ${formatCents(balance.refundedCents)}. Your appointment remains closed and has not been restored. You do not need to pay again while AutoClarity reviews the record.`,
+          changedAt,
+          `portal_refund_reconcile:${paymentId}:${providerRefundId}`,
+          balance.requestId,
+        ),
+      db
+        .prepare(
+          `INSERT OR IGNORE INTO admin_audit_log
+             (id, actor, action, entity, entity_id, details_json, created_at)
+           VALUES (?, 'system:stripe-webhook', 'refund_reconciliation_needed', 'payment', ?, ?, ?)`,
+        )
+        .bind(
+          `al_refund_reconcile_${eventId}`,
+          paymentId,
+          JSON.stringify({
+            providerRefundId,
+            previousRefundedCents: balance.previousRefundedCents,
+            refundedCents: balance.refundedCents,
+            capacityRestored: false,
+          }),
+          changedAt,
+        ),
+    ]);
+    const safeRequest = await db
+      .prepare(`SELECT status FROM ppi_requests WHERE id = ? AND deleted_at IS NULL`)
+      .bind(balance.requestId)
+      .first<{ status: string }>();
+    if (!safeRequest || !['refund_reconciliation_needed', 'disputed'].includes(safeRequest.status)) {
+      throw new Error(`Request ${balance.requestId} could not enter a safe refund-reconciliation state.`);
+    }
+    requireRecordedEmail(
+      await queueTemplate(env, db, balance.requestId, 'refund_reconciliation_needed', req.email, {
+        ref: req.ref,
+        supportEmail: config.supportEmail,
+        extra: { amount: formatCents(balance.refundedCents) },
+      }, waitUntil, undefined, `refund_reconciliation_customer:${paymentId}:${providerRefundId}`),
+      'refund_reconciliation_needed',
+    );
+    if (env.ADMIN_NOTIFY_EMAIL) {
+      requireRecordedEmail(
+        await queueTemplate(env, db, balance.requestId, 'owner_notify', env.ADMIN_NOTIFY_EMAIL, {
+          ref: req.ref,
+          supportEmail: config.supportEmail,
+          extra: {
+            kind: 'REFUND REGRESSION — reconciliation required',
+            detail: `Previously full refund fell to ${formatCents(balance.refundedCents)}. Booking and capacity remain closed; review Stripe before any customer action.`,
+            adminUrl: `${publicBase}/ppi/admin/?request=${encodeURIComponent(balance.requestId)}`,
+          },
+        }, waitUntil, req.email, `owner_refund_reconciliation:${paymentId}:${providerRefundId}`),
+        'owner_refund_reconciliation',
+      );
+    }
+    return balance;
+  }
+
+  const disputeOpen = balance.status === 'disputed' || req.status === 'disputed';
+  if (balance.isFullyRefunded && !disputeOpen) {
+    const lifecycle = await applyTerminalLifecycle(db, {
+      requestId: balance.requestId,
+      to: 'refunded',
+      actor: 'system:stripe-webhook',
+      reason: 'Full refund confirmed by Stripe Refund ledger',
+      relatedId: paymentId,
+    });
+    if (!lifecycle.ok) {
+      throw new Error(`Request ${balance.requestId} could not reconcile to refunded from ${req.status}.`);
+    }
+    requireRecordedEmail(
+      await queueTemplate(env, db, balance.requestId, 'refund_issued', req.email, {
+        ref: req.ref,
+        supportEmail: config.supportEmail,
+        extra: { amount: formatCents(balance.refundedCents) },
+      }, waitUntil, undefined, `refund_issued:${paymentId}:${balance.refundedCents}`),
+      'refund_issued',
+    );
+  }
+  if (env.ADMIN_NOTIFY_EMAIL && balance.refundedCents > 0) {
+    requireRecordedEmail(
+      await queueTemplate(env, db, balance.requestId, 'owner_notify', env.ADMIN_NOTIFY_EMAIL, {
+        ref: req.ref,
+        supportEmail: config.supportEmail,
+        extra: {
+          kind: disputeOpen
+            ? 'REFUND BALANCE UPDATED DURING DISPUTE'
+            : balance.isFullyRefunded
+              ? 'FULL REFUND CONFIRMED'
+              : 'REFUND BALANCE UPDATED',
+          detail: `${formatCents(balance.refundedCents)} currently succeeded in Stripe's Refund ledger`,
+          adminUrl: `${publicBase}/ppi/admin/?request=${encodeURIComponent(balance.requestId)}`,
+        },
+      }, waitUntil, req.email, disputeOpen
+        ? `owner_refund_disputed:${paymentId}:${balance.refundedCents}`
+        : `owner_refund:${paymentId}:${balance.refundedCents}`),
+      'owner_refund',
+    );
+  }
+  return balance;
+}
+
+async function handleRefundStatusEvent(
+  env: Env,
+  eventId: string,
+  eventCreated: number,
+  eventType: string,
+  obj: Record<string, unknown>,
+  waitUntil: WaitUntil,
+  publicBase: string,
+): Promise<void> {
+  const recorded = await recordProviderRefund(
+    env,
+    eventId,
+    eventCreated,
+    eventType,
+    obj,
+    waitUntil,
+    publicBase,
+  );
+  if (!recorded || !recorded.authoritative) return;
+  await reconcileRefundBalanceEffects(
+    env,
+    recorded.link.payment_id,
+    eventId,
+    recorded.ledger.provider_refund_id,
+    waitUntil,
+    publicBase,
+  );
+}
+
+async function handleChargeRefunded(
+  env: Env,
+  eventId: string,
+  eventCreated: number,
+  obj: Record<string, unknown>,
+  waitUntil: WaitUntil,
+  publicBase: string,
+): Promise<void> {
+  const db = env.DB;
+  const paymentIntent = String(obj['payment_intent'] ?? '');
+  const paymentMatches = await db
+    .prepare(`SELECT id, request_id, amount_cents, currency FROM payments WHERE stripe_payment_intent = ? LIMIT 2`)
+    .bind(paymentIntent)
+    .all<{ id: string; request_id: string; amount_cents: number; currency: string }>();
+  const payments = paymentMatches.results ?? [];
+  if (payments.length > 1) {
+    throw new Error(`Stripe charge.refunded ${eventId} PaymentIntent maps to multiple local payments.`);
+  }
+  const payment = payments[0];
+  if (!payment) return;
+  const rawReported = Number(obj['amount_refunded']);
+  if (!Boolean(obj['refunded'])
+    && (!Number.isSafeInteger(rawReported) || rawReported < 0 || rawReported > payment.amount_cents)) {
+    throw new Error(`Stripe charge.refunded ${eventId} reported an invalid cumulative amount.`);
+  }
+  const reportedCents = Boolean(obj['refunded'])
+    ? payment.amount_cents
+    : rawReported;
+  let lastProviderRefundId = `charge:${eventId}`;
+
+  const refundsValue = obj['refunds'];
+  const refundData = refundsValue && typeof refundsValue === 'object' && !Array.isArray(refundsValue)
+    && Array.isArray((refundsValue as { data?: unknown }).data)
+    ? (refundsValue as { data: unknown[] }).data
+    : [];
+  for (const value of refundData) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const refund = value as Record<string, unknown>;
+    const providerRefundId = String(refund['id'] ?? '');
+    if (!/^re_[A-Za-z0-9_]+$/.test(providerRefundId)) continue;
+    lastProviderRefundId = providerRefundId;
+    await recordProviderRefund(
+      env,
+      eventId,
+      eventCreated,
+      'charge.refunded',
+      { payment_intent: paymentIntent, currency: payment.currency, ...refund },
+      waitUntil,
+      publicBase,
+      classifyStripeRefundStatus(refund) === 'succeeded',
+    );
+  }
+
+  // A compact Charge contains only a cumulative amount, not enough identity
+  // to assign success to any particular Refund. It remains a cross-check;
+  // only actual Refund objects above can mutate the per-refund ledger.
+  const balance = await reconcileRefundBalanceEffects(
+    env,
+    payment.id,
+    eventId,
+    lastProviderRefundId,
+    waitUntil,
+    publicBase,
+  );
+  if (balance.refundedCents !== reportedCents) {
+    const req = await db
+      .prepare(
+        `SELECT r.ref, c.email FROM ppi_requests r JOIN customers c ON c.id = r.customer_id WHERE r.id = ?`,
+      )
+      .bind(payment.request_id)
+      .first<{ ref: string; email: string }>();
+    await db
+      .prepare(
+        `INSERT OR IGNORE INTO admin_audit_log
+           (id, actor, action, entity, entity_id, details_json, created_at)
+         VALUES (?, 'system:stripe-webhook', 'charge_refund_balance_mismatch', 'payment', ?, ?, ?)`,
+      )
+      .bind(
+        `al_charge_refund_mismatch_${eventId}`,
+        payment.id,
+        JSON.stringify({ reportedCents, ledgerCents: balance.refundedCents, eventCreated }),
+        nowIso(),
+      )
+      .run();
+    if (req && env.ADMIN_NOTIFY_EMAIL) {
+      const config = await getConfig(db);
+      requireRecordedEmail(
+        await queueTemplate(env, db, payment.request_id, 'owner_notify', env.ADMIN_NOTIFY_EMAIL, {
+          ref: req.ref,
+          supportEmail: config.supportEmail,
+          extra: {
+            kind: 'STRIPE REFUND BALANCE MISMATCH — review required',
+            detail: `Charge reports ${formatCents(reportedCents)} refunded; identified Refund objects total ${formatCents(balance.refundedCents)}. The older charge event did not override newer Refund states.`,
+            adminUrl: `${publicBase}/ppi/admin/?request=${encodeURIComponent(payment.request_id)}`,
+          },
+        }, waitUntil, req.email, `owner_charge_refund_mismatch:${eventId}`),
+        'owner_charge_refund_mismatch',
+      );
+    }
+  }
+}
+
+interface CheckoutPaymentRow {
+  id: string;
+  request_id: string;
+  quote_id: string;
+  booking_id: string | null;
+  amount_cents: number;
+  currency: string;
+  status: string;
+  stripe_payment_intent: string | null;
+  quote_request_id: string;
+  quote_status: string;
+  quote_total_cents: number;
+  quote_currency: string;
+  quote_subtotal_cents: number;
+  quote_travel_cents: number;
+  quote_addons_cents: number;
+  quote_discount_cents: number;
+  quote_base_line_cents: number;
+  quote_travel_line_cents: number;
+  quote_addon_line_cents: number;
+  quote_discount_line_cents: number;
+  quote_line_total_cents: number;
+  quote_invalid_line_count: number;
+}
+
+interface CheckoutBookingRow {
+  id: string;
+  request_id: string;
+  quote_id: string;
+  slot_id: string | null;
+  status: string;
+}
+
+interface ValidatedCheckoutSession {
+  paymentIntent: string;
+  payment: CheckoutPaymentRow;
+  booking: CheckoutBookingRow;
+}
+
+const POST_PAYMENT_TERMINAL_STATUSES = new Set(['partially_refunded', 'refunded', 'disputed']);
+
+async function validateCheckoutSessionIdentity(
+  env: Env,
+  obj: Record<string, unknown>,
+  expectedPaymentStatus: 'paid' | 'unpaid',
+): Promise<ValidatedCheckoutSession> {
+  const sessionId = typeof obj['id'] === 'string' ? obj['id'] : '';
+  const paymentIntent = typeof obj['payment_intent'] === 'string' ? obj['payment_intent'] : '';
+  const paymentStatus = typeof obj['payment_status'] === 'string' ? obj['payment_status'] : '';
+  const amountTotal = obj['amount_total'];
+  const currency = typeof obj['currency'] === 'string' ? obj['currency'] : '';
+  const clientReferenceId = typeof obj['client_reference_id'] === 'string' ? obj['client_reference_id'] : '';
+  const metadataValue = obj['metadata'];
+  const metadata = metadataValue && typeof metadataValue === 'object' && !Array.isArray(metadataValue)
+    ? metadataValue as Record<string, unknown>
+    : null;
+  if (!/^cs_[A-Za-z0-9_]+$/.test(sessionId) || sessionId.length > 255) {
+    throw new Error('Stripe event omitted a valid Checkout Session id.');
+  }
+  if (paymentStatus !== expectedPaymentStatus) {
+    throw new Error(`Stripe Checkout Session ${sessionId} has unexpected payment status ${paymentStatus || '(missing)'}.`);
+  }
+  if (!/^pi_[A-Za-z0-9_]+$/.test(paymentIntent) || paymentIntent.length > 255) {
+    throw new Error(`Stripe Checkout Session ${sessionId} omitted a valid PaymentIntent id.`);
+  }
+  if (!Number.isSafeInteger(amountTotal) || Number(amountTotal) <= 0) {
+    throw new Error(`Stripe Checkout Session ${sessionId} omitted a valid amount_total.`);
+  }
+  if (!currency || !clientReferenceId || !metadata) {
+    throw new Error(`Stripe Checkout Session ${sessionId} omitted required commerce identity fields.`);
+  }
+
+  const db = env.DB;
+
+  const payment = await db
+    .prepare(
+      `SELECT p.id, p.request_id, p.quote_id, p.booking_id, p.amount_cents, p.currency,
+              p.status, p.stripe_payment_intent,
+              q.request_id AS quote_request_id, q.status AS quote_status,
+              q.total_cents AS quote_total_cents, q.currency AS quote_currency,
+              q.subtotal_cents AS quote_subtotal_cents,
+              q.travel_cents AS quote_travel_cents,
+              q.addons_cents AS quote_addons_cents,
+              q.discount_cents AS quote_discount_cents,
+              COALESCE((SELECT SUM(li.amount_cents) FROM quote_line_items li WHERE li.quote_id = q.id AND li.kind = 'base'), 0) AS quote_base_line_cents,
+              COALESCE((SELECT SUM(li.amount_cents) FROM quote_line_items li WHERE li.quote_id = q.id AND li.kind = 'travel'), 0) AS quote_travel_line_cents,
+              COALESCE((SELECT SUM(li.amount_cents) FROM quote_line_items li WHERE li.quote_id = q.id AND li.kind = 'addon'), 0) AS quote_addon_line_cents,
+              COALESCE((SELECT SUM(li.amount_cents) FROM quote_line_items li WHERE li.quote_id = q.id AND li.kind = 'discount'), 0) AS quote_discount_line_cents,
+              COALESCE((SELECT SUM(li.amount_cents) FROM quote_line_items li WHERE li.quote_id = q.id), 0) AS quote_line_total_cents,
+              (SELECT COUNT(*) FROM quote_line_items li
+               WHERE li.quote_id = q.id
+                 AND ((li.kind IN ('base','travel','addon') AND li.amount_cents <= 0)
+                   OR (li.kind = 'discount' AND li.amount_cents >= 0))) AS quote_invalid_line_count
+       FROM payments p
+       JOIN quotes q ON q.id = p.quote_id
+       WHERE p.stripe_session_id = ?`,
+    )
+    .bind(sessionId)
+    .first<CheckoutPaymentRow>();
+  if (!payment) throw new Error(`Unknown Stripe Checkout Session ${sessionId.slice(0, 48)}.`);
+  if (!payment.booking_id) throw new Error(`Payment ${payment.id} has no booking.`);
+
+  const booking = await db
+    .prepare(`SELECT id, request_id, quote_id, slot_id, status FROM bookings WHERE id = ?`)
+    .bind(payment.booking_id)
+    .first<CheckoutBookingRow>();
+  const harmlessHistoricalFailureAfterRequote = expectedPaymentStatus === 'unpaid'
+    && (payment.status === 'failed' || payment.status === 'expired')
+    && payment.quote_status === 'superseded'
+    && booking?.request_id === payment.request_id
+    && booking.quote_id !== payment.quote_id;
+  if (
+    !Number.isSafeInteger(payment.amount_cents)
+    || payment.amount_cents <= 0
+    || amountTotal !== payment.amount_cents
+    || payment.currency !== STRIPE_CHECKOUT_CURRENCY
+    || currency !== STRIPE_CHECKOUT_CURRENCY
+    || payment.quote_request_id !== payment.request_id
+    || (!['sent', 'accepted'].includes(payment.quote_status) && !harmlessHistoricalFailureAfterRequote)
+    || !Number.isSafeInteger(payment.quote_total_cents)
+    || payment.quote_total_cents <= 0
+    || payment.quote_currency !== STRIPE_CHECKOUT_CURRENCY
+    || payment.quote_total_cents !== payment.amount_cents
+    || !Number.isSafeInteger(payment.quote_subtotal_cents)
+    || !Number.isSafeInteger(payment.quote_travel_cents)
+    || !Number.isSafeInteger(payment.quote_addons_cents)
+    || !Number.isSafeInteger(payment.quote_discount_cents)
+    || !Number.isSafeInteger(payment.quote_base_line_cents)
+    || !Number.isSafeInteger(payment.quote_travel_line_cents)
+    || !Number.isSafeInteger(payment.quote_addon_line_cents)
+    || !Number.isSafeInteger(payment.quote_discount_line_cents)
+    || !Number.isSafeInteger(payment.quote_line_total_cents)
+    || payment.quote_subtotal_cents <= 0
+    || payment.quote_travel_cents < 0
+    || payment.quote_addons_cents < 0
+    || payment.quote_discount_cents < 0
+    || payment.quote_total_cents !== payment.quote_subtotal_cents
+      + payment.quote_travel_cents + payment.quote_addons_cents - payment.quote_discount_cents
+    || payment.quote_base_line_cents !== payment.quote_subtotal_cents
+    || payment.quote_travel_line_cents !== payment.quote_travel_cents
+    || payment.quote_addon_line_cents !== payment.quote_addons_cents
+    || payment.quote_discount_line_cents !== -payment.quote_discount_cents
+    || payment.quote_line_total_cents !== payment.quote_total_cents
+    || payment.quote_invalid_line_count !== 0
+    || clientReferenceId !== payment.booking_id
+    || metadata['request_id'] !== payment.request_id
+    || metadata['quote_id'] !== payment.quote_id
+    || metadata['booking_id'] !== payment.booking_id
+    || (payment.stripe_payment_intent !== null && payment.stripe_payment_intent !== paymentIntent)
+  ) {
+    throw new Error(`Stripe Checkout Session ${sessionId} does not match its stored payment identity.`);
+  }
+
+  if (!booking
+    || booking.request_id !== payment.request_id
+    || (booking.quote_id !== payment.quote_id && !harmlessHistoricalFailureAfterRequote)) {
+    throw new Error(`Payment ${payment.id} does not match its stored booking identity.`);
+  }
+
+  return { paymentIntent, payment, booking };
+}
+
+async function handlePaymentFailed(env: Env, obj: Record<string, unknown>): Promise<void> {
+  const { payment } = await validateCheckoutSessionIdentity(env, obj, 'unpaid');
+  if (payment.status === 'succeeded'
+    || payment.status === 'failed'
+    || payment.status === 'expired'
+    || POST_PAYMENT_TERMINAL_STATUSES.has(payment.status)) return;
+  await env.DB
+    .prepare(`UPDATE payments SET status = 'failed', updated_at = ? WHERE id = ? AND status IN ('created','pending')`)
+    .bind(nowIso(), payment.id)
+    .run();
 }
 
 async function handlePaymentSucceeded(
   env: Env,
-  sessionId: string,
-  paymentIntent: string,
+  obj: Record<string, unknown>,
   waitUntil: WaitUntil,
   publicBase: string,
 ): Promise<void> {
-  if (!sessionId) throw new Error('Stripe success event omitted the Checkout Session id.');
+  const { paymentIntent, payment, booking } = await validateCheckoutSessionIdentity(env, obj, 'paid');
   const db = env.DB;
   const now = nowIso();
 
-  const payment = await db
-    .prepare(`SELECT id, request_id, quote_id, booking_id, amount_cents, status FROM payments WHERE stripe_session_id = ?`)
-    .bind(sessionId)
-    .first<{ id: string; request_id: string; quote_id: string; booking_id: string | null; amount_cents: number; status: string }>();
-  if (!payment) throw new Error(`Unknown Stripe Checkout Session ${sessionId.slice(0, 48)}.`);
+  // A success event that arrives after refund/dispute reconciliation is valid
+  // historical evidence, but must never regress payment state or reopen the
+  // request, booking, or slot.
+  if (POST_PAYMENT_TERMINAL_STATUSES.has(payment.status)) return;
 
   if (payment.status !== 'succeeded') {
     const updated = await db
@@ -570,6 +1241,11 @@ async function handlePaymentSucceeded(
       .bind(paymentIntent, now, payment.id)
       .run();
     if ((updated.meta?.changes ?? 0) !== 1) {
+      const current = await db
+        .prepare(`SELECT status FROM payments WHERE id = ?`)
+        .bind(payment.id)
+        .first<{ status: string }>();
+      if (current && POST_PAYMENT_TERMINAL_STATUSES.has(current.status)) return;
       throw new Error(`Payment ${payment.id} could not transition from ${payment.status} to succeeded.`);
     }
   } else if (paymentIntent) {
@@ -584,13 +1260,13 @@ async function handlePaymentSucceeded(
     .bind(payment.request_id)
     .first<{ status: string; ref: string; email: string }>();
   if (!requestRow) throw new Error(`Payment ${payment.id} has no request.`);
-  if (!payment.booking_id) throw new Error(`Payment ${payment.id} has no booking.`);
 
-  const booking = await db
-    .prepare(`SELECT id, slot_id, status FROM bookings WHERE id = ?`)
-    .bind(payment.booking_id)
-    .first<{ id: string; slot_id: string | null; status: string }>();
-  if (!booking) throw new Error(`Payment ${payment.id} references a missing booking.`);
+  // A favorable dispute outcome or a failed full-refund reconciliation may
+  // restore the payment's economic status to succeeded, but the request
+  // lifecycle deliberately remains closed. A late Checkout snapshot is valid
+  // historical evidence only: it must not create a new portal link, send
+  // paid-lapsed notices, or touch booking/capacity state.
+  if (requestRow.status === 'disputed' || requestRow.status === 'refund_reconciliation_needed') return;
 
   const slot = booking.slot_id
     ? await db

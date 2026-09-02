@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { claimStripeEvent, classifyStripeRefundStatus, createCheckoutSession, createRefund, decideCheckoutAttempt, expireCheckoutSession, verifyStripeSignature, stripeKey, StripeApiError, StripeConfigError } from '../../functions/lib/stripe.ts';
-import type { Env } from '../../functions/lib/types.ts';
+import { modeFlags, type Env } from '../../functions/lib/types.ts';
 import { onRequestPost as stripeWebhook, reconcileRefundLifecycle, stripeWebhookBase } from '../../functions/api/stripe/webhook.ts';
 
 const SECRET = 'whsec_test_secret_for_unit_tests';
@@ -77,6 +77,40 @@ describe('stripeKey safety rails', () => {
   it('accepts sk_test_ in test env', () => {
     expect(stripeKey({ ...baseEnv, STRIPE_SECRET_KEY: 'sk_test_ok' } as Env)).toBe('sk_test_ok');
   });
+
+  it('enables production payments only for the complete live tuple', () => {
+    const complete = {
+      PPI_ENV: 'production',
+      PPI_MODE: 'live',
+      PAYMENTS_ENABLED: 'true',
+      STRIPE_ENV: 'live',
+      STRIPE_SECRET_KEY: 'sk_live_owner_approved',
+    } as Env;
+    expect(modeFlags(complete).paymentsEnabled).toBe(true);
+    expect(stripeKey(complete)).toBe('sk_live_owner_approved');
+
+    expect(modeFlags({ ...complete, PPI_MODE: 'request' }).paymentsEnabled).toBe(false);
+    expect(modeFlags({ ...complete, PAYMENTS_ENABLED: 'false' }).paymentsEnabled).toBe(false);
+    expect(modeFlags({ ...complete, STRIPE_ENV: 'test', STRIPE_SECRET_KEY: 'sk_test_wrong_for_production' }).paymentsEnabled).toBe(false);
+    expect(modeFlags({ ...complete, STRIPE_SECRET_KEY: 'sk_test_wrong_key_mode' }).paymentsEnabled).toBe(false);
+  });
+
+  it('keeps preview test Checkout effective but never enables preview live Checkout', () => {
+    expect(modeFlags({
+      PPI_ENV: 'preview',
+      PPI_MODE: 'request',
+      PAYMENTS_ENABLED: 'true',
+      STRIPE_ENV: 'test',
+      STRIPE_SECRET_KEY: 'sk_test_preview',
+    } as Env).paymentsEnabled).toBe(true);
+    expect(modeFlags({
+      PPI_ENV: 'preview',
+      PPI_MODE: 'live',
+      PAYMENTS_ENABLED: 'true',
+      STRIPE_ENV: 'live',
+      STRIPE_SECRET_KEY: 'sk_live_never_preview',
+    } as Env).paymentsEnabled).toBe(false);
+  });
 });
 
 describe('Stripe refund provider status classification', () => {
@@ -103,14 +137,14 @@ describe('Stripe refund provider status classification', () => {
     expect(classifyStripeRefundStatus(refund)).toBe('unknown');
   });
 
-  it('advances pending/action-required states while preserving definitive outcomes', () => {
+  it('maps the authoritative ledger outcome even after an earlier definitive state', () => {
     expect(reconcileRefundLifecycle('pending', 'provider_accepted')).toBe('provider_accepted');
     expect(reconcileRefundLifecycle('requires_action', 'failed')).toBe('failed');
     expect(reconcileRefundLifecycle('reconciliation_required', 'pending')).toBe('pending');
-    expect(reconcileRefundLifecycle('provider_accepted', 'pending')).toBe('provider_accepted');
-    expect(reconcileRefundLifecycle('failed', 'provider_accepted')).toBe('failed');
-    expect(reconcileRefundLifecycle('canceled', 'pending')).toBe('canceled');
-    expect(reconcileRefundLifecycle('confirmed', 'failed')).toBe('confirmed');
+    expect(reconcileRefundLifecycle('provider_accepted', 'failed')).toBe('failed');
+    expect(reconcileRefundLifecycle('failed', 'provider_accepted')).toBe('provider_accepted');
+    expect(reconcileRefundLifecycle('canceled', 'pending')).toBe('pending');
+    expect(reconcileRefundLifecycle('confirmed', 'failed')).toBe('failed');
   });
 });
 
@@ -138,6 +172,7 @@ describe('Stripe POST idempotency', () => {
       quoteId: 'qot_1',
       bookingId: 'bkg_1',
       amountCents: 19900,
+      currency: 'usd',
       customerEmail: 'customer@example.com',
       publicBaseUrl: 'https://example.com',
       attempt: 2,
@@ -148,6 +183,29 @@ describe('Stripe POST idempotency', () => {
     const params = new URLSearchParams(String(requestInit?.body));
     expect(Number(params.get('expires_at'))).toBeGreaterThanOrEqual(before + 31 * 60);
     expect(params.get('metadata[request_id]')).toBe('req_1');
+    expect(params.get('line_items[0][price_data][currency]')).toBe('usd');
+    expect(params.get('line_items[0][price_data][unit_amount]')).toBe('19900');
+  });
+
+  it('rejects zero, unsafe, and non-USD Checkout identities before contacting Stripe', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const input = {
+      requestId: 'req_1',
+      requestRef: 'PPI-UNIT-1',
+      quoteId: 'qot_1',
+      bookingId: 'bkg_1',
+      amountCents: 19900,
+      currency: 'usd',
+      customerEmail: 'customer@example.com',
+      publicBaseUrl: 'https://example.com',
+      attempt: 1,
+    };
+
+    await expect(createCheckoutSession(env, { ...input, amountCents: 0 })).rejects.toThrow(/positive safe integer/);
+    await expect(createCheckoutSession(env, { ...input, amountCents: Number.MAX_SAFE_INTEGER + 1 })).rejects.toThrow(/positive safe integer/);
+    await expect(createCheckoutSession(env, { ...input, currency: 'eur' })).rejects.toThrow(/currency must be usd/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('passes the caller-defined refund idempotency key', async () => {
@@ -236,7 +294,11 @@ describe('Stripe POST idempotency', () => {
 });
 
 describe('Stripe event claims', () => {
-  function claimDb(insertChanges: number, reclaimChanges: number): D1Database {
+  function claimDb(
+    insertChanges: number,
+    reclaimChanges: number,
+    existing: { type: string; payload_sha256: string; processed_at: string | null } | null = null,
+  ): D1Database {
     let call = 0;
     return {
       prepare() {
@@ -244,18 +306,180 @@ describe('Stripe event claims', () => {
         return {
           bind() { return this; },
           async run() { return { meta: { changes: current === 0 ? insertChanges : reclaimChanges } }; },
+          async first() { return existing; },
         };
       },
     } as unknown as D1Database;
   }
 
   it('owns a new event and does not need a reclaim query', async () => {
-    expect(await claimStripeEvent(claimDb(1, 0), 'evt_new', 'checkout.session.completed', 'sha')).toBe(true);
+    expect(await claimStripeEvent(claimDb(1, 0), 'evt_new', 'checkout.session.completed', 'sha')).toBe('claimed');
   });
 
-  it('can reclaim a stale unprocessed event but not an active/processed replay', async () => {
-    expect(await claimStripeEvent(claimDb(0, 1), 'evt_stale', 'checkout.session.completed', 'sha')).toBe(true);
-    expect(await claimStripeEvent(claimDb(0, 0), 'evt_replay', 'checkout.session.completed', 'sha')).toBe(false);
+  it('reclaims stale events and distinguishes processed from in-flight duplicates', async () => {
+    expect(await claimStripeEvent(claimDb(0, 1), 'evt_stale', 'checkout.session.completed', 'sha')).toBe('claimed');
+    expect(await claimStripeEvent(
+      claimDb(0, 0, { type: 'checkout.session.completed', payload_sha256: 'sha', processed_at: '2030-01-01T00:00:00.000Z' }),
+      'evt_replay',
+      'checkout.session.completed',
+      'sha',
+    )).toBe('processed');
+    expect(await claimStripeEvent(
+      claimDb(0, 0, { type: 'checkout.session.completed', payload_sha256: 'sha', processed_at: null }),
+      'evt_active',
+      'checkout.session.completed',
+      'sha',
+    )).toBe('in_progress');
+    expect(await claimStripeEvent(
+      claimDb(0, 0, { type: 'checkout.session.completed', payload_sha256: 'different', processed_at: '2030-01-01T00:00:00.000Z' }),
+      'evt_collision',
+      'checkout.session.completed',
+      'sha',
+    )).toBe('in_progress');
+  });
+});
+
+describe('Stripe webhook environment and duplicate guards', () => {
+  async function webhookRequest(event: Record<string, unknown>): Promise<Request> {
+    const payload = JSON.stringify(event);
+    return new Request('https://example.com/api/stripe/webhook', {
+      method: 'POST',
+      headers: { 'stripe-signature': await sign(payload, Math.floor(Date.now() / 1000)) },
+      body: payload,
+    });
+  }
+
+  it('rejects a livemode mismatch before touching D1', async () => {
+    const db = {
+      prepare() { throw new Error('D1 must not be touched for a mode mismatch'); },
+    } as unknown as D1Database;
+    const response = await stripeWebhook({
+      request: await webhookRequest({ id: 'evt_wrong_mode', type: 'customer.created', livemode: true, data: { object: {} } }),
+      env: { DB: db, STRIPE_ENV: 'test', STRIPE_WEBHOOK_SECRET: SECRET } as Env,
+      waitUntil: vi.fn(),
+    } as unknown as EventContext<Env, string, Record<string, unknown>>);
+
+    expect(response.status).toBe(400);
+    expect((await response.json() as { error: { code: string } }).error.code).toBe('stripe_mode_mismatch');
+  });
+
+  it('requires an explicit boolean livemode before touching D1', async () => {
+    const db = {
+      prepare() { throw new Error('D1 must not be touched for a malformed mode'); },
+    } as unknown as D1Database;
+    const response = await stripeWebhook({
+      request: await webhookRequest({ id: 'evt_missing_mode', type: 'customer.created', data: { object: {} } }),
+      env: { DB: db, STRIPE_ENV: 'test', STRIPE_WEBHOOK_SECRET: SECRET } as Env,
+      waitUntil: vi.fn(),
+    } as unknown as EventContext<Env, string, Record<string, unknown>>);
+
+    expect(response.status).toBe(400);
+    expect((await response.json() as { error: { code: string } }).error.code).toBe('bad_event');
+  });
+
+  it('returns non-2xx for an in-flight duplicate so Stripe retries it', async () => {
+    const event = { id: 'evt_in_flight', type: 'customer.created', livemode: false, data: { object: {} } };
+    const payload = JSON.stringify(event);
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload));
+    const payloadSha256 = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+    let statement = 0;
+    const db = {
+      prepare() {
+        const current = statement++;
+        return {
+          bind() { return this; },
+          async run() { return { meta: { changes: 0 } }; },
+          async first() {
+            if (current !== 2) throw new Error('Unexpected claim query order');
+            return { type: event.type, payload_sha256: payloadSha256, processed_at: null };
+          },
+        };
+      },
+    } as unknown as D1Database;
+    const response = await stripeWebhook({
+      request: await webhookRequest(event),
+      env: { DB: db, STRIPE_ENV: 'test', STRIPE_WEBHOOK_SECRET: SECRET } as Env,
+      waitUntil: vi.fn(),
+    } as unknown as EventContext<Env, string, Record<string, unknown>>);
+
+    expect(response.status).toBe(409);
+    expect(response.headers.get('retry-after')).toBe('5');
+    expect((await response.json() as { error: { code: string } }).error.code).toBe('event_in_progress');
+  });
+
+  it('reconciles a matching late event while new payments are disabled', async () => {
+    const sqlCalls: string[] = [];
+    const db = {
+      prepare(sql: string) {
+        return {
+          bind() { return this; },
+          async run() { sqlCalls.push(sql); return { meta: { changes: 1 } }; },
+        };
+      },
+    } as unknown as D1Database;
+    const response = await stripeWebhook({
+      request: await webhookRequest({
+        id: 'evt_late_expiry',
+        type: 'checkout.session.expired',
+        livemode: true,
+        data: { object: { id: 'cs_live_late' } },
+      }),
+      env: {
+        DB: db,
+        PPI_ENV: 'production',
+        PPI_MODE: 'request',
+        PAYMENTS_ENABLED: 'false',
+        STRIPE_ENV: 'live',
+        STRIPE_WEBHOOK_SECRET: SECRET,
+      } as Env,
+      waitUntil: vi.fn(),
+    } as unknown as EventContext<Env, string, Record<string, unknown>>);
+
+    expect(response.status).toBe(200);
+    expect(sqlCalls.some((sql) => sql.includes("UPDATE payments SET status = 'expired'"))).toBe(true);
+    expect(sqlCalls.some((sql) => sql.includes('UPDATE stripe_events SET processed_at'))).toBe(true);
+  });
+
+  it('rejects charge.refunded when one PaymentIntent maps to multiple local payments', async () => {
+    const sqlCalls: string[] = [];
+    const db = {
+      prepare(sql: string) {
+        return {
+          bind() { return this; },
+          async run() {
+            sqlCalls.push(sql);
+            return { meta: { changes: 1 } };
+          },
+          async all() {
+            sqlCalls.push(sql);
+            if (sql.includes('FROM payments WHERE stripe_payment_intent')) {
+              return {
+                results: [
+                  { id: 'pay_duplicate_1', request_id: 'req_1', amount_cents: 19900, currency: 'usd' },
+                  { id: 'pay_duplicate_2', request_id: 'req_2', amount_cents: 19900, currency: 'usd' },
+                ],
+              };
+            }
+            throw new Error(`Unexpected all(): ${sql}`);
+          },
+        };
+      },
+    } as unknown as D1Database;
+    const response = await stripeWebhook({
+      request: await webhookRequest({
+        id: 'evt_ambiguous_charge_refund',
+        type: 'charge.refunded',
+        livemode: false,
+        created: Math.floor(Date.now() / 1000),
+        data: { object: { payment_intent: 'pi_ambiguous', amount_refunded: 1000, refunded: false } },
+      }),
+      env: { DB: db, STRIPE_ENV: 'test', STRIPE_WEBHOOK_SECRET: SECRET } as Env,
+      waitUntil: vi.fn(),
+    } as unknown as EventContext<Env, string, Record<string, unknown>>);
+
+    expect(response.status).toBe(500);
+    expect(sqlCalls.some((sql) => sql.includes('DELETE FROM stripe_events'))).toBe(true);
+    expect(sqlCalls.some((sql) => sql.includes('UPDATE stripe_events SET processed_at'))).toBe(false);
   });
 });
 
@@ -275,9 +499,15 @@ describe('Stripe required notification outbox', () => {
           async first() {
             sqlCalls.push(sql);
             if (sql.includes('FROM payments WHERE stripe_payment_intent')) {
+              return { id: 'pay_1', request_id: 'req_1', amount_cents: 19900, currency: 'usd', refunded_cents: 0, status: 'succeeded' };
+            }
+            if (sql.includes('SELECT id, request_id, amount_cents, refunded_cents, status FROM payments WHERE id')) {
               return { id: 'pay_1', request_id: 'req_1', amount_cents: 19900, refunded_cents: 0, status: 'succeeded' };
             }
-            if (sql.includes('SELECT refunded_cents, status FROM payments')) return { refunded_cents: 19900, status: 'refunded' };
+            if (sql.includes('SELECT request_id, amount_cents, refunded_cents, status FROM payments WHERE id')) {
+              return { request_id: 'req_1', amount_cents: 19900, refunded_cents: 19900, status: 'refunded' };
+            }
+            if (sql.includes('AS cents') && sql.includes('FROM provider_refunds')) return { cents: 19900 };
             if (sql.includes('FROM ppi_requests r JOIN customers')) {
               return { status: 'confirmed', ref: 'PPI-UNIT-1', email: 'customer@example.com' };
             }
@@ -285,7 +515,16 @@ describe('Stripe required notification outbox', () => {
               return { status: 'confirmed', has_open_payment: 0 };
             }
             if (sql.includes('FROM configuration')) return null;
+            if (sql.includes('SELECT 1 AS latched FROM admin_audit_log')) return null;
             throw new Error(`Unexpected first(): ${sql} (${String(args)})`);
+          },
+          async all() {
+            sqlCalls.push(sql);
+            if (sql.includes('FROM payments WHERE stripe_payment_intent')) {
+              return { results: [{ id: 'pay_1', request_id: 'req_1', amount_cents: 19900, currency: 'usd' }] };
+            }
+            if (sql.includes('FROM refund_operations o')) return { results: [] };
+            throw new Error(`Unexpected all(): ${sql} (${String(args)})`);
           },
         };
         return statement;
@@ -298,6 +537,8 @@ describe('Stripe required notification outbox', () => {
     const event = JSON.stringify({
       id: 'evt_outbox_failure',
       type: 'charge.refunded',
+      livemode: false,
+      created: Math.floor(Date.now() / 1000),
       data: { object: { payment_intent: 'pi_1', amount_refunded: 19900, refunded: true } },
     });
     const timestamp = Math.floor(Date.now() / 1000);
@@ -313,6 +554,7 @@ describe('Stripe required notification outbox', () => {
     } as unknown as EventContext<Env, string, Record<string, unknown>>);
 
     expect(response.status).toBe(500);
+    expect(sqlCalls.some((sql) => sql.includes('INSERT INTO messages'))).toBe(true);
     expect(sqlCalls.some((sql) => sql.includes('DELETE FROM stripe_events'))).toBe(true);
     expect(sqlCalls.some((sql) => sql.includes('UPDATE stripe_events SET processed_at'))).toBe(false);
   });

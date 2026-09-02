@@ -25,7 +25,13 @@ export default async function setup() {
   let sessionCounter = 0;
   let lastSessionParams: Record<string, string> = {};
   let lastSessionIdempotencyKey = '';
-  type MockCheckoutSession = { id: string; url: string; expires_at: number; status?: string };
+  type MockCheckoutSession = {
+    id: string;
+    url: string;
+    expires_at: number;
+    status?: string;
+    eventObject: Record<string, unknown>;
+  };
   type RefundControlStatus = 'pending' | 'succeeded' | 'requires_action' | 'failed' | 'canceled' | 'unknown';
   const sessionsByIdempotencyKey = new Map<string, MockCheckoutSession>();
   const sessionsById = new Map<string, MockCheckoutSession>();
@@ -35,6 +41,7 @@ export default async function setup() {
     idempotencyKey: string;
     responseId: string;
     responseStatus: string;
+    responseCreated: number;
   }> = [];
   let delayNextCheckout = false;
   let waitingCheckout: { response: http.ServerResponse; session: MockCheckoutSession } | null = null;
@@ -77,6 +84,18 @@ export default async function setup() {
             id: `cs_mock_${sessionCounter}`,
             url: `http://127.0.0.1:8798/pay/cs_mock_${sessionCounter}`,
             expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
+            eventObject: {
+              id: `cs_mock_${sessionCounter}`,
+              payment_status: 'paid',
+              amount_total: Number(lastSessionParams['line_items[0][price_data][unit_amount]']),
+              currency: lastSessionParams['line_items[0][price_data][currency]'],
+              client_reference_id: lastSessionParams['client_reference_id'],
+              metadata: {
+                request_id: lastSessionParams['metadata[request_id]'],
+                quote_id: lastSessionParams['metadata[quote_id]'],
+                booking_id: lastSessionParams['metadata[booking_id]'],
+              },
+            },
           };
           if (lastSessionIdempotencyKey) sessionsByIdempotencyKey.set(lastSessionIdempotencyKey, session);
           sessionsById.set(session.id, session);
@@ -112,17 +131,32 @@ export default async function setup() {
         }
         res.end(JSON.stringify({ ...session, status: 'expired' }));
       } else if (req.method === 'POST' && req.url === '/v1/refunds') {
+        const refundParams = new URLSearchParams(body);
         const selectedStatus = nextRefundStatus ?? 'succeeded';
         nextRefundStatus = null;
         const responseStatus = selectedStatus === 'unknown' ? 'future_refund_status' : selectedStatus;
         const responseId = `re_mock_${refundRequests.length + 1}`;
+        const responseCreated = Math.floor(Date.now() / 1000);
         refundRequests.push({
           body,
           idempotencyKey: String(req.headers['idempotency-key'] ?? ''),
           responseId,
           responseStatus,
+          responseCreated,
         });
-        res.end(JSON.stringify({ id: responseId, object: 'refund', status: responseStatus }));
+        res.end(JSON.stringify({
+          id: responseId,
+          object: 'refund',
+          status: responseStatus,
+          amount: Number(refundParams.get('amount')),
+          currency: 'usd',
+          payment_intent: refundParams.get('payment_intent'),
+          created: responseCreated,
+          metadata: {
+            refund_operation_id: refundParams.get('metadata[refund_operation_id]'),
+            refund_attempt_no: refundParams.get('metadata[refund_attempt_no]'),
+          },
+        }));
       } else if (req.method === 'POST' && req.url === '/test/delay-next-checkout') {
         if (waitingCheckout) {
           res.statusCode = 409;
@@ -150,6 +184,15 @@ export default async function setup() {
         res.end(JSON.stringify({ ok: true, nextRefundStatus }));
       } else if (req.method === 'GET' && req.url === '/last-session') {
         res.end(JSON.stringify({ ...lastSessionParams, _idempotencyKey: lastSessionIdempotencyKey }));
+      } else if (req.method === 'GET' && /^\/test\/session\/cs_[A-Za-z0-9_]+$/.test(req.url ?? '')) {
+        const sessionId = String(req.url).split('/').at(-1)!;
+        const session = sessionsById.get(sessionId);
+        if (!session) {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ error: { message: 'mock: session not found' } }));
+          return;
+        }
+        res.end(JSON.stringify(session.eventObject));
       } else if (req.method === 'GET' && req.url === '/test-state') {
         res.end(JSON.stringify({
           sessionCount: sessionCounter,
@@ -200,9 +243,11 @@ export default async function setup() {
   };
   // Pages dev intentionally rejects a custom --config path. Bind the same
   // local resources explicitly while the D1 migration command above continues
-  // to use the non-deployable local config.
+  // to use the non-deployable local config. Serve only the small integration
+  // fixture directory so the dev server does not watch source, tests,
+  // node_modules, and local D1 files as if they were deployable static assets.
   const args = [
-    'wrangler', 'pages', 'dev', '.', '--port', '8799',
+    'wrangler', 'pages', 'dev', 'tests/integration/public', '--port', '8799',
     '--compatibility-date', '2026-07-01',
     '--d1', 'DB=00000000-0000-0000-0000-000000000000',
     '--r2', 'UPLOADS=autoclarity-ppi-uploads',

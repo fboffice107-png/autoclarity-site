@@ -189,6 +189,7 @@
       var cfg = response.body;
       runtime = cfg;
       applyPricing(cfg);
+      applyTravel(cfg);
       applyScanLanguage(cfg);
       applyPaymentLanguage(cfg);
       applyContact(cfg);
@@ -211,7 +212,15 @@
       track("ppi_page_view");
     });
 
-  function money(cents) { return "$" + Math.round(cents / 100); }
+  function money(cents) {
+    var amount = Number(cents) / 100;
+    return amount.toLocaleString("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: Number(cents) % 100 === 0 ? 0 : 2,
+      maximumFractionDigits: 2
+    });
+  }
 
   function applyPricing(cfg) {
     if (!cfg.pricing) return;
@@ -222,15 +231,34 @@
       // window is active and a lower price is set for this tier.
       var wasEl = document.querySelector('[data-was="' + tier.key + '"]');
       var launchEl = document.querySelector('[data-launch="' + tier.key + '"]');
-      var prefixEl = document.querySelector('[data-prefix="' + tier.key + '"]');
       if (tier.wasCents && tier.wasCents > tier.priceCents) {
         if (wasEl) { wasEl.textContent = money(tier.wasCents); wasEl.hidden = false; }
-        if (prefixEl) prefixEl.textContent = tier.startingAt ? "Launch price, starting at" : "Launch price";
         if (launchEl) { launchEl.textContent = "Introductory Las Vegas launch pricing"; launchEl.hidden = false; }
-      } else if (prefixEl) {
-        prefixEl.textContent = tier.startingAt ? "Starting at" : "Flat rate";
       }
     });
+  }
+
+  function applyTravel(cfg) {
+    var table = document.getElementById("travelRows");
+    var travel = cfg && cfg.travel;
+    var bands = travel && Array.isArray(travel.bands) ? travel.bands : [];
+    if (!table || !bands.length) return;
+
+    var priorMax = -1;
+    var rows = [];
+    for (var i = 0; i < bands.length; i++) {
+      var maxMiles = Number(bands[i].maxMiles);
+      var feeCents = Number(bands[i].feeCents);
+      if (!Number.isInteger(maxMiles) || maxMiles <= priorMax || !Number.isSafeInteger(feeCents) || feeCents < 0) return;
+      var startMiles = priorMax + 1;
+      rows.push("<tr><th scope=\"row\">" + startMiles + "–" + maxMiles + " miles</th><td>" +
+        (feeCents === 0 ? "Included" : "+" + money(feeCents) + " mobile-service charge") + "</td></tr>");
+      priorMax = maxMiles;
+    }
+    var customBeyond = Number(travel.customBeyondMiles);
+    if (!Number.isInteger(customBeyond) || customBeyond < priorMax) return;
+    rows.push("<tr><th scope=\"row\">Beyond " + customBeyond + " miles</th><td>Custom review</td></tr>");
+    table.innerHTML = rows.join("");
   }
 
   function applyReviews(cfg) {
@@ -681,23 +709,6 @@
   }
 
   /* ---------- review + submit ---------- */
-  // Lightweight client-side tier hint (PRELIMINARY only — the server computes
-  // the real suggestion and the owner confirms the final quote).
-  function preliminaryTier() {
-    var make = val("make").toLowerCase();
-    var model = val("model").toLowerCase();
-    var trim = val("trim").toLowerCase();
-    var mods = val("modStatus");
-    var exotic = /ferrari|lamborghini|mclaren|aston martin|bentley|rolls|maserati|lotus|bugatti|pagani/.test(make);
-    var euro = /bmw|mercedes|audi|porsche|land rover|range rover|jaguar|volvo|volkswagen|mini|tesla|lexus|genesis|maserati/.test(make);
-    var perf = /corvette|gt-r|gtr|supra|nsx|hellcat|demon|trackhawk|raptor|trx|type r|wrx|sti|golf r|gti|911|amg|shelby|mustang|camaro|challenger|charger|m3|m4|m5/.test(model + " " + trim);
-    var year = parseInt(val("year"), 10);
-    var classic = year && (new Date().getFullYear() - year) >= 25;
-    if (exotic || classic || mods === "heavy") return "Exotic, Collector or Heavily Modified";
-    if (euro || perf || mods === "light") return "European, Luxury or Performance";
-    return "Standard Vehicle";
-  }
-
   function buildReview() {
     var card = document.getElementById("reviewCard");
     var rows = [
@@ -713,7 +724,7 @@
     }).join("");
     var tierEl = document.getElementById("reviewTier");
     if (tierEl) {
-      tierEl.innerHTML = "Estimated tier: <strong>" + escapeHtml(preliminaryTier()) + " PPI</strong> — <em>preliminary; your exact price and any travel charge are confirmed after AutoClarity reviews the vehicle.</em>";
+      tierEl.innerHTML = "Pricing review: <strong>AutoClarity confirms the vehicle tier</strong> after reviewing the vehicle, location and scope. Your approved quote shows the exact price and any travel charge before you accept or pay.";
     }
   }
 

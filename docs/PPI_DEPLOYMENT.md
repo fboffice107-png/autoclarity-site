@@ -4,7 +4,7 @@
 
 | | Hosting | Data | Payments | Admin auth |
 |---|---|---|---|---|
-| **Production today** | Cloudflare Pages direct upload + custom domains | production D1/R2 | Request mode; payments disabled | Cloudflare Access only |
+| **Production** | Cloudflare Pages direct upload + custom domains | production D1/R2 | Live Stripe only with the complete production tuple | Cloudflare Access only |
 | **Local** | `wrangler pages dev` | local D1/R2 emulation | Stripe TEST; payments disabled by default | `ADMIN_DEV_KEY` |
 | **Hosted preview** | Cloudflare Pages branch deploy (`*.pages.dev`) | preview-only D1/R2 required before write testing | Stripe TEST; payments disabled by default | `ADMIN_DEV_KEY` or Access |
 
@@ -59,17 +59,11 @@ policy before write testing.
 ## Production release (owner-gated)
 
 The custom domains and production data bindings already exist. A release changes
-the live acquisition funnel, so deploy only after the production checklist and
-an owner-approved release window. Enabling payments remains a separate decision.
+the live acquisition funnel, so deploy only in an owner-approved release window
+after completing `PPI_PRODUCTION_CHECKLIST.md`.
 
-**Release blocker:** the currently published app-oriented privacy policy and
-terms do not cover the PPI service and conflict with its professional-service
-positioning. The owner and counsel must approve and publish PPI-specific privacy
-and service terms before this release. This repository does not supply or
-publish replacement legal text.
-
-1. Clear the legal release blocker above and record owner approval for the
-   release window.
+1. Record owner approval for the release window, the public pricing/policy copy,
+   and any intentionally active time-bounded launch price or promotion.
 2. Back up production D1 and record the current successful Pages deployment.
 3. Reconcile the recovered `0002` migration before code rollout. Using only an
    independently reviewed production configuration, confirm the intended D1
@@ -95,21 +89,36 @@ publish replacement legal text.
    application code. Confirm the stored PPI configuration JSON is valid before
    applying the migration; invalid JSON must be repaired or explicitly reviewed
    so the documented default buffers are used.
-6. Export or reconstruct the actual production Pages configuration outside the
+6. Apply `0005_provider_refund_ledger.sql`, then
+   `0006_payment_disputes.sql`, then
+   `0007_agreement_version_immutability.sql`. Verify the refund and dispute
+   ledgers, their guards/indexes, and the append-only agreement-version triggers
+   after each migration before proceeding.
+7. Apply `0008_quote_payment_integrity.sql` after `0007`. Verify database-bound
+   positive USD quote/payment amounts, exact component and line-item totals, and
+   immutable sent-quote/payment identity before application rollout.
+8. Export or reconstruct the actual production Pages configuration outside the
    repository and review every project name, binding name/ID, bucket, variable,
    route, branch, and compatibility setting. There is intentionally no tracked
    default `wrangler.toml`; never use `wrangler.local.toml` or the generated
    preview configuration for production.
-7. Confirm production variables/secrets and Access protection; set
-   `PUBLIC_BASE_URL=https://getautoclarity.com`, and keep
-   `PPI_MODE=request`, `PAYMENTS_ENABLED=false`, and `STRIPE_ENV=test` unless the
-   owner separately approves the live-payment checklist.
-8. Deploy the reviewed build to the production branch using only that audited
+9. Confirm Access protection and the complete payment tuple:
+   `PPI_ENV=production`, `PPI_MODE=live`, `PAYMENTS_ENABLED=true`,
+   `STRIPE_ENV=live`, `PUBLIC_BASE_URL=https://getautoclarity.com`, and an
+   `sk_live_` Stripe secret. Partial or mixed test/live combinations must remain
+   fail-closed.
+10. Deploy the reviewed build to the production branch using only that audited
    production configuration.
-9. Smoke-test homepage, PPI page, redirects, runtime config, admin lock, and a
-   controlled non-customer request flow. Do not use real customer data in tests.
-10. Roll back by promoting/redeploying the previously recorded Pages deployment;
-   do not change DNS or delete production data.
+11. Smoke-test homepage, PPI page, redirects, runtime config, admin lock, webhook
+   signature rejection, and failure handling without creating a production
+   fixture/customer or completing a charge. Initialize live Checkout only from a
+   genuine approved quote. The full paid confirmation/refund workflow must pass
+   in isolated Stripe test mode, and the first genuine paid booking is monitored
+   end-to-end in production.
+12. If commerce verification fails, set `PAYMENTS_ENABLED=false` while authentic
+   late Stripe events continue to reconcile. Roll back application code by
+   promoting/redeploying the previously recorded Pages deployment; do not change
+   DNS or delete production data.
 
 ## Optional enhancement (documented, not built)
 

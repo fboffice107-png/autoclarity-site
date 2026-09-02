@@ -14,9 +14,10 @@ import { classifyStripeRefundStatus, createRefund, StripeConfigError, type Strip
 import { releaseExpiredHolds } from '../../../lib/portal.ts';
 import { applyTerminalLifecycle } from '../../../lib/lifecycle.ts';
 import { expireOpenCheckoutAttempts } from '../../../lib/payment-lifecycle.ts';
+import { upsertProviderRefund, validateStripeRefundIdentity } from '../../../lib/refunds.ts';
 import { clampStr, errorJson, formatCents, json, newId, nowIso } from '../../../lib/util.ts';
 
-const GENERIC_STATUS_BLOCKED = new Set<Status>(['refunded', 'disputed', 'customer_cancelled']);
+const GENERIC_STATUS_BLOCKED = new Set<Status>(['refunded', 'refund_reconciliation_needed', 'disputed', 'customer_cancelled']);
 const AWAITING_PAYMENT_BACKWARD_BLOCKED = new Set<Status>(['awaiting_agreement', 'awaiting_time_selection']);
 
 function genericStatusAllowed(from: Status, to: Status): boolean {
@@ -219,7 +220,20 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     .first<Record<string, unknown>>();
   if (!req) return errorJson('not_found', 'Request not found.', 404);
 
-  const [quotes, lines, slots, uploads, history, messagesRows, payments, acceptances, refundOperations, refundAttempts] = await Promise.all([
+  const [
+    quotes,
+    lines,
+    slots,
+    uploads,
+    history,
+    messagesRows,
+    payments,
+    acceptances,
+    refundOperations,
+    refundAttempts,
+    providerRefunds,
+    paymentDisputes,
+  ] = await Promise.all([
     db.prepare(`SELECT * FROM quotes WHERE request_id = ? ORDER BY version DESC`).bind(id).all<Record<string, unknown>>(),
     db.prepare(`SELECT l.* FROM quote_line_items l JOIN quotes q ON q.id = l.quote_id WHERE q.request_id = ? ORDER BY l.sort`).bind(id).all<Record<string, unknown>>(),
     db.prepare(`SELECT * FROM appointment_slots WHERE request_id = ? ORDER BY starts_at`).bind(id).all<Record<string, unknown>>(),
@@ -233,6 +247,16 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       `SELECT a.* FROM refund_operation_attempts a
        JOIN refund_operations o ON o.id = a.operation_id
        WHERE o.request_id = ? ORDER BY a.created_at DESC`,
+    ).bind(id).all<Record<string, unknown>>(),
+    db.prepare(
+      `SELECT pr.* FROM provider_refunds pr
+       JOIN payments p ON p.id = pr.payment_id
+       WHERE p.request_id = ? ORDER BY pr.updated_at DESC`,
+    ).bind(id).all<Record<string, unknown>>(),
+    db.prepare(
+      `SELECT d.* FROM payment_disputes d
+       JOIN payments p ON p.id = d.payment_id
+       WHERE p.request_id = ? ORDER BY d.updated_at DESC`,
     ).bind(id).all<Record<string, unknown>>(),
   ]);
 
@@ -253,6 +277,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     acceptances: acceptances.results ?? [],
     refundOperations: refundOperations.results ?? [],
     refundAttempts: refundAttempts.results ?? [],
+    providerRefunds: providerRefunds.results ?? [],
+    paymentDisputes: paymentDisputes.results ?? [],
   });
 };
 
@@ -336,7 +362,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       const reason = clampStr(body.reason, 300) || 'Admin status change';
 
       if (to === 'confirmed') {
-        if (flags.paymentsEnabled) {
+        if (flags.paymentsEnabled || flags.env === 'production') {
           return errorJson('payment_authority_required', 'Paid confirmations are recorded only from Stripe or paid-time reselection.', 409);
         }
         const now = nowIso();
@@ -418,6 +444,22 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           return errorJson('conflict', 'The request or held time changed concurrently — reload and retry.', 409);
         }
       } else if (to === 'admin_cancelled' || to === 'expired') {
+        if (to === 'admin_cancelled') {
+          const paid = await db
+            .prepare(
+              `SELECT id FROM payments
+               WHERE request_id = ? AND status IN ('succeeded','partially_refunded','refunded','disputed') LIMIT 1`,
+            )
+            .bind(id)
+            .first<{ id: string }>();
+          if (paid) {
+            return errorJson(
+              'paid_cancellation_remedy_required',
+              'A paid booking cannot be closed with a generic status change. Submit the promised refund through the recorded payment, or keep the booking active while arranging priority rescheduling.',
+              409,
+            );
+          }
+        }
         const checkoutExpiry = await expireOpenCheckoutAttempts(env, id);
         if (!checkoutExpiry.ok) {
           return errorJson(
@@ -514,14 +556,21 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       }
 
       const tierBase = basePriceForTier(tier, config);
-      const baseCents = Number.isInteger(body.basePriceCents) && (body.basePriceCents as number) > 0
+      const baseCents = Number.isSafeInteger(body.basePriceCents) && (body.basePriceCents as number) > 0
         ? (body.basePriceCents as number)
         : tierBase.priceCents;
 
-      let travelCents = Number.isInteger(body.travelCents) && (body.travelCents as number) >= 0 ? (body.travelCents as number) : null;
+      let travelCents = Number.isSafeInteger(body.travelCents) && (body.travelCents as number) >= 0 ? (body.travelCents as number) : null;
       if (travelCents === null) {
         const suggestion = req.travel_miles !== null ? travelFeeForMiles(req.travel_miles, config) : { feeCents: null };
-        travelCents = suggestion.feeCents ?? 0;
+        if (suggestion.feeCents === null) {
+          return errorJson(
+            'travel_quote_required',
+            'This location requires custom travel review. Enter the approved travel amount explicitly (enter 0 only when AutoClarity has intentionally approved no travel charge).',
+            422,
+          );
+        }
+        travelCents = suggestion.feeCents;
       }
 
       const lines: QuoteLineInput[] = [
@@ -531,12 +580,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       for (const addon of body.addons ?? []) {
         const label = clampStr(addon.label, 120);
         const cents = Number(addon.amountCents);
-        if (label && Number.isInteger(cents) && cents > 0 && cents <= 500000) {
+        if (label && Number.isSafeInteger(cents) && cents > 0 && cents <= 500000) {
           lines.push({ kind: 'addon', label, amountCents: cents });
         }
       }
       const discount = Number(body.discountCents);
-      if (Number.isInteger(discount) && discount > 0) {
+      if (Number.isSafeInteger(discount) && discount > 0) {
         lines.push({ kind: 'discount', label: clampStr(body.discountLabel, 120) || 'Discount', amountCents: -discount });
       }
 
@@ -544,7 +593,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       try {
         totals = computeQuoteTotals(lines);
       } catch {
-        return errorJson('validation', 'Quote total cannot be negative.', 422);
+        return errorJson('validation', 'Quote lines must produce one positive, exact total in whole cents.', 422);
       }
 
       const versionRow = await db
@@ -561,9 +610,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         db.prepare(`UPDATE quotes SET status = 'superseded', updated_at = ? WHERE request_id = ? AND status IN ('draft','sent')`).bind(now, id),
         db
           .prepare(
-            `INSERT INTO quotes (id, request_id, version, status, tier, subtotal_cents, travel_cents, addons_cents, discount_cents, total_cents,
+            `INSERT INTO quotes (id, request_id, version, status, tier, currency, subtotal_cents, travel_cents, addons_cents, discount_cents, total_cents,
                                  expires_at, admin_note_internal, customer_note, approved_by, created_at, updated_at)
-             VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, 'draft', ?, 'usd', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .bind(
             quoteId, id, version, tier,
@@ -736,7 +785,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         .first<{ status: string }>();
       if (!slot) return errorJson('not_found', 'Slot not found or not releasable.', 404);
       const now = nowIso();
-      if (slot.status === 'held' && (status === 'awaiting_agreement' || status === 'awaiting_payment')) {
+      if ((slot.status === 'held' || slot.status === 'offered')
+        && (status === 'awaiting_agreement' || status === 'awaiting_payment')) {
         if (status === 'awaiting_payment') {
           const checkoutExpiry = await expireOpenCheckoutAttempts(env, id);
           if (!checkoutExpiry.ok) {
@@ -780,11 +830,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             .prepare(
               `UPDATE appointment_slots
                SET status = 'released', hold_expires_at = NULL, updated_at = ?
-               WHERE id = ? AND request_id = ? AND status = 'held'
+               WHERE id = ? AND request_id = ? AND status = ?
                  AND EXISTS (SELECT 1 FROM status_history WHERE id = ?)
                  AND EXISTS (SELECT 1 FROM ppi_requests WHERE id = ? AND status = 'awaiting_time_selection')`,
             )
-            .bind(now, slotId, id, historyId, id),
+            .bind(now, slotId, id, slot.status, historyId, id),
           db
             .prepare(
               `UPDATE bookings SET slot_id = NULL, status = 'pending_payment', updated_at = ?
@@ -931,15 +981,18 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     // ----------------------------------------------------------------- refund
     case 'refund': {
       const payment = await db
-        .prepare(`SELECT id, stripe_payment_intent, amount_cents, refunded_cents, status FROM payments WHERE id = ? AND request_id = ?`)
+        .prepare(`SELECT id, stripe_payment_intent, amount_cents, refunded_cents, currency, status FROM payments WHERE id = ? AND request_id = ?`)
         .bind(clampStr(body.paymentId, 60), id)
-        .first<{ id: string; stripe_payment_intent: string | null; amount_cents: number; refunded_cents: number; status: string }>();
+        .first<{ id: string; stripe_payment_intent: string | null; amount_cents: number; refunded_cents: number; currency: string; status: string }>();
       if (!payment) return errorJson('not_found', 'Payment not found.', 404);
       if (payment.status !== 'succeeded' && payment.status !== 'partially_refunded') {
         return errorJson('wrong_state', 'Only succeeded payments can be refunded.', 409);
       }
       if (!payment.stripe_payment_intent) return errorJson('wrong_state', 'No payment intent recorded.', 409);
-      const amount = Number.isInteger(body.amountCents) && (body.amountCents as number) > 0 ? (body.amountCents as number) : undefined;
+      if (payment.currency.toLowerCase() !== 'usd') {
+        return errorJson('refund_reconciliation_required', 'This payment has an unsupported currency and must be reconciled before a refund is submitted.', 409);
+      }
+      const amount = Number.isSafeInteger(body.amountCents) && (body.amountCents as number) > 0 ? (body.amountCents as number) : undefined;
       if (amount !== undefined && amount > payment.amount_cents - payment.refunded_cents) {
         return errorJson('validation', 'Refund exceeds the remaining refundable amount.', 422);
       }
@@ -1203,13 +1256,76 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       }
 
       const providerStatus = classifyStripeRefundStatus(providerRefund);
-      const rawProviderId = typeof providerRefund['id'] === 'string' ? providerRefund['id'] : '';
-      const providerId = /^re_[A-Za-z0-9_]+$/.test(rawProviderId) && rawProviderId.length <= 255 ? rawProviderId : null;
+      const providerIdentity = validateStripeRefundIdentity(providerRefund, {
+        paymentIntent: payment.stripe_payment_intent,
+        amountCents: effectiveRefundAmount,
+        currency: payment.currency,
+        operationId: operation.id,
+        attemptNo,
+      });
+      if (!providerIdentity.ok) {
+        const detail = `provider_identity_mismatch:${providerIdentity.reason}`;
+        const persisted = await settleAttempt(
+          'reconciliation_required',
+          providerIdentity.providerRefundId,
+          providerStatus,
+          detail,
+        );
+        await auditLog(db, actor, 'refund_provider_identity_mismatch', 'refund_operation', operation.id, {
+          attemptNo,
+          reason: providerIdentity.reason,
+          providerStatus,
+          operationStatus: persisted.status,
+        });
+        return refundResultResponse(operation.id, persisted.status, providerStatus);
+      }
+      const providerId = providerIdentity.providerRefundId;
       const outcome = refundOutcome(providerStatus, providerId);
       const failure = outcome === 'failed' || outcome === 'canceled' || outcome === 'requires_action' || outcome === 'reconciliation_required'
         ? clampStr(providerRefund['failure_reason'] ?? providerRefund['failure_message'] ?? `provider_status:${providerStatus}`, 240)
         : null;
       const persisted = await settleAttempt(outcome, providerId, providerStatus, failure);
+      if (providerId) {
+        const attempt = await db
+          .prepare(`SELECT id FROM refund_operation_attempts WHERE operation_id = ? AND attempt_no = ?`)
+          .bind(operation.id, attemptNo)
+          .first<{ id: string }>();
+        if (!attempt) throw new Error(`Refund attempt ${operation.id}/${attemptNo} disappeared before ledger seeding.`);
+        try {
+          await upsertProviderRefund(db, {
+            providerRefundId: providerId,
+            paymentId: payment.id,
+            operationId: operation.id,
+            attemptId: attempt.id,
+            amountCents: providerIdentity.amountCents,
+            currency: providerIdentity.currency,
+            providerCreated: providerIdentity.providerCreated,
+            status: providerStatus,
+            eventCreated: providerIdentity.providerCreated,
+            eventId: `admin_response:${operation.id}:${attemptNo}`,
+          });
+        } catch (ledgerError) {
+          const detail = `refund ledger persistence failed: ${String(ledgerError).slice(0, 180)}`;
+          await db.batch([
+            db
+              .prepare(
+                `UPDATE refund_operation_attempts
+                 SET outcome_status = 'reconciliation_required', error = ?, updated_at = ?
+                 WHERE id = ?`,
+              )
+              .bind(detail, nowIso(), attempt.id),
+            db
+              .prepare(
+                `UPDATE refund_operations
+                 SET status = 'reconciliation_required', last_error = ?, updated_at = ?
+                 WHERE id = ? AND attempt_count = ?`,
+              )
+              .bind(detail, nowIso(), operation.id, attemptNo),
+          ]);
+          await auditLog(db, actor, 'refund_ledger_seed_failed', 'refund_operation', operation.id, { attemptNo, detail });
+          return refundResultResponse(operation.id, 'reconciliation_required', providerStatus);
+        }
+      }
       await auditLog(db, actor, 'refund_provider_result', 'refund_operation', operation.id, {
         attemptNo,
         amountCents: effectiveRefundAmount,

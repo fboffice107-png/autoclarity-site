@@ -20,6 +20,7 @@ export const STATUSES = [
   'admin_cancelled',
   'expired',
   'refunded',
+  'refund_reconciliation_needed',
   'disputed',
 ] as const;
 
@@ -44,6 +45,7 @@ export const STATUS_LABELS: Record<Status, string> = {
   admin_cancelled: 'Admin Cancelled',
   expired: 'Expired',
   refunded: 'Refunded',
+  refund_reconciliation_needed: 'Refund Reconciliation Needed',
   disputed: 'Disputed',
 };
 
@@ -67,8 +69,12 @@ const TRANSITIONS: Record<Status, Status[]> = {
   customer_cancelled: ['refunded', 'disputed'],
   admin_cancelled: ['refunded', 'disputed'],
   expired: ['ready_for_review'], // admin may reopen
-  refunded: ['disputed'],
-  disputed: ['refunded'],
+  refunded: ['refund_reconciliation_needed', 'disputed'],
+  refund_reconciliation_needed: ['refunded', 'disputed'],
+  // A signed dispute permanently closes automatic commerce transitions. Even
+  // a concurrent full-refund event must leave the request visibly disputed;
+  // deliberate resolution happens outside the webhook state machine.
+  disputed: [],
 };
 
 export function isStatus(v: string): v is Status {

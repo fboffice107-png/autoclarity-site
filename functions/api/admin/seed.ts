@@ -1,5 +1,5 @@
 // POST /api/admin/seed — clearly-labeled PREVIEW fixtures (spec §27).
-// Hard-refuses in production. Idempotent: re-running resets fixture rows only.
+// Hard-refuses in production. Idempotent: existing fixture evidence is kept.
 
 import type { Env } from '../../lib/types.ts';
 import { requireAdmin, auditLog } from '../../lib/auth.ts';
@@ -45,40 +45,20 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const agreements = await latestAgreements(db);
   const now = nowIso();
 
-  // Remove previous fixture rows (identified by fixture emails).
-  const emails = FIXTURES.map((f) => f.email);
-  const placeholders = emails.map(() => '?').join(',');
-  const oldCustomers = await db
-    .prepare(`SELECT id FROM customers WHERE email IN (${placeholders})`)
-    .bind(...emails)
-    .all<{ id: string }>();
-  for (const c of oldCustomers.results ?? []) {
-    const reqs = await db.prepare(`SELECT id, vehicle_id FROM ppi_requests WHERE customer_id = ?`).bind(c.id).all<{ id: string; vehicle_id: string }>();
-    for (const r of reqs.results ?? []) {
-      await db.batch([
-        db.prepare(`DELETE FROM status_history WHERE request_id = ?`).bind(r.id),
-        db.prepare(`DELETE FROM magic_links WHERE request_id = ?`).bind(r.id),
-        db.prepare(`DELETE FROM messages WHERE request_id = ?`).bind(r.id),
-        db.prepare(`DELETE FROM agreement_acceptances WHERE request_id = ?`).bind(r.id),
-        db.prepare(`DELETE FROM payments WHERE request_id = ?`).bind(r.id),
-        db.prepare(`DELETE FROM bookings WHERE request_id = ?`).bind(r.id),
-        db.prepare(`DELETE FROM appointment_slots WHERE request_id = ?`).bind(r.id),
-        db.prepare(`DELETE FROM quote_line_items WHERE quote_id IN (SELECT id FROM quotes WHERE request_id = ?)`).bind(r.id),
-        db.prepare(`DELETE FROM quotes WHERE request_id = ?`).bind(r.id),
-        db.prepare(`DELETE FROM request_uploads WHERE request_id = ?`).bind(r.id),
-        db.prepare(`DELETE FROM ppi_requests WHERE id = ?`).bind(r.id),
-        db.prepare(`DELETE FROM vehicles WHERE id = ?`).bind(r.vehicle_id),
-      ]);
-    }
-    await db.prepare(`DELETE FROM customers WHERE id = ?`).bind(c.id).run();
-  }
-
   const created: string[] = [];
   for (const f of FIXTURES) {
     const customerId = newId('cus');
     const vehicleId = newId('veh');
     const requestId = newId('req');
     const ref = `PPI-FIXTURE-${f.refSuffix}`;
+    const existing = await db
+      .prepare(`SELECT id FROM ppi_requests WHERE ref = ? LIMIT 1`)
+      .bind(ref)
+      .first<{ id: string }>();
+    if (existing) {
+      created.push(ref);
+      continue;
+    }
     const tier = suggestTier({ year: f.vehicle.year, make: f.vehicle.make, model: f.vehicle.model, trim: f.vehicle.trim, modStatus: f.vehicle.mod, titleStatus: f.vehicle.title, startsDrives: 'yes' });
     const travel = estimateTravel(f.zip, config);
 
@@ -104,9 +84,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       const quoteId = newId('qot');
       const quoteStatus = f.refSuffix === 'EUROLX' ? 'sent' : 'accepted';
       await db.batch([
-        db.prepare(`INSERT INTO quotes (id, request_id, version, status, tier, subtotal_cents, travel_cents, addons_cents, discount_cents, total_cents, expires_at, approved_by, created_at, updated_at) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, 'system:seed', ?, ?)`)
-          .bind(quoteId, requestId, quoteStatus, tier.tier, totals.subtotalCents, totals.travelCents, totals.addonsCents, totals.discountCents, totals.totalCents, new Date(Date.now() + 48 * 3600_000).toISOString(), now, now),
+        db.prepare(`INSERT INTO quotes (id, request_id, version, status, tier, currency, subtotal_cents, travel_cents, addons_cents, discount_cents, total_cents, expires_at, approved_by, created_at, updated_at) VALUES (?, ?, 1, 'draft', ?, 'usd', ?, ?, ?, ?, ?, ?, 'system:seed', ?, ?)`)
+          .bind(quoteId, requestId, tier.tier, totals.subtotalCents, totals.travelCents, totals.addonsCents, totals.discountCents, totals.totalCents, new Date(Date.now() + 48 * 3600_000).toISOString(), now, now),
         ...lines.map((l, i) => db.prepare(`INSERT INTO quote_line_items (id, quote_id, kind, label, amount_cents, sort) VALUES (?, ?, ?, ?, ?, ?)`).bind(newId('qli'), quoteId, l.kind, l.label, l.amountCents, i)),
+        db.prepare(`UPDATE quotes SET status = ?, updated_at = ? WHERE id = ? AND status = 'draft'`).bind(quoteStatus, now, quoteId),
       ]);
 
       if (f.refSuffix === 'EUROLX') {

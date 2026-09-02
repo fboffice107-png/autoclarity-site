@@ -1,15 +1,9 @@
 # Diagnostic-Scan Scope Review
 
 **Master switch:** `scan.included` in `functions/lib/config.ts` (exposed to the
-frontend as `scanIncluded`). **Default: `false`** — fail-safe until the owner
-confirms scan-tool usage is within the approved operating scope.
-
-The owner has verbally confirmed with Nevada DMV Occupational & Business
-Licensing that a **PPI-only** service does not require garage registration. The
-website does **not** state any DMV endorsement/licensing of AutoClarity, and
-shows no legal conclusions to customers. Because a diagnostic scan can blur the
-line between "inspection" and "repair/diagnosis," scan language ships **off** by
-default and the owner enables it deliberately once the scope is confirmed.
+frontend as `scanIncluded`). **Default: `false`** because a diagnostic scan is
+an optional scope item, not an included part of every inspection. Enable it only
+when it is part of the approved customer quote and confirmed inspection scope.
 
 ## Behavior by state
 
@@ -24,7 +18,7 @@ default and the owner enables it deliberately once the scope is confirmed.
 - A real report may still include a clearly disabled "scan: not performed /
   not included" section.
 
-### `scan.included = true` (owner enables after confirming scope)
+### `scan.included = true`
 - Qualified wording appears everywhere: *"Diagnostic scan where supported and
   included in the confirmed inspection scope."*
 - The seller diagnostic-scanning consent field is shown.
@@ -43,7 +37,7 @@ default and the owner enables it deliberately once the scope is confirmed.
 | `las-vegas-.../index.html` "Road test & diagnostics" card | road test + warning-light doc (default); scan/emissions lines | `[data-scan="on"]` / `[data-scan="off"]` |
 | `las-vegas-.../index.html` intake, seller diagnostic-scanning consent | checkbox | `[data-scan="on"]` |
 | `las-vegas-.../sample-report/` | road-test section present; scan not asserted as performed | static demo, labeled |
-| `functions/lib/agreements.ts` (Scope & Limitations, Service Agreement) | "a diagnostic scan cannot prove the absence of all faults"; "where the vehicle supports it and the seller permits it" | qualified, condition-dependent language (owner-review legal drafts) |
+| `functions/lib/agreements.ts` (Scope & Limitations, Service Agreement) | scan is conditional on the approved scope, vehicle support, and seller permission; a scan cannot prove the absence of all faults | versioned customer agreements |
 | `assets/js/ppi-form.js` `applyScanLanguage()` | toggles all `[data-scan]` elements from `scanIncluded` | runtime config |
 
 ## Separation from the digital app
@@ -51,7 +45,9 @@ default and the owner enables it deliberately once the scope is confirmed.
 This setting only affects the **physical PPI page**. It does not touch the
 AutoClarity iPhone app's symptom-guidance language or its App Store copy.
 
-## To enable later
+## To enable
 
-Admin dashboard → Configuration → set `scan.included: true` (and confirm the
-agreement wording with counsel). No code change required.
+Set `scan.included: true` through the reviewed PPI configuration process, then
+verify the customer quote/scope and current versioned agreements all describe
+the same conditional scan service. No customer should be promised or asked to
+authorize a scan when the switch is off.

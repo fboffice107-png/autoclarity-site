@@ -9,6 +9,7 @@ import intakeApi from '../../functions/api/ppi/requests.ts?raw';
 import mainScript from '../../assets/js/main.js?raw';
 import adminScript from '../../assets/js/ppi-admin.js?raw';
 import sitemap from '../../sitemap.xml?raw';
+import privacy from '../../privacy.html?raw';
 
 describe('PPI frontend conversion safeguards', () => {
   it('uses one canonical trailing-slash URL and valid local-service schema', () => {
@@ -66,6 +67,15 @@ describe('PPI frontend conversion safeguards', () => {
     expect(duplicateBranch).not.toContain('clearDraft()');
     const uncertainBranch = script.slice(script.indexOf('.catch(function (error)'), script.indexOf('var STEP_OF_FIELD'));
     expect(uncertainBranch).not.toContain('clearDraft()');
+    expect(privacy).toContain('stores a draft containing the fields you entered');
+    expect(privacy).toContain("browser tab's session storage");
+  });
+
+  it('keeps operator quote defaults aligned with the server suggestion and permits an explicit custom-travel zero', () => {
+    expect(adminScript).toContain('suggestedTier === "euro_luxury_performance" ? " selected"');
+    expect(adminScript).toContain('suggestedTier === "exotic_collector" ? " selected"');
+    expect(adminScript).toContain('dollarsToCents(document.getElementById("qTravel").value, true)');
+    expect(adminScript).toContain('travelCents: travelCents !== null ? travelCents : undefined');
   });
 
   it('preserves allowlisted first-touch attribution from homepage to the PPI form', () => {
@@ -106,12 +116,18 @@ describe('PPI frontend conversion safeguards', () => {
     expect(page).toContain('<div data-payment="on" hidden>');
     expect(page).not.toContain('physical services paid through this website');
     expect(page).toContain('<span data-payment="off">Submitting is free.');
-    expect(page).toContain('<span data-payment="on" hidden>After review, you can select a time');
+    expect(page).toContain('<span data-payment="on" hidden>After review, select a time, accept the current service agreements, and pay the exact approved quote amount securely through Stripe. Successful payment confirms the appointment.</span>');
     expect(script).toContain('cfg.paymentsEnabled === true');
+    expect(page).toContain('<tbody id="travelRows">');
+    expect(script).toContain('function applyTravel(cfg)');
+    expect(script).not.toContain('function preliminaryTier()');
+    expect(script).toContain('AutoClarity confirms the vehicle tier');
     expect(portalScript).not.toMatch(/hear back the same day|never later than|preview environment/iu);
     expect(portalScript).toContain('v.paymentsEnabled');
-    expect(portalScript).toContain('Online payment is currently unavailable');
-    expect(portalScript).toContain('no appointment time was booked');
+    expect(portalScript).toContain('function renderAgreementMarkdown(source)');
+    expect(portalScript).toContain('renderAgreementMarkdown(doc.bodyMd)');
+    expect(portalScript).toContain('Online payment cannot start until the current quote, held appointment, current agreements, and payment service are all ready.');
+    expect(portalScript).toContain('No charge has been started, and your appointment is not confirmed.');
     expect(portalAction).toContain("'payments_unavailable'");
     expect(portalAction).toContain('no charge was started');
     expect(portalAction).not.toContain('preview environment');

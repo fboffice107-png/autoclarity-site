@@ -60,6 +60,19 @@ describe('premium visual and interaction safeguards', () => {
     expectScrollCueTargetsToExist(ppiPage);
   });
 
+  it('keeps every PPI tier labeled as starting at when runtime pricing changes', () => {
+    const prefixes = [...ppiPage.matchAll(/<span class="price-prefix"([^>]*)>([^<]+)<\/span>/gu)];
+
+    expect(prefixes).toHaveLength(3);
+    for (const [, attributes, label] of prefixes) {
+      expect(attributes).not.toContain('data-prefix');
+      expect(label).toBe('Starting at');
+    }
+
+    expect(ppiPage).toContain('data-launch="standard"');
+    expect(ppiPage).toContain('data-launch="euro_luxury_performance"');
+  });
+
   it('hides non-editable carets while restoring insertion carets for editable text', () => {
     expect(siteCss).toMatch(/body\s*\{[^}]*caret-color:\s*transparent;/su);
     expect(siteCss).toMatch(

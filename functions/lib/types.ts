@@ -49,11 +49,25 @@ export function modeFlags(env: Env): ModeFlags {
   const ppiEnv = env.PPI_ENV === 'production' ? 'production' : 'preview';
   const rawMode = env.PPI_MODE ?? 'request';
   const mode = rawMode === 'waitlist' || rawMode === 'live' ? rawMode : 'request';
+  const stripeEnv = env.STRIPE_ENV === 'live' ? 'live' : 'test';
+  const requestedPayments = env.PAYMENTS_ENABLED === 'true';
+  const keyMatchesEnvironment = stripeEnv === 'live'
+    ? env.STRIPE_SECRET_KEY?.startsWith('sk_live_') === true
+    : env.STRIPE_SECRET_KEY?.startsWith('sk_test_') === true;
+
+  // Production Checkout is exposed only when every launch control agrees.
+  // Preview remains able to exercise test-mode Checkout in request/live modes,
+  // but a live key is never effective outside the explicit production tuple.
+  const paymentsEnabled = requestedPayments && keyMatchesEnvironment && (
+    ppiEnv === 'production'
+      ? mode === 'live' && stripeEnv === 'live'
+      : stripeEnv === 'test'
+  );
   return {
     env: ppiEnv,
     mode,
-    paymentsEnabled: env.PAYMENTS_ENABLED === 'true',
-    stripeEnv: env.STRIPE_ENV === 'live' ? 'live' : 'test',
+    paymentsEnabled,
+    stripeEnv,
     bookingEnabled: env.BOOKING_ENABLED !== 'false',
     uploadsEnabled: env.UPLOADS_ENABLED !== 'false',
   };

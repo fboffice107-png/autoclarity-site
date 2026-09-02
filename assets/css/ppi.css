@@ -555,8 +555,13 @@ fieldset.form-step legend {
   font-size: 14px;
   max-height: 300px;
   overflow-y: auto;
-  white-space: pre-wrap;
+  white-space: normal;
 }
+.agree-doc .agree-body h3 { margin: 16px 0 7px; color: var(--text); font-size: 15px; }
+.agree-doc .agree-body h3:first-child { margin-top: 4px; }
+.agree-doc .agree-body p { margin: 8px 0; }
+.agree-doc .agree-body ul { margin: 8px 0; padding-left: 20px; }
+.agree-doc .agree-body li + li { margin-top: 6px; }
 .agree-check { display: flex; gap: 10px; align-items: flex-start; padding: 0 16px 14px; }
 .agree-check input { width: 20px; height: 20px; accent-color: var(--blue); }
 

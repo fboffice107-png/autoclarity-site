@@ -25,7 +25,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="assets/img/favicon-32.png" />
   <link rel="apple-touch-icon" href="assets/img/icon-180.png" />
 
-  <link rel="stylesheet" href="assets/css/site.css?v=ac-prod-20260903-r2" />
+  <link rel="stylesheet" href="assets/css/site.css?v=ac-prod-20260903-r3" />
 
   <script type="application/ld+json">
   {
@@ -72,7 +72,7 @@
 <body data-page="home" data-fx-full>
   <a class="skip-link" href="#main">Skip to content</a>
 
-  <header class="nav" id="top">
+  <header class="nav home-nav" id="top">
     <div class="nav-inner">
       <a class="nav-brand" href="#top" aria-label="AutoClarity — back to top">
         <img src="assets/img/icon-64.png" alt="" width="32" height="32" />
@@ -81,22 +81,42 @@
       <nav class="nav-links" aria-label="Primary">
         <a href="#how-it-works">How it works</a>
         <a href="#report">Your report</a>
-        <a href="/las-vegas-pre-purchase-inspection/">Las Vegas PPI</a>
         <a href="#support">Support</a>
       </nav>
       <div class="nav-actions">
         <a
-          class="btn btn-service btn-nav nav-ppi-cta"
-          href="/las-vegas-pre-purchase-inspection/#request"
-          aria-label="Request a Las Vegas pre-purchase inspection"
+          class="btn btn-service btn-nav nav-service-cta"
+          href="/las-vegas-pre-purchase-inspection/"
+          aria-label="Las Vegas Pre-Purchase Inspection"
           data-analytics="ppi_cta_click"
-          data-step="home_nav"
+          data-step="service_discovery_home_nav"
         >
           <span class="status-dot" aria-hidden="true"></span>
-          <span class="nav-ppi-full">Request inspection</span>
-          <span class="nav-ppi-short" aria-hidden="true">Inspection</span>
+          <span>Las Vegas Pre-Purchase Inspection</span>
         </a>
         <a class="btn btn-primary btn-nav" href="https://apps.apple.com/us/app/autoclarity/id6761438602" target="_blank" rel="noopener noreferrer" aria-label="Download AutoClarity on the App Store">Get the app</a>
+        <details class="nav-mobile-menu">
+          <summary role="button" aria-label="Open navigation" aria-controls="home-mobile-nav">
+            <span class="nav-menu-icon" aria-hidden="true"><i></i><i></i><i></i></span>
+          </summary>
+          <div class="nav-mobile-panel" id="home-mobile-nav">
+            <nav class="nav-mobile-links" aria-label="Mobile primary">
+              <a href="#how-it-works">How it works</a>
+              <a href="#report">Your report</a>
+              <a href="#support">Support</a>
+            </nav>
+            <a
+              class="btn btn-service nav-mobile-service"
+              href="/las-vegas-pre-purchase-inspection/"
+              aria-label="Las Vegas Pre-Purchase Inspection"
+              data-analytics="ppi_cta_click"
+              data-step="service_discovery_home_menu"
+            >
+              <span class="status-dot" aria-hidden="true"></span>
+              <span>Las Vegas Pre-Purchase Inspection</span>
+            </a>
+          </div>
+        </details>
       </div>
     </div>
   </header>
@@ -254,7 +274,7 @@
           <div class="ppi-bridge-copy">
             <p class="ppi-availability">
               <span class="status-dot" aria-hidden="true"></span>
-              Las Vegas · Mobile service
+              Las Vegas · Mobile Pre-Purchase Inspections
             </p>
             <h2 id="ppi-home-title">Need a real technician to inspect the vehicle for you?</h2>
             <p class="ppi-summary">
@@ -273,11 +293,16 @@
             <div class="hero-ppi-actions">
               <a
                 class="btn btn-service btn-lg"
-                href="/las-vegas-pre-purchase-inspection/#request"
+                href="/las-vegas-pre-purchase-inspection/"
                 data-analytics="ppi_cta_click"
-                data-step="home_bridge"
+                data-step="service_discovery_home_bridge"
               >Request an Inspection</a>
-              <a class="btn btn-ghost btn-lg" href="/las-vegas-pre-purchase-inspection/#whats-inspected">See What’s Included</a>
+              <a
+                class="btn btn-ghost btn-lg"
+                href="/las-vegas-pre-purchase-inspection/"
+                data-analytics="ppi_cta_click"
+                data-step="service_discovery_home_scope"
+              >See What’s Included</a>
             </div>
             <p class="ppi-separation">A separately priced in-person service. You do not need the app to request one.</p>
           </div>
@@ -548,6 +573,6 @@
     </div>
   </footer>
 
-  <script src="assets/js/main.js?v=ac-prod-20260903-r2" defer></script>
+  <script src="assets/js/main.js?v=ac-prod-20260903-r3" defer></script>
 </body>
 </html>

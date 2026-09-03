@@ -28,8 +28,8 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/img/favicon-32.png" />
   <link rel="apple-touch-icon" href="/assets/img/icon-180.png" />
 
-  <link rel="stylesheet" href="/assets/css/site.css?v=ac-prod-20260903-r2" />
-  <link rel="stylesheet" href="/assets/css/ppi.css?v=ac-prod-20260903-r2" />
+  <link rel="stylesheet" href="/assets/css/site.css?v=ac-prod-20260903-r3" />
+  <link rel="stylesheet" href="/assets/css/ppi.css?v=ac-prod-20260903-r3" />
 
   <script type="application/ld+json">
   {
@@ -116,7 +116,7 @@
         <a href="#pricing">Pricing</a>
         <a href="#faq">FAQ</a>
       </nav>
-      <a class="btn btn-primary btn-nav" href="#request">Request an inspection</a>
+      <a class="btn btn-service btn-nav" href="#request" data-request-cta data-analytics="ppi_cta_click" data-step="request_intent_header">Request an Inspection</a>
     </div>
   </header>
 
@@ -134,8 +134,7 @@
         <div class="hero-copy">
           <p class="eyebrow">
             <span class="eyebrow-dot" aria-hidden="true"></span>
-            <span class="eyebrow-label-full">Las Vegas · Mobile pre-purchase inspections</span>
-            <span class="eyebrow-label-short" aria-hidden="true">Las Vegas · Pre-purchase inspections</span>
+            <span>Las Vegas · Mobile Pre-Purchase Inspections</span>
           </p>
           <h1>Buying a used car in Las&nbsp;Vegas? Know what you’re buying <em>before</em> you pay.</h1>
           <p class="lede">
@@ -146,7 +145,7 @@
           </p>
 
           <div class="hero-ctas">
-            <a class="btn btn-primary btn-lg" href="#request" data-analytics="ppi_founder_cta_click" data-step="hero">Request an Inspection</a>
+            <a class="btn btn-service btn-lg" href="#request" data-request-cta data-analytics="ppi_founder_cta_click" data-step="request_intent_hero">Request an Inspection</a>
             <a class="btn btn-ghost btn-lg" href="sample-report/" data-analytics="ppi_sample_report_view" data-step="hero">View a Sample Report</a>
           </div>
 
@@ -287,7 +286,7 @@
             <!-- Reserved founder-video slot: revealed by JS only when a real
                  video asset is configured (never an empty player). -->
             <div class="inspector-video" id="inspectorVideo" hidden></div>
-            <a class="btn btn-primary btn-lg" href="#request" data-analytics="ppi_founder_cta_click" data-step="inspector">Request an Inspection</a>
+            <a class="btn btn-service btn-lg" href="#request" data-request-cta data-analytics="ppi_founder_cta_click" data-step="request_intent_inspector">Request an Inspection</a>
           </div>
         </div>
       </div>
@@ -476,27 +475,29 @@
           <p class="section-sub">A few minutes now can save you thousands later. AutoClarity typically responds within 24 hours with scheduling details.</p>
         </header>
 
-        <!-- Waitlist variant (PPI_MODE=waitlist) -->
-        <div class="form-shell reveal" id="waitlistShell" hidden>
-          <h3>Booking opens soon</h3>
-          <p>Las Vegas appointments aren’t open quite yet. Join the launch list and you’ll be first to know.</p>
-          <form id="waitlistForm" novalidate>
-            <div class="field">
-              <label for="wlEmail">Email address</label>
-              <input id="wlEmail" name="email" type="email" autocomplete="email" required />
-            </div>
-            <div class="field">
-              <label for="wlZip">ZIP code <span class="opt">(optional)</span></label>
-              <input id="wlZip" name="zip" inputmode="numeric" autocomplete="postal-code" maxlength="10" />
-            </div>
-            <div class="turnstile-slot" data-turnstile></div>
-            <button class="btn btn-primary btn-lg" type="submit">Join the launch list</button>
-            <p class="form-status" role="status" aria-live="polite"></p>
-          </form>
-        </div>
+        <!-- Inert until runtime configuration explicitly reports waitlist mode. -->
+        <template id="waitlistTemplate">
+          <div class="form-shell reveal" id="waitlistShell">
+            <h3>Booking opens soon</h3>
+            <p>Las Vegas appointments aren’t open quite yet. Join the launch list and you’ll be first to know.</p>
+            <form id="waitlistForm" novalidate>
+              <div class="field">
+                <label for="wlEmail">Email address</label>
+                <input id="wlEmail" name="email" type="email" autocomplete="email" required />
+              </div>
+              <div class="field">
+                <label for="wlZip">ZIP code <span class="opt">(optional)</span></label>
+                <input id="wlZip" name="zip" inputmode="numeric" autocomplete="postal-code" maxlength="10" />
+              </div>
+              <div class="turnstile-slot" data-turnstile></div>
+              <button class="btn btn-service btn-lg" type="submit">Join the launch list</button>
+              <p class="form-status" role="status" aria-live="polite"></p>
+            </form>
+          </div>
+        </template>
 
         <!-- Full intake (PPI_MODE=request|live) -->
-        <div class="form-shell reveal" id="intakeShell">
+        <div class="form-shell reveal" id="intakeShell" hidden>
           <div class="form-progress" aria-hidden="true">
             <div class="form-progress-bar" id="progressBar"></div>
           </div>
@@ -846,16 +847,18 @@
           </div>
         </div>
 
-        <!-- Static fallback when the API isn't reachable. A mailto handoff is
-             never presented as a stored request. -->
-        <div class="form-shell reveal" id="fallbackShell" hidden>
-          <h3>Online requests are temporarily unavailable</h3>
-          <p>
-            Your answers stay saved on this device. Complete the form and choose Submit to
-            open a prepared email to <a href="mailto:support@getautoclarity.com?subject=Las%20Vegas%20PPI%20request">support@getautoclarity.com</a>.
-            AutoClarity does not receive the request until you send that email.
-          </p>
-        </div>
+        <!-- Inert until the runtime API is genuinely unavailable. The mailto
+             handoff is never presented as a stored request. -->
+        <template id="fallbackTemplate">
+          <div class="form-shell reveal" id="fallbackShell" role="status" aria-live="polite" tabindex="-1">
+            <h3>Online requests are temporarily unavailable</h3>
+            <p>
+              Your answers stay saved on this device. Complete the form and choose Submit to
+              open a prepared email to <a href="mailto:support@getautoclarity.com?subject=Las%20Vegas%20PPI%20request">support@getautoclarity.com</a>.
+              AutoClarity does not receive the request until you send that email.
+            </p>
+          </div>
+        </template>
       </div>
     </section>
 
@@ -946,7 +949,7 @@
       <div class="section-inner section-narrow reveal">
         <img class="final-icon" src="/assets/img/icon-180.png" alt="" width="88" height="88" />
         <h2 id="cta-title">Don’t gamble thousands on a vehicle you haven’t had independently inspected.</h2>
-        <a class="btn btn-primary btn-xl" href="#request" data-analytics="ppi_cta_click" data-step="final">Request Your Las Vegas PPI</a>
+        <a class="btn btn-service btn-xl" href="#request" data-request-cta data-analytics="ppi_cta_click" data-step="request_intent_final">Request an Inspection</a>
         <p class="hero-fineprint">Reviewed personally · Exact price before you pay · No repair upsell</p>
       </div>
     </section>
@@ -983,7 +986,7 @@
     </div>
   </footer>
 
-  <script src="/assets/js/main.js?v=ac-prod-20260903-r2" defer></script>
-  <script src="/assets/js/ppi-form.js?v=ac-prod-20260903-r2" defer></script>
+  <script src="/assets/js/main.js?v=ac-prod-20260903-r3" defer></script>
+  <script src="/assets/js/ppi-form.js?v=ac-prod-20260903-r3" defer></script>
 </body>
 </html>

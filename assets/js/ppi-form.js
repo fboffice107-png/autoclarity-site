@@ -16,8 +16,10 @@
   };
 
   var intakeShell = document.getElementById("intakeShell");
-  var waitlistShell = document.getElementById("waitlistShell");
-  var fallbackShell = document.getElementById("fallbackShell");
+  var waitlistTemplate = document.getElementById("waitlistTemplate");
+  var fallbackTemplate = document.getElementById("fallbackTemplate");
+  var waitlistShell = null;
+  var fallbackShell = null;
   var form = document.getElementById("intakeForm");
   if (!form) return;
 
@@ -31,6 +33,80 @@
   var submissionKey = "";
   var ATTRIBUTION_KEY = "ppi-attribution-v1";
   var attributionSource = getAttributionSource();
+
+  /* Dormant waitlist/outage copy lives in inert templates. Mount only the
+     state confirmed by runtime configuration, then remove both templates from
+     the rendered document so healthy live mode exposes no contradictory UI. */
+  function mountConditionalShell(template, fallbackAnchor) {
+    if (!template || !template.content || !template.content.firstElementChild) return null;
+    var node = template.content.firstElementChild.cloneNode(true);
+    var anchor = fallbackAnchor || (template.parentNode ? template : null);
+    if (!anchor || !anchor.parentNode) return null;
+    anchor.parentNode.insertBefore(node, anchor);
+    node.classList.add("in-view");
+    return node;
+  }
+
+  function removeRuntimeTemplates() {
+    if (waitlistTemplate && waitlistTemplate.parentNode) waitlistTemplate.remove();
+    if (fallbackTemplate && fallbackTemplate.parentNode) fallbackTemplate.remove();
+  }
+
+  function runtimeConfigIsValid(cfg) {
+    return Boolean(
+      cfg &&
+      ["live", "request", "waitlist"].indexOf(cfg.mode) !== -1 &&
+      typeof cfg.paymentsEnabled === "boolean" &&
+      typeof cfg.bookingEnabled === "boolean" &&
+      typeof cfg.uploadsEnabled === "boolean" &&
+      typeof cfg.turnstileSiteKey === "string" &&
+      cfg.turnstileSiteKey.length > 0 &&
+      cfg.pricing && Array.isArray(cfg.pricing.tiers) && cfg.pricing.tiers.length > 0 &&
+      cfg.travel && Array.isArray(cfg.travel.bands)
+    );
+  }
+
+  function applyWaitlistCopy() {
+    document.querySelectorAll("[data-request-cta]").forEach(function (cta) {
+      cta.textContent = "Join the Launch List";
+    });
+    var title = document.getElementById("request-title");
+    var subtitle = title && title.parentNode ? title.parentNode.querySelector(".section-sub") : null;
+    if (title) title.textContent = "Join the Las Vegas inspection launch list";
+    if (subtitle) subtitle.textContent = "Share your email and ZIP code to hear when Las Vegas appointments open.";
+  }
+
+  function activateWaitlistState(moveFocus) {
+    if (fallbackShell && fallbackShell.parentNode) fallbackShell.remove();
+    intakeShell.hidden = true;
+    if (!waitlistShell || !waitlistShell.isConnected) {
+      waitlistShell = mountConditionalShell(waitlistTemplate, intakeShell);
+    }
+    if (!waitlistShell) throw new Error("waitlist template unavailable");
+    applyWaitlistCopy();
+    setupWaitlist();
+    removeRuntimeTemplates();
+    if (moveFocus) {
+      var heading = waitlistShell.querySelector("h3");
+      if (heading) {
+        heading.setAttribute("tabindex", "-1");
+        heading.focus({ preventScroll: true });
+      }
+    }
+  }
+
+  function activateFallbackState() {
+    intakeShell.hidden = false;
+    if (waitlistShell && waitlistShell.parentNode) waitlistShell.remove();
+    if (!fallbackShell || !fallbackShell.isConnected) {
+      fallbackShell = mountConditionalShell(fallbackTemplate, intakeShell);
+    }
+    if (!fallbackShell) throw new Error("fallback template unavailable");
+    removeRuntimeTemplates();
+    if (!document.activeElement || document.activeElement === document.body) {
+      fallbackShell.focus({ preventScroll: true });
+    }
+  }
 
   /* Fetch JSON without leaving the form stuck forever. The caller still owns
      the important ambiguity: a timed-out submission may have reached the
@@ -75,7 +151,7 @@
     bar.id = "ppiSticky";
     bar.className = "ppi-sticky";
     bar.setAttribute("aria-label", "Quick actions");
-    var html = '<a class="ppi-sticky-primary" href="#request" data-analytics="ppi_cta_click" data-step="sticky">Request Inspection</a>';
+    var html = '<a class="ppi-sticky-primary" href="#request" data-request-cta data-analytics="ppi_cta_click" data-step="request_intent_sticky">Request an Inspection</a>';
     if (contact && contact.configured && contact.callEnabled) html += '<a class="ppi-sticky-secondary" href="tel:' + tel + '" data-analytics="ppi_call_click" data-step="sticky" aria-label="Call ' + escapeHtml(display) + '">Call</a>';
     if (contact && contact.configured && contact.smsEnabled) html += '<a class="ppi-sticky-secondary" href="sms:' + tel + '" data-analytics="ppi_text_click" data-step="sticky">Text</a>';
     html += '<button type="button" class="ppi-sticky-close" id="ppiStickyClose" aria-label="Dismiss">✕</button>';
@@ -187,19 +263,20 @@
     .then(function (response) {
       if (!response.ok) throw new Error("config " + response.status);
       var cfg = response.body;
+      if (!runtimeConfigIsValid(cfg)) throw new Error("invalid runtime config");
       runtime = cfg;
       applyPricing(cfg);
       applyTravel(cfg);
       applyScanLanguage(cfg);
       applyPaymentLanguage(cfg);
-      applyContact(cfg);
       applyReviews(cfg);
       if (cfg.mode === "waitlist") {
-        intakeShell.hidden = true;
-        waitlistShell.hidden = false;
-        setupWaitlist();
+        activateWaitlistState();
       } else {
+        intakeShell.hidden = false;
+        applyContact(cfg);
         setupForm();
+        removeRuntimeTemplates();
       }
       track("ppi_page_view");
     })
@@ -207,7 +284,7 @@
       // No API reachable (e.g. static hosting): keep the multi-step form usable
       // and offer a prefilled email handoff. This is never called a receipt.
       staticMode = true;
-      fallbackShell.hidden = false;
+      activateFallbackState();
       setupForm();
       track("ppi_page_view");
     });
@@ -314,13 +391,16 @@
   }
 
   /* ---------- Turnstile ---------- */
-  function loadTurnstile(cb) {
+  function loadTurnstile(cb, onError) {
     if (window.turnstile) return cb();
     var script = document.createElement("script");
     script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
     script.async = true;
     script.onload = cb;
-    script.onerror = function () { setStatus("Human-verification service failed to load. Please refresh and try again."); };
+    script.onerror = function () {
+      if (onError) onError();
+      else setStatus("Human-verification service failed to load. Please refresh and try again.");
+    };
     document.head.appendChild(script);
   }
 
@@ -339,8 +419,12 @@
   /* ---------- waitlist ---------- */
   function setupWaitlist() {
     var wlForm = document.getElementById("waitlistForm");
+    if (!wlForm || wlForm.dataset.waitlistReady === "1") return;
+    wlForm.dataset.waitlistReady = "1";
     var slot = waitlistShell.querySelector("[data-turnstile]");
-    loadTurnstile(function () { renderTurnstile(slot); });
+    loadTurnstile(function () { renderTurnstile(slot); }, function () {
+      wlForm.querySelector(".form-status").textContent = "Human-verification service failed to load. Please refresh and try again.";
+    });
     wlForm.addEventListener("submit", function (e) {
       e.preventDefault();
       var status = wlForm.querySelector(".form-status");
@@ -389,7 +473,7 @@
     showStep(current, true);
 
     form.addEventListener("input", function () {
-      if (!formStarted) { formStarted = true; track("ppi_form_started"); }
+      if (!formStarted) { formStarted = true; track("ppi_form_started", "request_intake"); }
       saveDraft();
     });
 
@@ -913,6 +997,13 @@
           setStatus("Please correct the highlighted fields. Your other answers are still saved.");
           return;
         }
+        if (r.status === 409 && r.body && r.body.error && r.body.error.code === "waitlist_mode") {
+          resetTurnstile();
+          activateWaitlistState(true);
+          var waitlistStatus = waitlistShell.querySelector(".form-status");
+          waitlistStatus.textContent = r.body.error.message || "Inspection requests are not open right now. Join the launch list instead.";
+          return;
+        }
         setStatus(submissionErrorMessage(r));
         resetTurnstile();
       })
@@ -962,7 +1053,7 @@
     var subject = "Las Vegas PPI request — " + [val("year"), val("make"), val("model")].filter(Boolean).join(" ");
     var href = "mailto:" + support + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(lines.join("\n"));
     saveDraft();
-    fallbackShell.hidden = false;
+    if (!fallbackShell || !fallbackShell.isConnected) activateFallbackState();
     setStatus("Opening a prepared email. Your request has not been received yet — review it and choose Send in your email app. This draft remains saved here.");
     window.location.href = href;
   }

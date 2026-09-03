@@ -11,6 +11,24 @@ import adminScript from '../../assets/js/ppi-admin.js?raw';
 import sitemap from '../../sitemap.xml?raw';
 import privacy from '../../privacy.html?raw';
 import headers from '../../_headers?raw';
+import eventsApi from '../../functions/api/ppi/events.ts?raw';
+
+type NodeFs = { readFileSync(path: URL, encoding: 'utf8'): string };
+type NodeProcess = { getBuiltinModule(name: 'fs'): NodeFs };
+const nodeProcess = (globalThis as unknown as { process: NodeProcess }).process;
+const nodeFs = nodeProcess.getBuiltinModule('fs');
+const ppiCss = nodeFs.readFileSync(new URL('../../assets/css/ppi.css', import.meta.url), 'utf8');
+
+type AnchorParts = { attributes: string; content: string };
+
+function requestCtasIn(source: string): AnchorParts[] {
+  return [...source.matchAll(/<a\b([^>]*\bdata-request-cta\b[^>]*)>([\s\S]*?)<\/a>/gu)]
+    .map((match) => ({ attributes: match[1] ?? '', content: match[2] ?? '' }));
+}
+
+function templateContents(id: string): string {
+  return page.match(new RegExp(`<template id="${id}">([\\s\\S]*?)<\\/template>`, 'u'))?.[1] ?? '';
+}
 
 describe('PPI frontend conversion safeguards', () => {
   it('uses one canonical trailing-slash URL and valid local-service schema', () => {
@@ -37,6 +55,85 @@ describe('PPI frontend conversion safeguards', () => {
     expect(service.offers).toBeUndefined();
     expect(service.description).toContain('Published tier amounts are starting prices');
     expect(page).not.toMatch(/"priceSpecification"\s*:/u);
+  });
+
+  it('keeps every PPI request CTA green, form-bound, and intent-tagged', () => {
+    const requestCtas = requestCtasIn(`${page}\n${script}`);
+    const intentSteps = requestCtas.map(({ attributes }) => (
+      attributes.match(/\bdata-step="([^"]+)"/u)?.[1] ?? ''
+    ));
+
+    expect(requestCtas).toHaveLength(5);
+    expect(new Set(intentSteps)).toEqual(new Set([
+      'request_intent_header',
+      'request_intent_hero',
+      'request_intent_inspector',
+      'request_intent_final',
+      'request_intent_sticky',
+    ]));
+
+    for (const { attributes, content } of requestCtas) {
+      expect(attributes).toContain('href="#request"');
+      expect(attributes).toMatch(/\bdata-analytics="ppi_(?:cta|founder_cta)_click"/u);
+      expect(attributes).toMatch(/\bdata-step="request_intent_[a-z_]+"/u);
+      expect(attributes).not.toMatch(/\bbtn-primary\b/u);
+      expect(attributes).toMatch(/\b(?:btn-service|ppi-sticky-primary)\b/u);
+      expect(content.trim()).toBe('Request an Inspection');
+    }
+
+    const stickyStyle = ppiCss.match(/\.ppi-sticky-primary\s*\{([^}]*)\}/u)?.[1] ?? '';
+    expect(stickyStyle).toMatch(/background:\s*linear-gradient\([^;]*var\(--green\)/u);
+    expect(stickyStyle).toContain('color: #03140d;');
+  });
+
+  it('keeps conditional waitlist and outage shells inert outside their selected runtime state', () => {
+    const waitlist = templateContents('waitlistTemplate');
+    const fallback = templateContents('fallbackTemplate');
+    const renderedPage = page.replace(/<template\b[\s\S]*?<\/template>/gu, '');
+
+    expect(waitlist).toContain('id="waitlistShell"');
+    expect(waitlist).toContain('id="waitlistForm"');
+    expect(fallback).toContain('id="fallbackShell"');
+    expect(renderedPage).not.toContain('id="waitlistShell"');
+    expect(renderedPage).not.toContain('id="fallbackShell"');
+    expect(renderedPage).toContain('id="intakeShell" hidden');
+
+    const mountState = script.slice(
+      script.indexOf('function mountConditionalShell'),
+      script.indexOf('function requestJson'),
+    );
+    expect(mountState).toContain('template.content.firstElementChild.cloneNode(true)');
+    expect(mountState).toContain('intakeShell.hidden = true');
+    expect(mountState).toContain('waitlistShell = mountConditionalShell(waitlistTemplate, intakeShell)');
+    expect(mountState).toContain('fallbackShell = mountConditionalShell(fallbackTemplate, intakeShell)');
+    expect(mountState).toContain('heading.focus({ preventScroll: true })');
+    expect(mountState).toContain('function removeRuntimeTemplates()');
+
+    const runtimeBranch = script.slice(
+      script.indexOf('/* ---------- runtime config ---------- */'),
+      script.indexOf('function money'),
+    );
+    expect(runtimeBranch).toContain('if (!runtimeConfigIsValid(cfg)) throw new Error("invalid runtime config")');
+    const liveOrRequestBranch = runtimeBranch.match(
+      /if \(cfg\.mode === "waitlist"\) \{\s*activateWaitlistState\(\);\s*\} else \{([\s\S]*?)\n\s*\}/u,
+    )?.[1] ?? '';
+    expect(liveOrRequestBranch).toContain('applyContact(cfg)');
+    expect(liveOrRequestBranch).toContain('setupForm()');
+    expect(liveOrRequestBranch).toContain('removeRuntimeTemplates()');
+    expect(script).toContain('if (r.status === 409 && r.body && r.body.error && r.body.error.code === "waitlist_mode")');
+    expect(script).toContain('activateWaitlistState();');
+  });
+
+  it('records the first request-form interaction with accepted start metadata', () => {
+    const formStart = script.slice(
+      script.indexOf('form.addEventListener("input"'),
+      script.indexOf('backBtn.addEventListener', script.indexOf('form.addEventListener("input"')),
+    );
+
+    expect(formStart).toContain('if (!formStarted)');
+    expect(formStart).toContain('track("ppi_form_started", "request_intake")');
+    expect(script.match(/track\("ppi_form_started", "request_intake"\)/gu)).toHaveLength(1);
+    expect(eventsApi).toContain("'ppi_form_started'");
   });
 
   it('discloses replacement-vehicle review and price adjustments consistently', () => {

@@ -28,7 +28,7 @@
 .ppi-hero { padding-bottom: clamp(44px, 5vw, 64px); }
 .ppi-hero .hero-copy { max-width: 760px; }
 .ppi-fineprint { max-width: 62ch; }
-.eyebrow-label-short { display: none; }
+.ppi-hero .eyebrow { max-width: 100%; white-space: normal; }
 
 /* The PPI hero is intentionally information-rich and can exceed one screen.
    Keep its cue at the first-view boundary instead of the section boundary. */
@@ -36,11 +36,6 @@
   top: calc(100vh - 62px);
   top: calc(100svh - 62px);
   bottom: auto;
-}
-
-@media (max-width: 359px) {
-  .eyebrow-label-full { display: none; }
-  .eyebrow-label-short { display: inline; }
 }
 
 .verdict-strip {
@@ -872,9 +867,13 @@ fieldset.form-step legend {
 .ppi-sticky-primary {
   flex: 1;
   display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(180deg, #4079ff, #2456d8);
-  color: #fff; font-weight: 750; font-size: 15px;
+  background: linear-gradient(180deg, #65e9ab 0%, var(--green) 58%, #28b979 100%);
+  color: #03140d; font-weight: 750; font-size: 15px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.42) inset, 0 10px 24px rgba(33, 168, 104, 0.25);
   border-radius: 11px; text-decoration: none; padding: 12px 14px;
+}
+.ppi-sticky-primary:hover {
+  background: linear-gradient(180deg, #7aefb8 0%, #49dc99 58%, #31c584 100%);
 }
 .ppi-sticky-secondary {
   display: flex; align-items: center; justify-content: center;

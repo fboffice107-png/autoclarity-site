@@ -28,6 +28,34 @@
   window.addEventListener("scroll", onScroll, { passive: true });
   onScroll();
 
+  /* ---------- Compact homepage navigation ---------- */
+  var mobileMenu = document.querySelector(".nav-mobile-menu");
+  if (mobileMenu) {
+    var mobileMenuSummary = mobileMenu.querySelector("summary");
+
+    function syncMobileMenuLabel() {
+      if (!mobileMenuSummary) return;
+      var open = mobileMenu.open;
+      mobileMenuSummary.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
+      mobileMenuSummary.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+
+    mobileMenu.addEventListener("toggle", syncMobileMenuLabel);
+    mobileMenu.querySelectorAll("a").forEach(function (link) {
+      link.addEventListener("click", function () { mobileMenu.open = false; });
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && mobileMenu.open) {
+        mobileMenu.open = false;
+        if (mobileMenuSummary) mobileMenuSummary.focus();
+      }
+    });
+    document.addEventListener("pointerdown", function (event) {
+      if (mobileMenu.open && !mobileMenu.contains(event.target)) mobileMenu.open = false;
+    });
+    syncMobileMenuLabel();
+  }
+
   /* ---------- Scroll reveals ---------- */
   var reveals = document.querySelectorAll(".reveal");
   if ("IntersectionObserver" in window && !reducedMotion.matches) {

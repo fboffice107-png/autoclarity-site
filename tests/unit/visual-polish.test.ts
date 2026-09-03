@@ -14,6 +14,27 @@ type NodeProcess = { getBuiltinModule(name: 'fs'): NodeFs };
 const nodeProcess = (globalThis as unknown as { process: NodeProcess }).process;
 const nodeFs = nodeProcess.getBuiltinModule('fs');
 const siteCss = nodeFs.readFileSync(new URL('../../assets/css/site.css', import.meta.url), 'utf8');
+const ppiPath = '/las-vegas-pre-purchase-inspection/';
+
+type AnchorParts = { attributes: string; content: string };
+
+function anchorsIn(source: string): AnchorParts[] {
+  return [...source.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gu)]
+    .map((match) => ({ attributes: match[1] ?? '', content: match[2] ?? '' }));
+}
+
+function anchorWithClass(source: string, className: string): AnchorParts {
+  const anchor = anchorsIn(source).find(({ attributes }) => {
+    const classes = attributes.match(/\bclass="([^"]*)"/u)?.[1]?.split(/\s+/u) ?? [];
+    return classes.includes(className);
+  });
+  expect(anchor, `missing anchor with class ${className}`).toBeDefined();
+  return anchor!;
+}
+
+function markupText(source: string): string {
+  return source.replace(/<[^>]+>/gu, ' ').replace(/\s+/gu, ' ').trim();
+}
 
 function openingBodyTag(source: string): string {
   return source.match(/<body\b[^>]*>/u)?.[0] ?? '';
@@ -43,9 +64,55 @@ describe('premium visual and interaction safeguards', () => {
     ].map((path) => nodeFs.readFileSync(new URL(path, import.meta.url), 'utf8'));
 
     for (const source of sources) {
-      expect(source).toContain('ac-prod-20260903-r2');
-      expect(source).not.toContain('ac-prod-20260901-r1');
+      const fingerprints = source.match(/ac-prod-\d{8}-r\d+/gu) ?? [];
+      expect(fingerprints.length).toBeGreaterThan(0);
+      expect(new Set(fingerprints)).toEqual(new Set(['ac-prod-20260903-r3']));
     }
+  });
+
+  it('keeps the homepage desktop navigation focused and ordered', () => {
+    const desktopNav = homePage.match(/<nav class="nav-links" aria-label="Primary">([\s\S]*?)<\/nav>/u)?.[1] ?? '';
+    const labels = anchorsIn(desktopNav).map(({ content }) => markupText(content));
+
+    expect(labels).toEqual(['How it works', 'Your report', 'Support']);
+    expect(desktopNav).not.toContain('Las Vegas PPI');
+  });
+
+  it('uses the exact canonical service CTA in desktop and mobile navigation', () => {
+    for (const className of ['nav-service-cta', 'nav-mobile-service']) {
+      const anchor = anchorWithClass(homePage, className);
+      expect(anchor.attributes).toContain(`href="${ppiPath}"`);
+      expect(anchor.attributes).toContain('aria-label="Las Vegas Pre-Purchase Inspection"');
+      expect(anchor.attributes).not.toContain('#');
+      expect(markupText(anchor.content)).toBe('Las Vegas Pre-Purchase Inspection');
+      expect(anchor.content).toMatch(/<span class="status-dot" aria-hidden="true"><\/span>/u);
+      expect(anchor.attributes).toContain('data-analytics="ppi_cta_click"');
+    }
+
+    const mobileMenu = homePage.match(/<details class="nav-mobile-menu">([\s\S]*?)<\/details>/u)?.[1] ?? '';
+    const mobileLinks = mobileMenu.match(/<nav class="nav-mobile-links"[^>]*>([\s\S]*?)<\/nav>/u)?.[1] ?? '';
+    expect(mobileMenu).toContain('<summary role="button" aria-label="Open navigation" aria-controls="home-mobile-nav">');
+    expect(mainScript).toContain('mobileMenuSummary.setAttribute("aria-expanded", open ? "true" : "false")');
+    expect(mainScript).toContain('if (event.key === "Escape" && mobileMenu.open)');
+    expect(anchorsIn(mobileLinks).map(({ content }) => markupText(content))).toEqual([
+      'How it works',
+      'Your report',
+      'Support',
+    ]);
+    expect(mobileMenu).toContain('data-step="service_discovery_home_menu"');
+    expect(siteCss).toMatch(
+      /@media \(max-width: 1000px\)[\s\S]*?\.home-nav \.nav-service-cta\s*\{\s*display:\s*none;\s*\}[\s\S]*?\.home-nav \.nav-mobile-menu\s*\{\s*display:\s*block;\s*\}/u,
+    );
+  });
+
+  it('gives both navigation service markers a scoped bright-green treatment', () => {
+    const scopedDot = siteCss.match(
+      /\.nav-service-cta \.status-dot,\s*\.nav-mobile-service \.status-dot\s*\{([^}]*)\}/u,
+    )?.[1] ?? '';
+
+    expect(scopedDot).toContain('background: #dcff72;');
+    expect(scopedDot).toContain('border: 1px solid rgba(3, 20, 13, 0.62);');
+    expect(scopedDot).toMatch(/box-shadow:[\s\S]*rgba\(220, 255, 114, 0\.72\);/u);
   });
 
   it('limits the full-page ambient treatment to public marketing pages', () => {
@@ -68,14 +135,19 @@ describe('premium visual and interaction safeguards', () => {
     expect(bridge).toContain('id="ppi"');
     expect(bridge).toContain('aria-labelledby="ppi-home-title"');
     expect(bridge).toContain('id="ppi-home-title"');
-    expect(bridge).toContain('href="/las-vegas-pre-purchase-inspection/#request"');
+    expect(bridge).toContain('Las Vegas · Mobile Pre-Purchase Inspections');
     expect(bridge).toContain('data-analytics="ppi_cta_click"');
-    expect(bridge).toContain('data-step="home_bridge"');
-    expect(bridge).toContain('href="/las-vegas-pre-purchase-inspection/#whats-inspected"');
+    expect(bridge).toContain('data-step="service_discovery_home_bridge"');
+    expect(bridge).toContain('data-step="service_discovery_home_scope"');
+    expect(anchorsIn(bridge).map(({ attributes }) => attributes.match(/\bhref="([^"]+)"/u)?.[1])).toEqual([
+      ppiPath,
+      ppiPath,
+    ]);
+    expect(bridge).not.toMatch(/href="[^"]*#(?:request|whats-inspected)"/u);
   });
 
   it('states the PPI service explicitly and keeps every scroll cue target valid', () => {
-    expect(ppiPage).toContain('Las Vegas · Mobile pre-purchase inspections');
+    expect(ppiPage).toContain('Las Vegas · Mobile Pre-Purchase Inspections');
     expectScrollCueTargetsToExist(homePage);
     expectScrollCueTargetsToExist(ppiPage);
   });

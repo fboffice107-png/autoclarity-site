@@ -10,6 +10,7 @@ import mainScript from '../../assets/js/main.js?raw';
 import adminScript from '../../assets/js/ppi-admin.js?raw';
 import sitemap from '../../sitemap.xml?raw';
 import privacy from '../../privacy.html?raw';
+import headers from '../../_headers?raw';
 
 describe('PPI frontend conversion safeguards', () => {
   it('uses one canonical trailing-slash URL and valid local-service schema', () => {
@@ -23,11 +24,38 @@ describe('PPI frontend conversion safeguards', () => {
 
     const blocks = [...page.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/gu)];
     expect(blocks).toHaveLength(3);
-    const service = JSON.parse(blocks[0]![1]!) as { url: string; areaServed: Array<{ name: string }> };
+    const service = JSON.parse(blocks[0]![1]!) as {
+      url: string;
+      areaServed: Array<{ name: string }>;
+      offers?: unknown;
+      description: string;
+    };
     expect(service.url).toBe('https://getautoclarity.com/las-vegas-pre-purchase-inspection/');
     expect(service.areaServed.map((place) => place.name)).toEqual(
       expect.arrayContaining(['Las Vegas', 'North Las Vegas', 'Henderson', 'Boulder City', 'Clark County']),
     );
+    expect(service.offers).toBeUndefined();
+    expect(service.description).toContain('Published tier amounts are starting prices');
+    expect(page).not.toMatch(/"priceSpecification"\s*:/u);
+  });
+
+  it('discloses replacement-vehicle review and price adjustments consistently', () => {
+    expect(page).toContain('one replacement vehicle with no transfer fee');
+    expect(page).toContain('re-reviews the replacement vehicle, location, scope and seller access');
+    expect(page).toContain('if it is lower, AutoClarity refunds the difference');
+    expect(page).toContain('your existing payment transfers with no additional charge');
+    expect(page).toContain('A replacement vehicle is re-reviewed and repriced, with any difference collected or refunded');
+
+    expect(portalScript).toContain('A transfer to a replacement vehicle has no transfer fee');
+    expect(portalScript).toContain('you pay any increase before the replacement booking is confirmed');
+    expect(portalScript).toContain('receive a refund of any decrease');
+    expect(portalScript).toContain('carry the same payment forward when the approved totals match');
+  });
+
+  it('applies a first-party Content Security Policy to both legal pages', () => {
+    for (const route of ['/terms', '/privacy']) {
+      expect(headers).toMatch(new RegExp(`${route}\\n\\s+Content-Security-Policy: default-src 'self'`, 'u'));
+    }
   });
 
   it('renders a safe, exact confirmation receipt only after persistence', () => {

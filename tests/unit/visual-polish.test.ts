@@ -28,6 +28,26 @@ function expectScrollCueTargetsToExist(source: string): void {
 }
 
 describe('premium visual and interaction safeguards', () => {
+  it('uses one production build fingerprint across cache keys and response headers', () => {
+    const sources = [
+      '../../404.html',
+      '../../_headers',
+      '../../functions/_middleware.ts',
+      '../../index.html',
+      '../../las-vegas-pre-purchase-inspection/index.html',
+      '../../las-vegas-pre-purchase-inspection/sample-report/index.html',
+      '../../ppi/admin/index.html',
+      '../../ppi/portal/index.html',
+      '../../privacy.html',
+      '../../terms.html',
+    ].map((path) => nodeFs.readFileSync(new URL(path, import.meta.url), 'utf8'));
+
+    for (const source of sources) {
+      expect(source).toContain('ac-prod-20260903-r2');
+      expect(source).not.toContain('ac-prod-20260901-r1');
+    }
+  });
+
   it('limits the full-page ambient treatment to public marketing pages', () => {
     expect(openingBodyTag(homePage)).toContain('data-fx-full');
     expect(openingBodyTag(ppiPage)).toContain('data-fx-full');

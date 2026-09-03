@@ -10,7 +10,7 @@
 import type { Env } from './lib/types.ts';
 import { requireAdmin } from './lib/auth.ts';
 
-const BUILD_ID = 'ac-prod-20260901-r1';
+const BUILD_ID = 'ac-prod-20260903-r2';
 
 // Anything matching these is repo scaffolding, never website content. This
 // middleware runs before static-asset serving on both `wrangler pages dev`

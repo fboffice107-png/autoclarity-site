@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error node:sqlite is intentionally outside the Worker type surface.
 import { DatabaseSync } from 'node:sqlite';
 import initialMigration from '../../migrations/0001_init.sql?raw';
+import agreementImmutabilityMigration from '../../migrations/0007_agreement_version_immutability.sql?raw';
 import {
   AGREEMENT_DOCS,
   AgreementIntegrityError,
@@ -76,6 +77,46 @@ function agreementDatabase(): { sqlite: InstanceType<typeof DatabaseSync>; db: D
 }
 
 describe('agreement source seeding', () => {
+  it('publishes cancellation policy v3 while preserving immutable v2 evidence', async () => {
+    const policy = AGREEMENT_DOCS.find((doc) => doc.docKey === 'cancellation_policy');
+    expect(policy).toBeDefined();
+    expect(policy?.version).toBe(3);
+    expect(policy?.bodyMd).toContain('one replacement vehicle with no transfer fee');
+    expect(policy?.bodyMd).toContain('review the replacement vehicle, location, requested scope and seller access');
+    expect(policy?.bodyMd).toContain('pay the difference before the replacement booking is confirmed');
+    expect(policy?.bodyMd).toContain('AutoClarity refunds the difference');
+    expect(policy?.bodyMd).toContain('existing payment transfers with no additional charge');
+    expect(AGREEMENT_DOCS.filter((doc) => doc.docKey !== 'cancellation_policy').every((doc) => doc.version === 2)).toBe(true);
+
+    const { sqlite, db } = agreementDatabase();
+    try {
+      const historicalBody = 'Historical cancellation policy version two';
+      sqlite.prepare(
+        `INSERT INTO agreement_versions (id, doc_key, version, title, body_md, sha256, created_at)
+         VALUES ('ag_cancellation_policy_v2', 'cancellation_policy', 2, 'Cancellation and Refund Policy', ?, 'historical-v2-sha', '2029-01-01T00:00:00.000Z')`,
+      ).run(historicalBody);
+      sqlite.exec(agreementImmutabilityMigration);
+
+      await ensureAgreements(db);
+
+      expect(sqlite.prepare(
+        `SELECT body_md FROM agreement_versions WHERE doc_key = 'cancellation_policy' AND version = 2`,
+      ).get()).toEqual({ body_md: historicalBody });
+      expect(sqlite.prepare(
+        `SELECT id, version, body_md FROM agreement_versions WHERE doc_key = 'cancellation_policy' AND version = 3`,
+      ).get()).toEqual({
+        id: 'ag_cancellation_policy_v3',
+        version: 3,
+        body_md: policy?.bodyMd,
+      });
+      expect(() => sqlite.prepare(
+        `UPDATE agreement_versions SET body_md = 'changed' WHERE doc_key = 'cancellation_policy' AND version = 2`,
+      ).run()).toThrow(/agreement versions are immutable/u);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('fills every missing explicit source version when the table is partially populated', async () => {
     const { sqlite, db } = agreementDatabase();
     try {

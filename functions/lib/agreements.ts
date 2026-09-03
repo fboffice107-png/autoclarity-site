@@ -70,13 +70,13 @@ The amount due is the exact total in the AutoClarity-approved quote shown in you
   },
   {
     docKey: 'cancellation_policy',
-    version: 2,
+    version: 3,
     title: 'Cancellation and Refund Policy',
     bodyMd: `- **48 hours or more before the appointment:** full refund or free rescheduling.
 - **At least 24 hours but less than 48 hours:** one free reschedule.
 - **Less than 24 hours:** generally nonrefundable; a transferable service credit may be offered at AutoClarity's discretion.
-- **The vehicle sells before the appointment:** one free transfer to a different vehicle.
-- **The seller refuses access before travel begins:** free reschedule or vehicle transfer.
+- **The vehicle sells before the appointment:** you may transfer the inspection to one replacement vehicle with no transfer fee. AutoClarity must review the replacement vehicle, location, requested scope and seller access and issue an updated approved quote. If the updated total is higher, you must pay the difference before the replacement booking is confirmed. If it is lower, AutoClarity refunds the difference. If it is the same, your existing payment transfers with no additional charge.
+- **The seller refuses access before travel begins:** free rescheduling or one vehicle transfer with no transfer fee. A replacement vehicle is reviewed, repriced and adjusted under the replacement-vehicle terms above.
 - **The seller refuses access after the technician's travel has begun:** any separately disclosed travel or mobile-service charge in the approved quote may be retained.
 - **AutoClarity cancels:** full refund or priority rescheduling — your choice.
 

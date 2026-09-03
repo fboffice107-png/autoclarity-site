@@ -275,7 +275,7 @@
     if (v.status === "awaiting_payment" && !needsCurrentAgreements && currentQuoteAndHold && v.paymentsEnabled) {
       html += '<section class="portal-card"><h2>Payment</h2>' +
         '<p style="color:var(--text-2);font-size:15px;">Stripe will charge the exact server-approved quote total shown above. Your appointment is confirmed only after payment succeeds.</p>' +
-        '<p class="field-hint">The cancellation, rescheduling, vehicle-transfer, mobile-service, and refund terms you accepted apply to this booking.</p>' +
+        '<p class="field-hint">The cancellation, rescheduling, vehicle-transfer, mobile-service, and refund terms you accepted apply to this booking. A transfer to a replacement vehicle has no transfer fee, but AutoClarity re-reviews and re-quotes that vehicle: you pay any increase before the replacement booking is confirmed, receive a refund of any decrease, or carry the same payment forward when the approved totals match.</p>' +
         '<button class="btn btn-primary btn-lg" id="checkoutBtn" style="width:100%;margin-top:14px;">Pay exact quote securely with Stripe' +
         (v.quote ? " — " + money(v.quote.totalCents) : "") + "</button>" +
         '<p class="form-status" id="checkoutStatus" role="status" aria-live="polite"></p></section>';

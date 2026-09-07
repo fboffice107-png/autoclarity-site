@@ -38,11 +38,69 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString();
   const revenue = await db
     .prepare(
+      `SELECT COALESCE(SUM(amount_cents), 0) AS gross_cents,
+              COALESCE(SUM(refunded_cents), 0) AS refunded_cents,
+              COALESCE(SUM(amount_cents - refunded_cents), 0) AS net_cents,
+              COUNT(*) AS n
+       FROM payments
+       WHERE status IN ('succeeded','partially_refunded','refunded') AND created_at > ?`,
+    )
+    .bind(thirtyDaysAgo)
+    .first<{ gross_cents: number; refunded_cents: number; net_cents: number; n: number }>();
+
+  // Disputes are excluded from recognized net revenue and surfaced separately.
+  const disputed = await db
+    .prepare(
       `SELECT COALESCE(SUM(amount_cents - refunded_cents), 0) AS cents, COUNT(*) AS n
-       FROM payments WHERE status IN ('succeeded','partially_refunded') AND created_at > ?`,
+       FROM payments WHERE status = 'disputed' AND created_at > ?`,
     )
     .bind(thirtyDaysAgo)
     .first<{ cents: number; n: number }>();
+
+  const authoritativeFunnel = await db
+    .prepare(
+      `SELECT
+        (SELECT COUNT(*) FROM ppi_requests
+          WHERE deleted_at IS NULL AND created_at > ?) AS requests_saved,
+        (SELECT COUNT(DISTINCT request_id) FROM status_history
+          WHERE to_status = 'quote_sent' AND created_at > ?) AS quotes_sent,
+        (SELECT COUNT(DISTINCT request_id) FROM payments
+          WHERE created_at > ?) AS checkouts_created,
+        (SELECT COUNT(DISTINCT request_id) FROM payments
+          WHERE status IN ('succeeded','partially_refunded','refunded') AND created_at > ?) AS payments_succeeded,
+        (SELECT COUNT(*) FROM bookings
+          WHERE confirmed_at IS NOT NULL AND confirmed_at > ?) AS bookings_confirmed,
+        (SELECT COUNT(DISTINCT request_id) FROM status_history
+          WHERE to_status = 'completed' AND created_at > ?) AS completed`,
+    )
+    .bind(thirtyDaysAgo, thirtyDaysAgo, thirtyDaysAgo, thirtyDaysAgo, thirtyDaysAgo, thirtyDaysAgo)
+    .first<Record<string, number>>();
+
+  const attribution = await db
+    .prepare(
+      `WITH request_revenue AS (
+         SELECT request_id,
+                COALESCE(SUM(CASE WHEN status IN ('succeeded','partially_refunded','refunded') THEN amount_cents ELSE 0 END), 0) AS gross_cents,
+                COALESCE(SUM(CASE WHEN status IN ('succeeded','partially_refunded','refunded') THEN refunded_cents ELSE 0 END), 0) AS refunded_cents,
+                MAX(CASE WHEN status = 'disputed' THEN 1 ELSE 0 END) AS disputed
+         FROM payments GROUP BY request_id
+       )
+       SELECT COALESCE(NULLIF(r.attribution_source, ''), 'ppi_unknown') AS source,
+              COUNT(*) AS requests,
+              COALESCE(SUM(CASE WHEN rr.gross_cents > 0 THEN 1 ELSE 0 END), 0) AS paid_requests,
+              COALESCE(SUM(CASE WHEN r.status = 'completed' THEN 1 ELSE 0 END), 0) AS completed,
+              COALESCE(SUM(rr.gross_cents), 0) AS gross_cents,
+              COALESCE(SUM(rr.refunded_cents), 0) AS refunded_cents,
+              COALESCE(SUM(rr.gross_cents - rr.refunded_cents), 0) AS net_cents,
+              COALESCE(SUM(rr.disputed), 0) AS disputed_requests
+       FROM ppi_requests r
+       LEFT JOIN request_revenue rr ON rr.request_id = r.id
+       WHERE r.deleted_at IS NULL AND r.created_at > ?
+       GROUP BY COALESCE(NULLIF(r.attribution_source, ''), 'ppi_unknown')
+       ORDER BY net_cents DESC, requests DESC`,
+    )
+    .bind(thirtyDaysAgo)
+    .all<Record<string, unknown>>();
 
   const funnel = await db
     .prepare(`SELECT event, COUNT(*) AS n FROM analytics_events WHERE created_at > ? GROUP BY event`)
@@ -128,7 +186,16 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   return json({
     statusCounts: statusCounts.results ?? [],
     upcoming: upcoming.results ?? [],
-    revenue30d: { cents: revenue?.cents ?? 0, payments: revenue?.n ?? 0 },
+    revenue30d: {
+      grossCents: revenue?.gross_cents ?? 0,
+      refundedCents: revenue?.refunded_cents ?? 0,
+      netCents: revenue?.net_cents ?? 0,
+      payments: revenue?.n ?? 0,
+      disputedPayments: disputed?.n ?? 0,
+      disputedCents: disputed?.cents ?? 0,
+    },
+    authoritativeFunnel30d: authoritativeFunnel ?? {},
+    attribution30d: attribution.results ?? [],
     funnel30d: funnel.results ?? [],
     activity: activity.results ?? [],
     // Count affected requests, not raw audit/message rows, so one failed

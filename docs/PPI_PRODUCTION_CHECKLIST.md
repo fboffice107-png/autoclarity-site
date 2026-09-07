@@ -1,15 +1,15 @@
 # Production Operations Checklist — Las Vegas PPI
 
-The request-mode PPI funnel is already live on Cloudflare Pages and production
-payments remain disabled. Use this checklist for production releases and for
-any later decision to enable Stripe. Technical readiness does NOT imply legal
+The PPI funnel observed 2026-09-07 is live on Cloudflare Pages with runtime
+payment and booking flags enabled. That observation is not evidence of owner
+approval. Use this checklist for production releases and any payment-setting
+change. Technical readiness does NOT imply legal
 or insurance readiness — those are real-world facts only the owner can confirm.
 
-> **RELEASE BLOCKER:** the currently published privacy policy and terms are
-> app-oriented and do not cover the PPI service; their professional-service
-> framing also conflicts with the PPI offer. Do not deploy this release until
-> the owner and counsel approve and publish the required PPI privacy and service
-> terms. Engineering must not invent or publish substitute legal language.
+> **RELEASE BLOCKER:** the privacy policy and terms observed 2026-09-07 contain
+> both app and PPI sections, but owner/counsel approval, licensing, and insurance
+> are not evidenced in the repository. Record the approvals below before
+> deployment. Engineering must not infer legal readiness from published text.
 
 ## Business & legal (owner + counsel)
 
@@ -55,6 +55,8 @@ or insurance readiness — those are real-world facts only the owner can confirm
       retry; stored PPI configuration JSON validated; both buffered columns,
       both overlap triggers, checkout-attempt unique index, both refund tables,
       and both refund lookup indexes verified
+- [ ] `0005_request_attribution.sql` applied only after `0004`; source column,
+      unknown default, and source index verified before application deployment
 - [ ] Production D1 binding verified and migrations applied only through the
       independently reviewed production configuration
 - [ ] Production R2 bucket created, binding verified
@@ -72,10 +74,12 @@ or insurance readiness — those are real-world facts only the owner can confirm
 - [ ] Full test booking completed end-to-end in preview
 - [ ] Test refund completed in preview
 - [ ] Existing site verified after cutover: homepage, App Store links,
-      privacy, terms
+      privacy, terms, `/llms.txt`, and `/autoclarity-services.json`
 - [ ] `/las-vegas-pre-purchase-inspection` + `/ppi` + `/pre-purchase-inspection`
       redirects verified on production
 - [ ] Automated tests green (`npm test`), typecheck green (`npm run typecheck`)
+- [ ] IndexNow key file and every submitted URL return 2xx; only then run the
+      staged submission. Record the response; do not describe submission as indexing.
 - [ ] Monitoring active (Cloudflare Pages analytics + Stripe email alerts at
       minimum; optional: healthcheck on `/api/ppi/runtime-config`)
 - [ ] Backup/rollback documented and understood (previous successful Cloudflare

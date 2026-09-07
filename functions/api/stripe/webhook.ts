@@ -580,9 +580,9 @@ async function handlePaymentSucceeded(
   }
 
   const requestRow = await db
-    .prepare(`SELECT r.status, r.ref, c.email FROM ppi_requests r JOIN customers c ON c.id = r.customer_id WHERE r.id = ?`)
+    .prepare(`SELECT r.status, r.ref, r.attribution_source, c.email FROM ppi_requests r JOIN customers c ON c.id = r.customer_id WHERE r.id = ?`)
     .bind(payment.request_id)
-    .first<{ status: string; ref: string; email: string }>();
+    .first<{ status: string; ref: string; attribution_source: string; email: string }>();
   if (!requestRow) throw new Error(`Payment ${payment.id} has no request.`);
   if (!payment.booking_id) throw new Error(`Payment ${payment.id} has no booking.`);
 
@@ -598,6 +598,20 @@ async function handlePaymentSucceeded(
         .bind(booking.slot_id)
         .first<{ id: string; status: string; starts_at: string; hold_expires_at: string | null }>()
     : null;
+
+  // Deterministic ids make webhook retries safe. A payment and a confirmed
+  // booking are distinct milestones: a paid request can temporarily need a
+  // replacement time if its original hold lapsed.
+  await db
+    .prepare(`INSERT OR IGNORE INTO analytics_events (id, event, step, source, created_at) VALUES (?, 'ppi_payment_confirmed', 'stripe', ?, ?)`)
+    .bind(`ev_payment_${payment.id}`, requestRow.attribution_source || 'ppi_unknown', now)
+    .run();
+  if (booking.status === 'confirmed' && slot?.status === 'confirmed') {
+    await db
+      .prepare(`INSERT OR IGNORE INTO analytics_events (id, event, step, source, created_at) VALUES (?, 'ppi_booking_confirmed', 'stripe', ?, ?)`)
+      .bind(`ev_booking_${payment.id}`, requestRow.attribution_source || 'ppi_unknown', now)
+      .run();
+  }
 
   const candidateNotificationKeys = [
     `payment_received:${payment.id}`,
@@ -657,6 +671,10 @@ async function handlePaymentSucceeded(
     if (isStatus(requestRow.status) && requestRow.status === 'awaiting_payment') {
       await applyStatus(db, payment.request_id, 'awaiting_payment', 'confirmed', 'system:stripe-webhook', 'Payment succeeded — booking confirmed', payment.id);
     }
+    await db
+      .prepare(`INSERT OR IGNORE INTO analytics_events (id, event, step, source, created_at) VALUES (?, 'ppi_booking_confirmed', 'stripe', ?, ?)`)
+      .bind(`ev_booking_${payment.id}`, requestRow.attribution_source || 'ppi_unknown', now)
+      .run();
 
     let securePortalUrl: string | undefined;
     if (!recordedNotificationKeys.has(`appointment_confirmed:${payment.id}`)) {

@@ -26,6 +26,7 @@ const ALLOWED_EVENTS = new Set([
   'ppi_cancelled',
   'ppi_completed',
   'ppi_waitlist_joined',
+  'app_store_outbound_click',
 ]);
 
 const STEP_RE = /^[a-z0-9_-]{0,40}$/;

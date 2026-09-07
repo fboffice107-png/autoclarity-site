@@ -302,11 +302,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   const req = await db
     .prepare(
-      `SELECT r.id, r.ref, r.status, r.travel_miles, c.email, c.full_name FROM ppi_requests r
+      `SELECT r.id, r.ref, r.status, r.travel_miles, r.attribution_source, c.email, c.full_name FROM ppi_requests r
        JOIN customers c ON c.id = r.customer_id WHERE r.id = ? AND r.deleted_at IS NULL`,
     )
     .bind(id)
-    .first<{ id: string; ref: string; status: string; travel_miles: number | null; email: string; full_name: string }>();
+    .first<{ id: string; ref: string; status: string; travel_miles: number | null; attribution_source: string; email: string; full_name: string }>();
   if (!req || !isStatus(req.status)) return errorJson('not_found', 'Request not found.', 404);
   const status = req.status as Status;
   const base = (env.PUBLIC_BASE_URL ?? new URL(context.request.url).origin).replace(/\/$/, '');
@@ -447,6 +447,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         if (!moved) return errorJson('conflict', 'Status changed concurrently — reload and retry.', 409);
       }
       await auditLog(db, actor, 'set_status', 'ppi_request', id, { from: status, to, reason: body.reason });
+      if (to === 'confirmed' || to === 'completed') {
+        const event = to === 'confirmed' ? 'ppi_booking_confirmed' : 'ppi_completed';
+        await db
+          .prepare(`INSERT OR IGNORE INTO analytics_events (id, event, step, source, created_at) VALUES (?, ?, 'workflow', ?, ?)`)
+          .bind(`ev_status_${id}_${to}`, event, req.attribution_source || 'ppi_unknown', nowIso())
+          .run();
+      }
 
       // Courtesy emails for the customer-facing waiting states.
       const templateByStatus: Partial<Record<Status, EmailTemplateKey>> = {
@@ -634,8 +641,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         },
       });
       await db
-        .prepare(`INSERT INTO analytics_events (id, event, step, source, created_at) VALUES (?, 'ppi_quote_sent', NULL, 'admin', ?)`)
-        .bind(newId('ev'), now)
+        .prepare(`INSERT INTO analytics_events (id, event, step, source, created_at) VALUES (?, 'ppi_quote_sent', NULL, ?, ?)`)
+        .bind(newId('ev'), req.attribution_source || 'ppi_unknown', now)
         .run();
       await auditLog(db, actor, 'send_quote', 'quote', quote.id);
       const emailFailure = await notificationFailureResponse(db, actor, id, 'send_quote', emailResult);

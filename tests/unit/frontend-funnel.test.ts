@@ -22,9 +22,10 @@ describe('PPI frontend conversion safeguards', () => {
 
     const blocks = [...page.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/gu)];
     expect(blocks).toHaveLength(3);
-    const service = JSON.parse(blocks[0]![1]!) as { url: string; areaServed: Array<{ name: string }> };
+    const graph = JSON.parse(blocks[0]![1]!) as { '@graph': Array<{ '@type': string; url?: string; areaServed?: Array<{ name: string }> }> };
+    const service = graph['@graph'].find((node) => node['@type'] === 'Service')!;
     expect(service.url).toBe('https://getautoclarity.com/las-vegas-pre-purchase-inspection/');
-    expect(service.areaServed.map((place) => place.name)).toEqual(
+    expect(service.areaServed!.map((place) => place.name)).toEqual(
       expect.arrayContaining(['Las Vegas', 'North Las Vegas', 'Henderson', 'Boulder City', 'Clark County']),
     );
   });
@@ -80,6 +81,7 @@ describe('PPI frontend conversion safeguards', () => {
     expect(mainScript).toContain('source: ppiAttribution');
     expect(mainScript).not.toContain('source: "homepage"');
     expect(script).toContain('if (isAllowedAttribution(saved)) return saved');
+    expect(script).toContain('attributionSource: attributionSource');
   });
 
   it('shows the exact conversion events and makes notification issues actionable in admin', () => {
@@ -95,6 +97,10 @@ describe('PPI frontend conversion safeguards', () => {
     expect(adminScript).toContain('requiresFreshConfirmation');
     expect(adminScript).toContain('confirmFresh: confirmFresh === true');
     expect(adminScript).toContain('provider’s duplicate protection has expired');
+    expect(adminScript).toContain('Verified service funnel (30 days)');
+    expect(adminScript).toContain('Gross collected (30d)');
+    expect(adminScript).toContain('Net collected (30d)');
+    expect(adminScript).toContain('Request cohorts by source (30 days)');
     expect(intakeApi).toContain("surfaceIntakeNotificationFailure(env.DB, requestId, customerEmail, 'request_received'");
     expect(intakeApi).toContain("surfaceIntakeNotificationFailure(env.DB, requestId, ownerEmail, 'owner_new_request'");
   });

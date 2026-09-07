@@ -254,7 +254,7 @@
     };
 
     function allowedAttribution(value) {
-      return /^ppi_(direct|internal|search|social|directory|referral|campaign|google|bing|yahoo|duckduckgo|facebook|instagram|tiktok|youtube|reddit|nextdoor|yelp|apple|email)(_(cpc|organic|social|paid_social|email|referral|display))?$/.test(String(value || ""));
+      return /^ppi_(unknown|direct|internal|search|social|directory|referral|campaign|google|bing|yahoo|duckduckgo|facebook|instagram|tiktok|youtube|reddit|nextdoor|yelp|apple|email)(_(cpc|organic|social|paid_social|email|referral|display))?$/.test(String(value || ""));
     }
 
     function homepageReferrerCategory(host) {

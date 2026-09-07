@@ -66,11 +66,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   const req = await db
     .prepare(
-      `SELECT r.id, r.ref, r.status, c.email, c.full_name FROM ppi_requests r
+      `SELECT r.id, r.ref, r.status, r.attribution_source, c.email, c.full_name FROM ppi_requests r
        JOIN customers c ON c.id = r.customer_id WHERE r.id = ? AND r.deleted_at IS NULL`,
     )
     .bind(requestId)
-    .first<{ id: string; ref: string; status: string; email: string; full_name: string }>();
+    .first<{ id: string; ref: string; status: string; attribution_source: string; email: string; full_name: string }>();
   if (!req || !isStatus(req.status)) return errorJson('not_found', 'This request no longer exists.', 404);
   const status = req.status as Status;
 
@@ -239,6 +239,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         if (!completed) {
           return errorJson('conflict', 'This request changed a moment ago — reload to see its current booking state.', 409);
         }
+
+        await db
+          .prepare(`INSERT OR IGNORE INTO analytics_events (id, event, step, source, created_at) VALUES (?, 'ppi_booking_confirmed', 'paid_reselection', ?, ?)`)
+          .bind(`ev_booking_${paid.id}`, req.attribution_source || 'ppi_unknown', confirmedAt)
+          .run();
 
         const secureUrl = portalUrl((env.PUBLIC_BASE_URL ?? new URL(request.url).origin).replace(/\/$/, ''), auth.token);
         await sendTemplate(env, db, requestId, 'appointment_confirmed', req.email, {

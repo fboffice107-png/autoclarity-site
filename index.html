@@ -25,48 +25,68 @@
   <link rel="icon" type="image/png" sizes="32x32" href="assets/img/favicon-32.png" />
   <link rel="apple-touch-icon" href="assets/img/icon-180.png" />
 
-  <link rel="stylesheet" href="assets/css/site.css?v=ac-prod-20260831-r1" />
+  <link rel="stylesheet" href="assets/css/site.css?v=ac-ai-20260907-r1" />
 
+  <!-- PUBLIC_FACTS:HOME_JSONLD:START -->
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
     "@graph": [
       {
-        "@type": "SoftwareApplication",
+        "@type": "Organization",
+        "@id": "https://getautoclarity.com/#organization",
+        "name": "AutoClarity",
+        "url": "https://getautoclarity.com/",
+        "email": "support@getautoclarity.com",
+        "sameAs": [
+          "https://apps.apple.com/us/app/autoclarity/id6761438602"
+        ]
+      },
+      {
+        "@type": "MobileApplication",
         "@id": "https://getautoclarity.com/#app",
         "name": "AutoClarity",
         "operatingSystem": "iOS",
         "applicationCategory": "UtilitiesApplication",
-        "description": "AutoClarity guides you through questions about your vehicle’s symptoms and creates a clear, mechanic-style report — likely causes, urgency guidance, and recommended next steps.",
+        "description": "An iPhone symptom-guidance product that asks questions about a vehicle's symptoms and provides possible causes, urgency and safety information, repair-cost direction, recommended next steps, and a shareable report without requiring an OBD scanner.",
         "url": "https://getautoclarity.com/",
         "installUrl": "https://apps.apple.com/us/app/autoclarity/id6761438602",
-        "offers": {
-          "@type": "Offer",
-          "price": "0",
-          "priceCurrency": "USD"
-        }
-      },
-      {
-        "@type": "Service",
-        "@id": "https://getautoclarity.com/las-vegas-pre-purchase-inspection/#service",
-        "name": "Las Vegas Mobile Pre-Purchase Vehicle Inspection",
-        "serviceType": "Pre-purchase car inspection",
-        "url": "https://getautoclarity.com/las-vegas-pre-purchase-inspection/",
-        "description": "Independent mobile pre-purchase inspections for used vehicles in the Las Vegas area, performed by AutoClarity founder and lead technician Faheb Brown.",
-        "provider": {
-          "@type": "Organization",
-          "name": "AutoClarity",
-          "url": "https://getautoclarity.com/"
+        "publisher": {
+          "@id": "https://getautoclarity.com/#organization"
         },
-        "areaServed": {
-          "@type": "City",
-          "name": "Las Vegas",
-          "containedInPlace": { "@type": "State", "name": "Nevada" }
-        }
+        "offers": [
+          {
+            "@type": "Offer",
+            "name": "Free download and one successfully completed report",
+            "price": "0",
+            "priceCurrency": "USD",
+            "description": "The app is free to download and one successfully completed diagnostic report is included at no charge."
+          },
+          {
+            "@type": "Offer",
+            "name": "AutoClarity Annual — introductory first year",
+            "price": "9.99",
+            "priceCurrency": "USD",
+            "priceValidUntil": "2026-12-31",
+            "eligibleRegion": {
+              "@type": "Country",
+              "name": "United States"
+            },
+            "description": "Eligible new subscribers in the United States; Apple determines eligibility."
+          },
+          {
+            "@type": "Offer",
+            "name": "AutoClarity Annual — standard annual price and renewal",
+            "price": "29.99",
+            "priceCurrency": "USD",
+            "description": "Renews unless canceled. Customers who are not eligible for the introductory offer see Apple's applicable localized standard annual price before purchase."
+          }
+        ]
       }
     ]
   }
   </script>
+  <!-- PUBLIC_FACTS:HOME_JSONLD:END -->
 </head>
 
 <body data-page="home" data-fx-full>
@@ -96,7 +116,7 @@
           <span class="nav-ppi-full">Request inspection</span>
           <span class="nav-ppi-short" aria-hidden="true">Inspection</span>
         </a>
-        <a class="btn btn-primary btn-nav" href="https://apps.apple.com/us/app/autoclarity/id6761438602" target="_blank" rel="noopener noreferrer" aria-label="Download AutoClarity on the App Store">Get the app</a>
+        <a class="btn btn-primary btn-nav" href="https://apps.apple.com/us/app/autoclarity/id6761438602" target="_blank" rel="noopener noreferrer" aria-label="Download AutoClarity on the App Store" data-analytics="app_store_outbound_click" data-step="home_nav">Get the app</a>
       </div>
     </div>
   </header>
@@ -123,12 +143,16 @@
 
           <p class="app-path-label">For mechanic-style symptom guidance</p>
           <div class="hero-ctas app-ctas">
-            <a class="btn btn-primary btn-lg" href="https://apps.apple.com/us/app/autoclarity/id6761438602" target="_blank" rel="noopener noreferrer">
+            <a class="btn btn-primary btn-lg" href="https://apps.apple.com/us/app/autoclarity/id6761438602" target="_blank" rel="noopener noreferrer" data-analytics="app_store_outbound_click" data-step="home_hero">
               Get the iPhone app
             </a>
             <a class="btn btn-ghost btn-lg" href="#how-it-works">See how the app works</a>
           </div>
-          <p class="hero-fineprint">Free to download for iPhone · In-app purchases available</p>
+          <p class="hero-fineprint app-offer-summary">
+            One successfully completed report is free. Eligible new U.S. subscribers pay
+            $9.99 for the first year, then $29.99/year unless canceled. Apple confirms
+            eligibility and the applicable localized price before purchase.
+          </p>
 
           <ul class="hero-chips" aria-label="Highlights">
             <li>No scanner or tools required</li>
@@ -494,7 +518,7 @@
         </div>
 
         <div class="video-cta reveal">
-          <a class="btn btn-primary btn-lg" href="https://apps.apple.com/us/app/autoclarity/id6761438602" target="_blank" rel="noopener noreferrer">
+          <a class="btn btn-primary btn-lg" href="https://apps.apple.com/us/app/autoclarity/id6761438602" target="_blank" rel="noopener noreferrer" data-analytics="app_store_outbound_click" data-step="home_tour">
             Download on the App&nbsp;Store
           </a>
         </div>
@@ -510,10 +534,14 @@
         <p class="section-sub">
           Get mechanic-style clarity about your car in minutes — before the shop quotes you.
         </p>
-        <a class="btn btn-primary btn-xl" href="https://apps.apple.com/us/app/autoclarity/id6761438602" target="_blank" rel="noopener noreferrer">
+        <a class="btn btn-primary btn-xl" href="https://apps.apple.com/us/app/autoclarity/id6761438602" target="_blank" rel="noopener noreferrer" data-analytics="app_store_outbound_click" data-step="home_final">
           Download on the App&nbsp;Store
         </a>
-        <p class="hero-fineprint">Free to download for iPhone · In-app purchases available</p>
+        <p class="hero-fineprint app-offer-summary">
+          One successfully completed report is free. Eligible new U.S. subscribers pay
+          $9.99 for the first year, then $29.99/year unless canceled. Apple confirms
+          eligibility and the applicable localized price before purchase.
+        </p>
       </div>
     </section>
   </main>
@@ -537,6 +565,8 @@
           <h3>Legal</h3>
           <p><a href="/privacy">Privacy Policy</a></p>
           <p><a href="/terms">Terms of Use</a></p>
+          <p><a href="/autoclarity-services.json">Public service catalog (JSON)</a></p>
+          <p><a href="/llms.txt">AI-readable site summary</a></p>
         </div>
       </div>
 
@@ -548,6 +578,6 @@
     </div>
   </footer>
 
-  <script src="assets/js/main.js?v=ac-prod-20260831-r1" defer></script>
+  <script src="assets/js/main.js?v=ac-ai-20260907-r1" defer></script>
 </body>
 </html>

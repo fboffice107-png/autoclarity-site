@@ -126,6 +126,12 @@
     return "Unknown refund state. Review Stripe before taking further action.";
   }
 
+  function attributionLabel(source) {
+    var value = String(source || "ppi_unknown");
+    if (value === "ppi_unknown" || value === "ppi_direct") return "Direct / unknown";
+    return value.replace(/^ppi_/, "").replace(/_/g, " ");
+  }
+
   /* ================= Overview ================= */
   function renderOverview(preloaded) {
     var proceed = function (data) {
@@ -142,8 +148,42 @@
         stat(c(["confirmed"]), "Confirmed") +
         stat(c(["completed"]), "Completed") +
         notificationStat(data.notificationIssues || 0) +
-        stat(money(data.revenue30d.cents), "Revenue (30d)") +
+        stat(money(data.revenue30d.grossCents), "Gross collected (30d)") +
+        stat(money(data.revenue30d.refundedCents), "Refunded (30d)") +
+        stat(money(data.revenue30d.netCents), "Net collected (30d)") +
         "</div>";
+
+      if (data.revenue30d.disputedPayments) {
+        html += '<div class="notice warn">' + esc(data.revenue30d.disputedPayments) +
+          " disputed payment record(s), totaling " + esc(money(data.revenue30d.disputedCents)) +
+          ", are excluded from net collected.</div>";
+      }
+
+      var verified = data.authoritativeFunnel30d || {};
+      html += '<section class="portal-card"><h2>Verified service funnel (30 days)</h2>' +
+        '<p style="color:var(--text-2);">Saved records and workflow/payment state—not browser clicks.</p><div class="admin-grid">' +
+        stat(verified.requests_saved || 0, "Requests saved") +
+        stat(verified.quotes_sent || 0, "Quotes sent") +
+        stat(verified.checkouts_created || 0, "Checkouts created") +
+        stat(verified.payments_succeeded || 0, "Payments succeeded") +
+        stat(verified.bookings_confirmed || 0, "Bookings confirmed") +
+        stat(verified.completed || 0, "Inspections completed") +
+        "</div></section>";
+
+      html += '<section class="portal-card"><h2>Request cohorts by source (30 days)</h2>' +
+        '<p style="color:var(--text-2);">First-touch source is reduced to an allowlisted category. Missing or direct referrers remain “Direct / unknown.” Revenue comes from payment records.</p>';
+      if (!(data.attribution30d || []).length) html += '<p style="color:var(--text-3);">No requests in this period.</p>';
+      else {
+        html += '<div style="overflow-x:auto;"><table class="admin-table"><thead><tr><th>Source</th><th>Requests</th><th>Paid</th><th>Completed</th><th>Gross</th><th>Refunded</th><th>Net</th><th>Disputed</th></tr></thead><tbody>';
+        data.attribution30d.forEach(function (row) {
+          html += "<tr><td>" + esc(attributionLabel(row.source)) + "</td><td>" + esc(row.requests) +
+            "</td><td>" + esc(row.paid_requests) + "</td><td>" + esc(row.completed) +
+            "</td><td>" + esc(money(row.gross_cents)) + "</td><td>" + esc(money(row.refunded_cents)) +
+            "</td><td>" + esc(money(row.net_cents)) + "</td><td>" + esc(row.disputed_requests) + "</td></tr>";
+        });
+        html += "</tbody></table></div>";
+      }
+      html += "</section>";
 
       var notificationRequests = data.notificationIssueRequests || [];
       if (notificationRequests.length) {
@@ -174,7 +214,8 @@
       }
       html += "</section>";
 
-      html += '<section class="portal-card"><h2>Funnel (30 days)</h2><div class="admin-grid">';
+      html += '<section class="portal-card"><h2>Interaction counters (30 days)</h2>' +
+        '<p style="color:var(--text-2);">Useful for diagnosing the page journey. These counters do not prove an install, purchase, or completed inspection.</p><div class="admin-grid">';
       var funnelOrder = ["ppi_page_view", "ppi_form_started", "ppi_form_completed", "ppi_request_submitted", "request_confirmation_viewed", "ppi_quote_sent", "ppi_slot_selected", "ppi_agreement_accepted", "ppi_checkout_started", "ppi_booking_confirmed"];
       var fmap = {};
       (data.funnel30d || []).forEach(function (f) { fmap[f.event] = f.n; });
@@ -346,6 +387,7 @@
       "<dt>Access</dt><dd>Inspection OK: " + yn(req.perm_inspection) + " · Scan OK: " + yn(req.perm_scan) + " · Road test: " + esc(req.perm_road_test) + " · Photos: " + esc(req.perm_photos) + " · Underbody: " + esc(req.perm_underbody) + " · Lift: " + esc(req.lift_available) + " · Level surface: " + esc(req.level_surface) + "</dd>" +
       "<dt>Timing</dt><dd>" + esc([req.decision_timeline, req.preferred_dates, req.time_window].filter(Boolean).join(" · ")) + (req.same_day_priority ? " · SAME-DAY PRIORITY" : "") + "</dd>" +
       "<dt>Travel est.</dt><dd>" + (req.travel_miles != null ? esc(req.travel_miles) + " mi (" + esc(req.travel_estimate_basis) + ")" : "unknown — custom review") + "</dd>" +
+      "<dt>Acquisition source</dt><dd>" + esc(attributionLabel(req.attribution_source)) + "</dd>" +
       "<dt>Customer notes</dt><dd>" + esc(req.customer_notes || "—") + "</dd>" +
       "</dl></section>";
 

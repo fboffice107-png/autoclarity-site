@@ -222,8 +222,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
            perm_inspection, perm_scan, perm_road_test, perm_photos, perm_underbody, ack_access_dependent,
            decision_timeline, preferred_dates, time_window, same_day_priority, customer_notes,
            travel_miles, travel_estimate_basis, suggested_tier, manual_review_reasons,
+           attribution_source,
            created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, 'submitted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, 'submitted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         requestId,
@@ -258,6 +259,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         travel.basis,
         tierSuggestion.tier,
         JSON.stringify([...tierSuggestion.reasons.map((r) => `tier: ${r}`), ...tierSuggestion.manualReasons]),
+        payload.attributionSource,
         now,
         now,
       ),

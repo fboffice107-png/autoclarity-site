@@ -1,0 +1,34 @@
+# AutoClarity
+
+> AutoClarity has two separate offerings: an informational iPhone symptom-guidance app and a founder-performed mobile pre-purchase vehicle inspection service for reviewed Las Vegas-area locations.
+
+Facts on this page were verified 2026-09-07. Availability, eligibility, quotes, and prices remain subject to the linked official pages.
+
+## Official pages
+
+- [AutoClarity iPhone app](https://getautoclarity.com/): possible causes, urgency and safety information, repair-cost direction, next steps, and a shareable report without an OBD scanner.
+- [Download on the U.S. App Store](https://apps.apple.com/us/app/autoclarity/id6761438602): Apple displays the applicable eligibility, storefront availability, and localized price before purchase.
+- [Las Vegas pre-purchase inspection](https://getautoclarity.com/las-vegas-pre-purchase-inspection/): separately requested, quoted, scheduled, and paid mobile inspection service.
+- [Public offerings catalog](https://getautoclarity.com/autoclarity-services.json): synchronized read-only JSON facts for both offerings.
+
+## App pricing and limits
+
+- One successfully completed diagnostic report is free.
+- Eligible new U.S. subscribers may pay $9.99 for the first year. The subscription renews at $29.99 per year unless canceled.
+- Apple determines introductory-offer eligibility and displays the applicable localized price. The verified public storefront is the U.S. App Store listing.
+- The app provides informational symptom guidance. It is not hands-on inspection, scan-tool testing, or diagnosis by a qualified technician.
+
+## Las Vegas inspection pricing, area, and limits
+
+- Standard Vehicle PPI: starting at $199.
+- European, Luxury or Performance PPI: starting at $299.
+- Exotic, Collector or Heavily Modified PPI: starting at $399.
+- Las Vegas, North Las Vegas, Henderson, Boulder City, and surrounding Clark County are subject to review.
+- From the central Las Vegas service area: 0–15 miles is included, 16–25 miles adds $25, 26–40 miles adds $50, and locations beyond 40 miles are individually reviewed.
+- A request is not an appointment. The exact quote and available times follow review; successful payment after agreement acceptance confirms the booking.
+- Scope depends on vehicle and access. Road tests require permission and safe, lawful conditions. An inspection is not a warranty and cannot identify every defect.
+
+## Product relationship
+
+- An app subscription does not include a physical inspection.
+- The app is not required to request a Las Vegas inspection.

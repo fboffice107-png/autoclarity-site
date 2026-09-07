@@ -9,6 +9,7 @@ export interface FieldErrors {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const ZIP_RE = /^\d{5}$/;
+const ATTRIBUTION_RE = /^ppi_(unknown|direct|internal|search|social|directory|referral|campaign|google|bing|yahoo|duckduckgo|facebook|instagram|tiktok|youtube|reddit|nextdoor|yelp|apple|email)(_(cpc|organic|social|paid_social|email|referral|display))?$/;
 
 export function validEmail(v: string): boolean {
   return v.length <= 254 && EMAIL_RE.test(v);
@@ -49,7 +50,15 @@ export function intInRange(v: unknown, min: number, max: number): number | null 
   return n;
 }
 
+/** Accept only the privacy-minimized category emitted by the public site.
+ * Unknown, absent, or manipulated values never become a fabricated channel. */
+export function normalizeAttributionSource(v: unknown): string {
+  const value = clampStr(v, 60).toLowerCase();
+  return ATTRIBUTION_RE.test(value) ? value : 'ppi_unknown';
+}
+
 export interface IntakePayload {
+  attributionSource: string;
   // buyer
   fullName: string;
   email: string;
@@ -106,6 +115,7 @@ export function parseIntake(raw: Record<string, unknown>): { payload: IntakePayl
   const b = (k: string) => raw[k] === true || raw[k] === 'true' || raw[k] === 'on' || raw[k] === '1';
 
   const payload: IntakePayload = {
+    attributionSource: normalizeAttributionSource(raw['attributionSource']),
     fullName: s('fullName', 120),
     email: s('email', 254).toLowerCase(),
     phone: s('phone', 30),

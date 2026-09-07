@@ -559,6 +559,11 @@ body[data-fx-full] .hero-grid { display: none; }
   color: var(--text-3);
 }
 
+.app-offer-summary {
+  max-width: 680px;
+  line-height: 1.55;
+}
+
 .hero-chips {
   list-style: none;
   display: flex;

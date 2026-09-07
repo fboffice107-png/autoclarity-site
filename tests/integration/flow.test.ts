@@ -41,6 +41,7 @@ function intakePayload(overrides: Json = {}): Json {
   return {
     turnstileToken: 'XXXX.DUMMY.TOKEN',
     submissionKey: `integration_${String(submissionSequence).padStart(8, '0')}`,
+    attributionSource: 'ppi_google_cpc',
     fullName: 'Integration Tester',
     email: 'integration@example.com',
     phone: '702-555-0111',
@@ -116,6 +117,23 @@ let confirmedVettePaymentId = '';
 const camrySubmissionKey = 'integration_camry_primary_0001';
 
 describe('public surface', () => {
+  it('serves the static discovery documents with safe public content types', async () => {
+    const catalog = await fetch(BASE + '/autoclarity-services.json');
+    expect(catalog.status).toBe(200);
+    expect(catalog.headers.get('content-type')).toContain('application/json');
+    expect(((await catalog.json()) as Json).offerings).toHaveLength(2);
+
+    const llms = await fetch(BASE + '/llms.txt');
+    expect(llms.status).toBe(200);
+    expect(llms.headers.get('content-type')).toContain('text/plain');
+    expect(await llms.text()).toContain('two separate offerings');
+
+    const key = await fetch(BASE + '/170f59a6dd75523c8f9318a7ae04ae2e.txt');
+    expect(key.status).toBe(200);
+    expect(key.headers.get('content-type')).toContain('text/plain');
+    expect((await key.text()).trim()).toBe('170f59a6dd75523c8f9318a7ae04ae2e');
+  });
+
   it('serves runtime config with pricing and no secrets', async () => {
     const r = await get('/api/ppi/runtime-config');
     expect(r.status).toBe(200);
@@ -197,6 +215,8 @@ describe('intake submission', () => {
     expect(r.body.emailStatus).toBe('recorded');
     camryToken = r.body.portalToken;
     camryRef = r.body.ref;
+    const list = await get('/api/admin/requests', admin);
+    expect(list.body.requests.find((row: Json) => row.ref === camryRef).attribution_source).toBe('ppi_google_cpc');
   });
 
   it('portal view works with the token', async () => {
@@ -615,6 +635,15 @@ describe('stripe webhook — the source of truth', () => {
     expect(confirmation.body_text).not.toMatch(/\/ppi\/portal\/$/m);
     expect(detail.body.messages.some((message: Json) => message.dedupe_key === `payment_received:${paymentId}`)).toBe(true);
     expect(detail.body.messages.some((message: Json) => message.dedupe_key === `owner_booking_confirmed:${paymentId}`)).toBe(true);
+
+    const overview = await get('/api/admin/overview', admin);
+    expect(overview.body.revenue30d.grossCents).toBeGreaterThanOrEqual(detail.body.payments[0].amount_cents);
+    expect(overview.body.revenue30d.refundedCents).toBeGreaterThanOrEqual(0);
+    expect(overview.body.revenue30d.netCents).toBeGreaterThanOrEqual(0);
+    expect(overview.body.authoritativeFunnel30d.payments_succeeded).toBeGreaterThanOrEqual(1);
+    expect(overview.body.authoritativeFunnel30d.bookings_confirmed).toBeGreaterThanOrEqual(1);
+    expect(overview.body.funnel30d.find((row: Json) => row.event === 'ppi_payment_confirmed')?.n).toBeGreaterThanOrEqual(1);
+    expect(overview.body.funnel30d.find((row: Json) => row.event === 'ppi_booking_confirmed')?.n).toBeGreaterThanOrEqual(1);
   });
 
   it('reconciles a dispute from a confirmed booking and disables calendar access', async () => {

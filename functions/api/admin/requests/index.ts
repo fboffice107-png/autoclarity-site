@@ -17,6 +17,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const stmt = `
     SELECT r.id, r.ref, r.status, r.created_at, r.loc_city, r.loc_zip, r.suggested_tier,
            r.manual_review_reasons, r.same_day_priority, r.travel_miles,
+           r.attribution_source,
            c.full_name, c.email, v.year, v.make, v.model, v.trim, v.vin
     FROM ppi_requests r
     JOIN customers c ON c.id = r.customer_id

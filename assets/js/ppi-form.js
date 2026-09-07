@@ -103,7 +103,7 @@
 
   /* ---------- analytics (no PII ever) ---------- */
   function isAllowedAttribution(value) {
-    return /^ppi_(direct|internal|search|social|directory|referral|campaign|google|bing|yahoo|duckduckgo|facebook|instagram|tiktok|youtube|reddit|nextdoor|yelp|apple|email)(_(cpc|organic|social|paid_social|email|referral|display))?$/.test(String(value || ""));
+    return /^ppi_(unknown|direct|internal|search|social|directory|referral|campaign|google|bing|yahoo|duckduckgo|facebook|instagram|tiktok|youtube|reddit|nextdoor|yelp|apple|email)(_(cpc|organic|social|paid_social|email|referral|display))?$/.test(String(value || ""));
   }
 
   function referrerCategory(host) {
@@ -862,7 +862,11 @@
     // or interrupted response must reuse it because the server may have saved
     // the original request already.
     saveDraft();
-    var payload = { turnstileToken: turnstileToken, submissionKey: ensureSubmissionKey() };
+    var payload = {
+      turnstileToken: turnstileToken,
+      submissionKey: ensureSubmissionKey(),
+      attributionSource: attributionSource
+    };
     FIELDS.forEach(function (name) {
       var el = form.elements[name];
       if (!el) return;

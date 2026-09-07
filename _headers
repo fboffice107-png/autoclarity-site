@@ -2,7 +2,7 @@
 # Dynamic API responses get their headers from functions/_middleware.ts.
 
 /*
-  X-AutoClarity-Build: ac-prod-20260831-r1
+  X-AutoClarity-Build: ac-ai-20260907-r1
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
@@ -22,3 +22,14 @@
 /ppi/*
   Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests
   X-Robots-Tag: noindex, nofollow
+
+# Public, machine-readable discovery documents. Content types are inferred from
+# their extensions by Pages; these short caches keep fact corrections timely.
+/autoclarity-services.json
+  Cache-Control: public, max-age=3600, must-revalidate
+
+/llms.txt
+  Cache-Control: public, max-age=3600, must-revalidate
+
+/170f59a6dd75523c8f9318a7ae04ae2e.txt
+  Cache-Control: public, max-age=3600, must-revalidate

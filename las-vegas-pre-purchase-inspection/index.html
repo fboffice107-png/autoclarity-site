@@ -28,54 +28,109 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/img/favicon-32.png" />
   <link rel="apple-touch-icon" href="/assets/img/icon-180.png" />
 
-  <link rel="stylesheet" href="/assets/css/site.css?v=ac-prod-20260831-r1" />
-  <link rel="stylesheet" href="/assets/css/ppi.css?v=ac-prod-20260831-r1" />
+  <link rel="stylesheet" href="/assets/css/site.css?v=ac-ai-20260907-r1" />
+  <link rel="stylesheet" href="/assets/css/ppi.css?v=ac-ai-20260907-r1" />
 
+  <!-- PUBLIC_FACTS:PPI_JSONLD:START -->
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
-    "@type": "Service",
-    "name": "Pre-Purchase Vehicle Inspection",
-    "serviceType": "Pre-purchase car inspection",
-    "provider": {
-      "@type": "LocalBusiness",
-      "name": "AutoClarity",
-      "url": "https://getautoclarity.com/",
-      "email": "support@getautoclarity.com"
-    },
-    "areaServed": [
+    "@graph": [
       {
-        "@type": "City",
-        "name": "Las Vegas",
-        "containedInPlace": { "@type": "State", "name": "Nevada" }
+        "@type": "Organization",
+        "@id": "https://getautoclarity.com/#organization",
+        "name": "AutoClarity",
+        "url": "https://getautoclarity.com/",
+        "email": "support@getautoclarity.com",
+        "sameAs": [
+          "https://apps.apple.com/us/app/autoclarity/id6761438602"
+        ]
       },
       {
-        "@type": "City",
-        "name": "North Las Vegas",
-        "containedInPlace": { "@type": "State", "name": "Nevada" }
-      },
-      {
-        "@type": "City",
-        "name": "Henderson",
-        "containedInPlace": { "@type": "State", "name": "Nevada" }
-      },
-      {
-        "@type": "City",
-        "name": "Boulder City",
-        "containedInPlace": { "@type": "State", "name": "Nevada" }
-      },
-      {
-        "@type": "AdministrativeArea",
-        "name": "Clark County",
-        "containedInPlace": { "@type": "State", "name": "Nevada" }
+        "@type": "Service",
+        "@id": "https://getautoclarity.com/las-vegas-pre-purchase-inspection/#service",
+        "name": "AutoClarity Las Vegas mobile pre-purchase inspection",
+        "serviceType": "Pre-purchase vehicle inspection",
+        "url": "https://getautoclarity.com/las-vegas-pre-purchase-inspection/",
+        "description": "A separate mobile, founder-performed pre-purchase vehicle inspection service for reviewed locations in the Las Vegas area.",
+        "provider": {
+          "@id": "https://getautoclarity.com/#organization"
+        },
+        "areaServed": [
+          {
+            "@type": "City",
+            "name": "Las Vegas",
+            "containedInPlace": {
+              "@type": "State",
+              "name": "Nevada"
+            }
+          },
+          {
+            "@type": "City",
+            "name": "North Las Vegas",
+            "containedInPlace": {
+              "@type": "State",
+              "name": "Nevada"
+            }
+          },
+          {
+            "@type": "City",
+            "name": "Henderson",
+            "containedInPlace": {
+              "@type": "State",
+              "name": "Nevada"
+            }
+          },
+          {
+            "@type": "City",
+            "name": "Boulder City",
+            "containedInPlace": {
+              "@type": "State",
+              "name": "Nevada"
+            }
+          },
+          {
+            "@type": "AdministrativeArea",
+            "name": "Clark County",
+            "containedInPlace": {
+              "@type": "State",
+              "name": "Nevada"
+            }
+          }
+        ],
+        "offers": [
+          {
+            "@type": "Offer",
+            "name": "Standard Vehicle PPI",
+            "description": "Starting price; commonly applies to unmodified domestic, Japanese, and Korean passenger vehicles and light trucks. The exact total is confirmed before payment.",
+            "priceSpecification": {
+              "@type": "PriceSpecification",
+              "price": "199",
+              "priceCurrency": "USD"
+            }
+          },
+          {
+            "@type": "Offer",
+            "name": "European, Luxury or Performance PPI",
+            "description": "Starting price; applies to European, luxury, performance, and other higher-complexity vehicles after review. The exact total is confirmed before payment.",
+            "priceSpecification": {
+              "@type": "PriceSpecification",
+              "price": "299",
+              "priceCurrency": "USD"
+            }
+          },
+          {
+            "@type": "Offer",
+            "name": "Exotic, Collector or Heavily Modified PPI",
+            "description": "Starting price; final quote requires review of the exact vehicle, location, and scope. The exact total is confirmed before payment.",
+            "priceSpecification": {
+              "@type": "PriceSpecification",
+              "price": "399",
+              "priceCurrency": "USD"
+            }
+          }
+        ]
       }
-    ],
-    "url": "https://getautoclarity.com/las-vegas-pre-purchase-inspection/",
-    "description": "Independent mobile pre-purchase inspections for used vehicles in the Las Vegas area, performed by an automotive technician with more than 11 years of hands-on experience.",
-    "offers": [
-      { "@type": "Offer", "name": "Standard Vehicle PPI", "priceSpecification": { "@type": "PriceSpecification", "price": "199", "priceCurrency": "USD", "valueAddedTaxIncluded": false } },
-      { "@type": "Offer", "name": "European, Luxury or Performance PPI", "priceSpecification": { "@type": "PriceSpecification", "price": "299", "priceCurrency": "USD" } },
-      { "@type": "Offer", "name": "Exotic, Collector or Heavily Modified PPI", "description": "Starting at $399; the exact quote is confirmed after reviewing the vehicle, location and scope.", "priceSpecification": { "@type": "PriceSpecification", "price": "399", "priceCurrency": "USD" } }
     ]
   }
   </script>
@@ -84,12 +139,46 @@
     "@context": "https://schema.org",
     "@type": "FAQPage",
     "mainEntity": [
-      { "@type": "Question", "name": "How long does an inspection take?", "acceptedAnswer": { "@type": "Answer", "text": "Typically 60–120 minutes on site depending on the vehicle and access, plus time afterward to prepare the written results. Same-day digital findings are provided when applicable." } },
-      { "@type": "Question", "name": "Do I need the seller’s permission?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. The seller controls access to the vehicle. Confirming that they allow an independent inspection before booking avoids wasted trips." } },
-      { "@type": "Question", "name": "Does the inspection guarantee the vehicle?", "acceptedAnswer": { "@type": "Answer", "text": "No. A pre-purchase inspection is a professional opinion about the vehicle’s observable condition at the time of inspection — not a warranty. Hidden or intermittent problems may not be detectable." } },
-      { "@type": "Question", "name": "When do I pay?", "acceptedAnswer": { "@type": "Answer", "text": "Submitting is free. After review, AutoClarity confirms the exact quote and available timing. If online payment is offered, completing it reserves the appointment." } },
-      { "@type": "Question", "name": "What areas do you serve?", "acceptedAnswer": { "@type": "Answer", "text": "Las Vegas, North Las Vegas, Henderson, Boulder City and the surrounding Clark County area. Travel within 15 miles of central Las Vegas is included; beyond that a small mobile-service charge applies, and anything past 40 miles is quoted individually." } },
-      { "@type": "Question", "name": "Do I need the VIN to request an inspection?", "acceptedAnswer": { "@type": "Answer", "text": "No — you can submit without it. The VIN is confirmed before the appointment is finalized so the inspection matches the exact vehicle." } }
+      {
+        "@type": "Question",
+        "name": "Does the AutoClarity app subscription include an in-person inspection?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "No. The AutoClarity iPhone app is a separately priced informational symptom-guidance product. A Las Vegas pre-purchase inspection is a separately requested, quoted, scheduled, and paid physical service."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Does the inspection guarantee the vehicle?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "No. A pre-purchase inspection is a professional opinion about the vehicle’s observable condition at the time of inspection, not a warranty. Hidden or intermittent problems may not be detectable."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "When do I pay?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Submitting is free and is not an appointment. After review, AutoClarity sends an exact quote and available timing. The customer selects a time, accepts the required agreements, and successful payment confirms the booking."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What areas do you serve?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Las Vegas, North Las Vegas, Henderson, Boulder City, and surrounding Clark County are subject to review. From the central Las Vegas service area, 0–15 miles is included, 16–25 miles adds $25, 26–40 miles adds $50, and locations beyond 40 miles are individually reviewed."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Is the service available outside Las Vegas?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "The in-person inspection service currently covers the listed Las Vegas-area locations only, subject to review. The symptom-guidance product is a separate iPhone app; Apple controls App Store availability for each storefront."
+        }
+      }
     ]
   }
   </script>
@@ -98,11 +187,22 @@
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     "itemListElement": [
-      { "@type": "ListItem", "position": 1, "name": "AutoClarity", "item": "https://getautoclarity.com/" },
-      { "@type": "ListItem", "position": 2, "name": "Las Vegas Pre-Purchase Inspection", "item": "https://getautoclarity.com/las-vegas-pre-purchase-inspection/" }
+      {
+        "@type": "ListItem",
+        "position": 1,
+        "name": "AutoClarity",
+        "item": "https://getautoclarity.com/"
+      },
+      {
+        "@type": "ListItem",
+        "position": 2,
+        "name": "Las Vegas Pre-Purchase Inspection",
+        "item": "https://getautoclarity.com/las-vegas-pre-purchase-inspection/"
+      }
     ]
   }
   </script>
+  <!-- PUBLIC_FACTS:PPI_JSONLD:END -->
 </head>
 
 <body data-fx-full>
@@ -874,6 +974,10 @@
 
         <div class="faq-list" id="faqList">
           <details class="faq-item reveal">
+            <summary>Does the AutoClarity app subscription include an in-person inspection?</summary>
+            <p>No. The AutoClarity iPhone app is a separately priced informational symptom-guidance product. A Las Vegas pre-purchase inspection is a separately requested, quoted, scheduled, and paid physical service.</p>
+          </details>
+          <details class="faq-item reveal">
             <summary>How long does an inspection take?</summary>
             <p>Typically 60–120 minutes on site depending on the vehicle and access, plus time afterward to prepare your written results. Same-day digital findings are provided when applicable.</p>
           </details>
@@ -916,7 +1020,7 @@
           </details>
           <details class="faq-item reveal">
             <summary>What areas do you serve?</summary>
-            <p>Las Vegas, North Las Vegas, Henderson, Boulder City and the surrounding Clark County area. Travel within 15 miles of central Las Vegas is included; beyond that a small mobile-service charge applies, and anything past 40 miles is quoted individually.</p>
+            <p>Las Vegas, North Las Vegas, Henderson, Boulder City, and surrounding Clark County are subject to review. From the central Las Vegas service area, 0–15 miles is included, 16–25 miles adds $25, 26–40 miles adds $50, and locations beyond 40 miles are individually reviewed.</p>
           </details>
           <details class="faq-item reveal">
             <summary>What exactly do I receive?</summary>
@@ -928,7 +1032,7 @@
           </details>
           <details class="faq-item reveal">
             <summary>Is the service available outside Las Vegas?</summary>
-            <p>The in-person inspection service currently covers the Las Vegas area only. The AutoClarity iPhone app for understanding car symptoms is available everywhere.</p>
+            <p>The in-person inspection service currently covers the listed Las Vegas-area locations only, subject to review. The symptom-guidance product is a separate iPhone app; Apple controls App Store availability for each storefront.</p>
           </details>
         </div>
       </div>
@@ -974,9 +1078,11 @@
         <div class="footer-col">
           <h3>AutoClarity</h3>
           <p><a href="/">Homepage &amp; iPhone app</a></p>
-          <p><a href="https://apps.apple.com/us/app/autoclarity/id6761438602" target="_blank" rel="noopener noreferrer">Download on the App&nbsp;Store</a></p>
+          <p><a href="https://apps.apple.com/us/app/autoclarity/id6761438602" target="_blank" rel="noopener noreferrer" data-analytics="app_store_outbound_click" data-step="ppi_footer">Download on the App&nbsp;Store</a></p>
           <p><a href="/privacy">Privacy Policy</a></p>
           <p><a href="/terms">Terms of Use</a></p>
+          <p><a href="/autoclarity-services.json">Public service catalog (JSON)</a></p>
+          <p><a href="/llms.txt">AI-readable site summary</a></p>
         </div>
       </div>
       <p class="footer-disclaimer">
@@ -988,7 +1094,7 @@
     </div>
   </footer>
 
-  <script src="/assets/js/main.js?v=ac-prod-20260831-r1" defer></script>
-  <script src="/assets/js/ppi-form.js?v=ac-prod-20260831-r1" defer></script>
+  <script src="/assets/js/main.js?v=ac-ai-20260907-r1" defer></script>
+  <script src="/assets/js/ppi-form.js?v=ac-ai-20260907-r1" defer></script>
 </body>
 </html>

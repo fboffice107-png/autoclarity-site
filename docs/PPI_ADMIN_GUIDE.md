@@ -6,7 +6,8 @@ you'll sign in through Cloudflare Access with your email instead.
 ## Daily flow
 
 1. **Overview** shows new requests, waiting states, upcoming appointments,
-   30-day revenue and the conversion funnel. ⚠ marks manual-review requests
+   separate gross/refund/net/dispute totals, a verified 30-day service funnel,
+   source cohorts, and interaction counters. ⚠ marks manual-review requests
    (exotic, classic, salvage, heavy mods, non-running); ⚡ marks same-day
    priority.
 2. Open a request → everything the customer submitted, their uploads, travel
@@ -73,9 +74,10 @@ The examples below are data-policy sketches, not unattended runbooks.
 |---|---|
 | `ppi_page_view` | Landing page loaded with the API reachable |
 | `ppi_cta_click` | A "Request" CTA clicked (`step`: hero/final) |
+| `app_store_outbound_click` | An App Store link was clicked; this does not prove install or purchase |
 | `ppi_form_started` | First keystroke/interaction in the intake form |
 | `ppi_form_step_completed` | A step passes validation (`step`: buyer/vehicle/location/access/timing) |
-| `ppi_request_submitted` | Server accepted the submission |
+| `ppi_request_submitted` | Browser received a persisted request receipt; D1 request count is authoritative |
 | `ppi_quote_sent` | Admin sent a quote (server-side) |
 | `ppi_slot_selected` | Customer held a window |
 | `ppi_agreement_accepted` | All documents accepted |
@@ -86,7 +88,17 @@ The examples below are data-policy sketches, not unattended runbooks.
 | `ppi_waitlist_joined` | Waitlist signup (waitlist mode) |
 
 Stored as counters in `analytics_events` (event, step, source, timestamp) —
-the table has no columns for names, emails, VINs or addresses.
+the table has no columns for names, emails, VINs or addresses. Each request also
+stores one allowlisted first-touch category so payment and completion can be
+reported by source. Raw URLs, campaign names, search terms, referrer paths, and
+customer data are not attribution fields; invalid or missing sources become
+`ppi_unknown` and display with direct traffic as “Direct / unknown.”
+
+The Overview revenue cards use payment records: gross is the original amount,
+refunded is the recorded refund amount, and net is gross minus refunds for the
+30-day payment cohort. Disputes are surfaced separately and excluded from net.
+The verified funnel uses request, status-history, payment, and booking records;
+interaction counters are diagnostics and do not prove installs or revenue.
 
 ## Things the system will NOT do (on purpose)
 

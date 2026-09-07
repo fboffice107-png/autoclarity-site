@@ -1,0 +1,144 @@
+{
+  "documentType": "AutoClarity public offerings catalog",
+  "schemaVersion": 1,
+  "verifiedAt": "2026-09-07",
+  "canonicalUrl": "https://getautoclarity.com/autoclarity-services.json",
+  "notice": "This is a static informational document, not a booking, availability, quote, or checkout API.",
+  "organization": {
+    "name": "AutoClarity",
+    "canonicalUrl": "https://getautoclarity.com/",
+    "supportEmail": "support@getautoclarity.com"
+  },
+  "offerings": [
+    {
+      "id": "autoclarity-app",
+      "type": "mobile_application",
+      "name": "AutoClarity iPhone app",
+      "summary": "An iPhone symptom-guidance product that asks questions about a vehicle's symptoms and provides possible causes, urgency and safety information, repair-cost direction, recommended next steps, and a shareable report without requiring an OBD scanner.",
+      "bestFor": "Drivers who want informational guidance about symptoms before speaking with a repair shop.",
+      "platform": "iPhone",
+      "officialPage": "https://getautoclarity.com/",
+      "purchaseUrl": "https://apps.apple.com/us/app/autoclarity/id6761438602",
+      "pricing": {
+        "currency": "USD",
+        "downloadPrice": 0,
+        "includedCompletedReports": 1,
+        "subscriptionName": "AutoClarity Annual",
+        "introductoryPrice": 9.99,
+        "introductoryPeriod": "first year",
+        "introductoryEligibility": "Eligible new subscribers in the United States; Apple determines eligibility.",
+        "introductoryOfferStarts": "2026-08-15",
+        "introductoryOfferEnds": "2026-12-31",
+        "renewalPrice": 29.99,
+        "renewalPeriod": "year",
+        "renewalQualification": "Renews unless canceled. Customers who are not eligible for the introductory offer see Apple's applicable localized standard annual price before purchase."
+      },
+      "limitations": [
+        "It is informational guidance, not hands-on inspection, scan-tool testing, or diagnosis by a qualified automotive technician.",
+        "It does not include an in-person pre-purchase inspection.",
+        "Only the United States App Store listing was verified; Apple controls storefront availability, eligibility, and the price displayed to each customer."
+      ],
+      "nextStep": "Open the verified App Store listing and review the price and eligibility Apple displays before purchasing.",
+      "sourceReferences": [
+        {
+          "url": "https://apps.apple.com/us/app/autoclarity/id6761438602",
+          "verifiedAt": "2026-09-07"
+        },
+        {
+          "url": "https://getautoclarity.com/privacy",
+          "verifiedAt": "2026-09-07"
+        },
+        {
+          "url": "https://getautoclarity.com/terms",
+          "verifiedAt": "2026-09-07"
+        }
+      ]
+    },
+    {
+      "id": "las-vegas-pre-purchase-inspection",
+      "type": "service",
+      "name": "AutoClarity Las Vegas mobile pre-purchase inspection",
+      "summary": "A separate mobile, founder-performed pre-purchase vehicle inspection service for reviewed locations in the Las Vegas area.",
+      "bestFor": "Used-car buyers seeking an in-person inspection in the listed Las Vegas-area service region before purchase.",
+      "officialPage": "https://getautoclarity.com/las-vegas-pre-purchase-inspection/",
+      "requestUrl": "https://getautoclarity.com/las-vegas-pre-purchase-inspection/#request",
+      "pricing": {
+        "currency": "USD",
+        "startingPrices": [
+          {
+            "id": "standard",
+            "name": "Standard Vehicle PPI",
+            "amount": 199,
+            "qualification": "Starting price; commonly applies to unmodified domestic, Japanese, and Korean passenger vehicles and light trucks."
+          },
+          {
+            "id": "euro-luxury-performance",
+            "name": "European, Luxury or Performance PPI",
+            "amount": 299,
+            "qualification": "Starting price; applies to European, luxury, performance, and other higher-complexity vehicles after review."
+          },
+          {
+            "id": "exotic-collector-modified",
+            "name": "Exotic, Collector or Heavily Modified PPI",
+            "amount": 399,
+            "qualification": "Starting price; final quote requires review of the exact vehicle, location, and scope."
+          }
+        ],
+        "qualification": "Every final price requires review of the vehicle, location, access, and confirmed inspection scope."
+      },
+      "serviceArea": {
+        "places": [
+          "Las Vegas",
+          "North Las Vegas",
+          "Henderson",
+          "Boulder City",
+          "surrounding Clark County"
+        ],
+        "qualification": "Every location is subject to review.",
+        "distanceBasis": "Distance from the central Las Vegas service area; the exact total is shown before payment.",
+        "travelBands": [
+          {
+            "distance": "0–15 miles",
+            "fee": 0,
+            "label": "included"
+          },
+          {
+            "distance": "16–25 miles",
+            "fee": 25,
+            "label": "+$25 mobile-service charge"
+          },
+          {
+            "distance": "26–40 miles",
+            "fee": 50,
+            "label": "+$50 mobile-service charge"
+          },
+          {
+            "distance": "Beyond 40 miles",
+            "fee": null,
+            "label": "individually reviewed"
+          }
+        ]
+      },
+      "limitations": [
+        "A submitted request is not an appointment. AutoClarity reviews the vehicle, location, scope, and seller access before sending an exact quote and available times.",
+        "A booking is confirmed only after the required agreements are accepted and successful payment is recorded.",
+        "Inspection scope depends on the vehicle, location, access, permission, safety, and confirmed quote.",
+        "Road tests require seller permission and safe, lawful conditions.",
+        "A pre-purchase inspection is a professional opinion about observable condition, not a warranty, guarantee, or promise to identify every defect.",
+        "The service does not include repairs, and an app subscription does not include this physical inspection."
+      ],
+      "nextStep": "Submit the inspection request form for review. Submitting is free and does not confirm an appointment or charge the customer.",
+      "sourceReferences": [
+        {
+          "url": "https://getautoclarity.com/las-vegas-pre-purchase-inspection/",
+          "verifiedAt": "2026-09-07"
+        },
+        {
+          "url": "https://getautoclarity.com/terms",
+          "verifiedAt": "2026-09-07"
+        }
+      ]
+    }
+  ],
+  "relationship": "The iPhone app and Las Vegas inspection are separate products. Buying the app subscription does not include a physical inspection, and the app is not required to request one."
+}

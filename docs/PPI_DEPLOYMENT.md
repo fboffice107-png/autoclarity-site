@@ -4,7 +4,7 @@
 
 | | Hosting | Data | Payments | Admin auth |
 |---|---|---|---|---|
-| **Production today** | Cloudflare Pages direct upload + custom domains | production D1/R2 | Request mode; payments disabled | Cloudflare Access only |
+| **Production observed 2026-09-07** | Cloudflare Pages direct upload + custom domains | production D1/R2 | Live mode; payments enabled | Cloudflare Access only |
 | **Local** | `wrangler pages dev` | local D1/R2 emulation | Stripe TEST; payments disabled by default | `ADMIN_DEV_KEY` |
 | **Hosted preview** | Cloudflare Pages branch deploy (`*.pages.dev`) | preview-only D1/R2 required before write testing | Stripe TEST; payments disabled by default | `ADMIN_DEV_KEY` or Access |
 
@@ -60,15 +60,15 @@ policy before write testing.
 
 The custom domains and production data bindings already exist. A release changes
 the live acquisition funnel, so deploy only after the production checklist and
-an owner-approved release window. Enabling payments remains a separate decision.
+an owner-approved release window. Do not infer approval from a runtime flag or
+silently change the current environment during an unrelated code release.
 
-**Release blocker:** the currently published app-oriented privacy policy and
-terms do not cover the PPI service and conflict with its professional-service
-positioning. The owner and counsel must approve and publish PPI-specific privacy
-and service terms before this release. This repository does not supply or
-publish replacement legal text.
+**Release blocker:** the public privacy policy and terms observed 2026-09-07 do
+contain app and PPI sections, but publication does not prove owner/counsel
+approval or the licensing and insurance checks in the production checklist.
+Record those approvals before release; engineering must not infer them.
 
-1. Clear the legal release blocker above and record owner approval for the
+1. Clear the business/legal approval blocker above and record owner approval for the
    release window.
 2. Back up production D1 and record the current successful Pages deployment.
 3. Reconcile the recovered `0002` migration before code rollout. Using only an
@@ -95,20 +95,24 @@ publish replacement legal text.
    application code. Confirm the stored PPI configuration JSON is valid before
    applying the migration; invalid JSON must be repaired or explicitly reviewed
    so the documented default buffers are used.
-6. Export or reconstruct the actual production Pages configuration outside the
+6. Apply `0005_request_attribution.sql` only after `0004`. Verify the
+   `ppi_requests.attribution_source` column has the `ppi_unknown` default and
+   the source index exists before deploying code that writes the field.
+7. Export or reconstruct the actual production Pages configuration outside the
    repository and review every project name, binding name/ID, bucket, variable,
    route, branch, and compatibility setting. There is intentionally no tracked
    default `wrangler.toml`; never use `wrangler.local.toml` or the generated
    preview configuration for production.
-7. Confirm production variables/secrets and Access protection; set
-   `PUBLIC_BASE_URL=https://getautoclarity.com`, and keep
-   `PPI_MODE=request`, `PAYMENTS_ENABLED=false`, and `STRIPE_ENV=test` unless the
-   owner separately approves the live-payment checklist.
-8. Deploy the reviewed build to the production branch using only that audited
+8. Confirm production variables/secrets and Access protection; set
+   `PUBLIC_BASE_URL=https://getautoclarity.com`. Compare `PPI_MODE`,
+   `PAYMENTS_ENABLED`, and `STRIPE_ENV` to the separately approved live-payment
+   decision; do not silently change them as part of this release.
+9. Deploy the reviewed build to the production branch using only that audited
    production configuration.
-9. Smoke-test homepage, PPI page, redirects, runtime config, admin lock, and a
+10. Smoke-test homepage, PPI page, redirects, runtime config, admin lock, public
+   fact documents, and a
    controlled non-customer request flow. Do not use real customer data in tests.
-10. Roll back by promoting/redeploying the previously recorded Pages deployment;
+11. Roll back by promoting/redeploying the previously recorded Pages deployment;
    do not change DNS or delete production data.
 
 ## Optional enhancement (documented, not built)

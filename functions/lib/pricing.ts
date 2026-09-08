@@ -88,7 +88,7 @@ export function suggestTier(v: VehicleFacts, now = new Date()): TierSuggestion {
   }
 
   if (v.modStatus === 'heavy') {
-    if (tier === 'standard') tier = 'euro_luxury_performance';
+    tier = 'exotic_collector';
     reasons.push('Heavily modified — additional inspection complexity');
     manualReasons.push('Heavily modified vehicle — review the modification list before quoting.');
   } else if (v.modStatus === 'light') {
@@ -162,13 +162,24 @@ export interface QuoteTotals {
 }
 
 export function computeQuoteTotals(lines: QuoteLineInput[]): QuoteTotals {
+  if (lines.length === 0) throw new Error('Quote must contain line items');
   let subtotal = 0;
   let travel = 0;
   let addons = 0;
   let discount = 0;
+  let baseLines = 0;
   for (const line of lines) {
+    if (!Number.isSafeInteger(line.amountCents)) {
+      throw new Error('Quote line amounts must be safe integer cents');
+    }
+    if (line.kind === 'discount') {
+      if (line.amountCents >= 0) throw new Error('Discount line amounts must be negative');
+    } else if (line.amountCents < 0) {
+      throw new Error('Charge line amounts cannot be negative');
+    }
     switch (line.kind) {
       case 'base':
+        baseLines++;
         subtotal += line.amountCents;
         break;
       case 'travel':
@@ -178,12 +189,16 @@ export function computeQuoteTotals(lines: QuoteLineInput[]): QuoteTotals {
         addons += line.amountCents;
         break;
       case 'discount':
-        discount += Math.abs(line.amountCents);
+        discount -= line.amountCents;
         break;
     }
+    if (![subtotal, travel, addons, discount].every(Number.isSafeInteger)) {
+      throw new Error('Quote components exceed safe integer cents');
+    }
   }
+  if (baseLines !== 1 || subtotal <= 0) throw new Error('Quote must contain one positive base line');
   const total = subtotal + travel + addons - discount;
-  if (total < 0) throw new Error('Quote total cannot be negative');
+  if (!Number.isSafeInteger(total) || total <= 0) throw new Error('Quote total must be positive safe integer cents');
   return { subtotalCents: subtotal, travelCents: travel, addonsCents: addons, discountCents: discount, totalCents: total };
 }
 
@@ -216,20 +231,30 @@ export type CancellationOutcome =
   | { kind: 'one_free_reschedule'; label: string }
   | { kind: 'admin_review'; label: string };
 
+function formatHours(hours: number): string {
+  return `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+}
+
 /**
- * Draft policy calculator. Late/exceptional cases always land on admin_review —
+ * Policy calculator. Late/exceptional cases always land on admin_review —
  * the system never auto-forfeits a customer's money.
  */
 export function cancellationOutcome(appointmentAtIso: string, config: PpiConfig, now = new Date()): CancellationOutcome {
   const hoursUntil = (new Date(appointmentAtIso).getTime() - now.getTime()) / 3600_000;
   if (hoursUntil >= config.cancellation.fullRefundHours) {
-    return { kind: 'refund_or_reschedule', label: 'More than 48 hours out — full refund or free rescheduling.' };
+    return {
+      kind: 'refund_or_reschedule',
+      label: `${formatHours(config.cancellation.fullRefundHours)} or more before the appointment — full refund or free rescheduling.`,
+    };
   }
   if (hoursUntil >= config.cancellation.rescheduleHours) {
-    return { kind: 'one_free_reschedule', label: 'Between 24 and 48 hours out — one free reschedule.' };
+    return {
+      kind: 'one_free_reschedule',
+      label: `At least ${formatHours(config.cancellation.rescheduleHours)} but less than ${formatHours(config.cancellation.fullRefundHours)} before the appointment — one free reschedule.`,
+    };
   }
   return {
     kind: 'admin_review',
-    label: 'Less than 24 hours out — reviewed personally; a transferable service credit may be offered.',
+    label: `Less than ${formatHours(config.cancellation.rescheduleHours)} before the appointment — reviewed personally; a transferable service credit may be offered.`,
   };
 }

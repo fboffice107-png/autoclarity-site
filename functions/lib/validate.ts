@@ -9,7 +9,50 @@ export interface FieldErrors {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const ZIP_RE = /^\d{5}$/;
-const ATTRIBUTION_RE = /^ppi_(unknown|direct|internal|search|social|directory|referral|campaign|google|bing|yahoo|duckduckgo|facebook|instagram|tiktok|youtube|reddit|nextdoor|yelp|apple|email)(_(cpc|organic|social|paid_social|email|referral|display))?$/;
+export const ATTRIBUTION_SOURCES = [
+  'ppi_unknown',
+  'ppi_direct',
+  'ppi_internal',
+  'ppi_search_organic',
+  'ppi_social_social',
+  'ppi_directory_referral',
+  'ppi_referral_referral',
+  'ppi_google_cpc',
+  'ppi_google_organic',
+  'ppi_bing_cpc',
+  'ppi_bing_organic',
+  'ppi_yahoo_organic',
+  'ppi_duckduckgo_organic',
+  'ppi_facebook_social',
+  'ppi_facebook_paid_social',
+  'ppi_instagram_social',
+  'ppi_instagram_paid_social',
+  'ppi_tiktok_social',
+  'ppi_tiktok_paid_social',
+  'ppi_youtube_social',
+  'ppi_youtube_paid_social',
+  'ppi_reddit_social',
+  'ppi_reddit_paid_social',
+  'ppi_nextdoor_referral',
+  'ppi_yelp_referral',
+  'ppi_apple_referral',
+  'ppi_email_email',
+  'ppi_campaign_cpc',
+  'ppi_campaign_organic',
+  'ppi_campaign_social',
+  'ppi_campaign_paid_social',
+  'ppi_campaign_email',
+  'ppi_campaign_referral',
+  'ppi_campaign_display',
+  'ppi_google_business_profile',
+  'ppi_bing_places',
+  'ppi_apple_maps',
+  'ppi_chatgpt_search',
+  'ppi_perplexity_search',
+  'ppi_claude_search',
+] as const;
+
+const ATTRIBUTION_SOURCE_SET = new Set<string>(ATTRIBUTION_SOURCES);
 
 export function validEmail(v: string): boolean {
   return v.length <= 254 && EMAIL_RE.test(v);
@@ -54,7 +97,7 @@ export function intInRange(v: unknown, min: number, max: number): number | null 
  * Unknown, absent, or manipulated values never become a fabricated channel. */
 export function normalizeAttributionSource(v: unknown): string {
   const value = clampStr(v, 60).toLowerCase();
-  return ATTRIBUTION_RE.test(value) ? value : 'ppi_unknown';
+  return ATTRIBUTION_SOURCE_SET.has(value) ? value : 'ppi_unknown';
 }
 
 export interface IntakePayload {

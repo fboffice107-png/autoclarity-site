@@ -44,6 +44,14 @@ describe('originAllowed', () => {
   it('allows non-browser clients (no Origin header)', () => {
     expect(originAllowed(req(null), undefined)).toBe(true);
   });
+  it('requires an exact Origin when requested for browser-only admin writes', () => {
+    expect(originAllowed(req(null), 'https://getautoclarity.com', true)).toBe(false);
+    expect(originAllowed(req('null'), 'https://getautoclarity.com', true)).toBe(false);
+    expect(originAllowed(req('https://getautoclarity.com'), 'https://getautoclarity.com', true)).toBe(true);
+    expect(originAllowed(req('http://getautoclarity.com'), 'https://getautoclarity.com', true)).toBe(false);
+    expect(originAllowed(req('https://admin.getautoclarity.com'), 'https://getautoclarity.com', true)).toBe(false);
+    expect(originAllowed(req('https://getautoclarity.com:8443'), 'https://getautoclarity.com', true)).toBe(false);
+  });
   it('rejects foreign origins', () => {
     expect(originAllowed(req('https://evil.example'), 'https://getautoclarity.com')).toBe(false);
   });

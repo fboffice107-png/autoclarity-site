@@ -2,7 +2,7 @@
 # Dynamic API responses get their headers from functions/_middleware.ts.
 
 /*
-  X-AutoClarity-Build: ac-ai-20260907-r1
+  X-AutoClarity-Build: ac-ai-20260907-r2
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
@@ -13,6 +13,13 @@
 # Homepage embeds the YouTube walkthrough.
 /
   Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src https://www.youtube-nocookie.com; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests
+
+# Legal pages are first-party only.
+/terms
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests
+
+/privacy
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests
 
 # PPI landing page — allows Turnstile and the camera-assisted VIN scan.
 /las-vegas-pre-purchase-inspection/*

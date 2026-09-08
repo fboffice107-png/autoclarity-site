@@ -23,6 +23,7 @@ describe('status state machine', () => {
     expect(canTransition('completed', 'submitted')).toBe(false);
     expect(canTransition('customer_cancelled', 'confirmed')).toBe(false);
     expect(canTransition('refunded', 'confirmed')).toBe(false);
+    expect(canTransition('disputed', 'refunded')).toBe(false);
   });
 
   it('allows refunds and disputes where money moved', () => {

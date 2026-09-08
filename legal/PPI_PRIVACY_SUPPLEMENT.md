@@ -1,20 +1,12 @@
 # Privacy Policy Supplement — Las Vegas Pre-Purchase Inspection Service
 
-> **LEGAL REVIEW REQUIRED BEFORE LIVE MODE** — owner-review draft. This
-> supplements the existing AutoClarity privacy policy (privacy.html), which
-> currently describes only the iPhone app. Publish the combined/updated policy
-> before accepting live PPI customers. Not legal advice.
+This is the factual source for the PPI-specific section of AutoClarity's
+published privacy policy and the versioned PPI privacy notice. The iPhone app's
+Apple/RevenueCat disclosures remain specific to the app. The physical PPI
+service separately collects request and booking records and uses Stripe for
+payment processing.
 
-**Why this is needed:** the current site policy describes an app whose payments
-run through Apple and which stores no service records. The PPI service is
-different: it collects booking data and payments run through **Stripe** — the
-policy must say so. The app's Apple/RevenueCat subscription language stays true
-for the app, but can no longer be presented as covering everything AutoClarity
-does. Likewise, the in-person inspection creates a real service relationship
-governed by the PPI Service Agreement — the app's "informational guidance only"
-framing applies to the app, not to the physical inspection.
-
-## Draft section to add to the published privacy policy
+## PPI privacy disclosure
 
 ### The Las Vegas Pre-Purchase Inspection service
 
@@ -38,6 +30,15 @@ inspection:
 - **Payment status** — payments for inspections are processed by **Stripe**.
   AutoClarity never receives or stores your full card number. We keep the
   payment amount, its status, and Stripe's reference identifiers.
+- **Limited PPI activity data** — an allowlisted event name, optional form step
+  or source label, and timestamp. The activity table has no fields for your
+  name, contact details, VIN, inspection address, message content, or
+  payment-card details.
+- **Browser storage** — while you complete the request form, your browser keeps
+  the entered fields as a local draft for up to seven days; successful
+  submission or the clear-draft control removes it. The customer portal keeps
+  its secure-link token in that browser tab's session storage so it can return
+  from Stripe Checkout.
 
 **Service providers:** Stripe (payments), our transactional email provider
 (delivery of confirmations and updates), and Cloudflare (website hosting,
@@ -46,26 +47,26 @@ database, file storage, and bot protection).
 **What we don't do:** we do not sell your personal information, and we do not
 send marketing messages unless you separately opted in.
 
-**Retention:** service and payment records are retained as required for legal,
-tax, and dispute purposes; uploaded images are kept only as long as useful for
-your inspection. You may request access, correction, or deletion of your data
-at support@getautoclarity.com; we will honor requests except where retention is
-legally required.
+**Retention:** service and payment records are retained for operating,
+accounting, refund, fraud-prevention, and dispute-handling purposes. Uploaded
+images are retained under the current PPI retention plan. You may request
+access, correction, or deletion of your data at support@getautoclarity.com;
+some records may need to be retained for an applicable business or legal
+obligation.
 
-**Security:** we use industry-standard safeguards (encrypted connections,
-access-controlled storage, private file storage). No method of transmission or
-storage is 100% secure.
+**Security:** AutoClarity uses encrypted connections, access-controlled data
+systems, and private file storage. No method of transmission or storage is
+100% secure.
 
 **Scope note:** the AutoClarity iPhone app's subscription remains an Apple App
 Store purchase governed by the app's terms; the in-person inspection service is
 purchased separately on this website and governed by the PPI Service Agreement.
 
-## Terms-of-use touchpoint (flag for the same review)
+## Terms-of-use scope
 
-`terms.html` should gain one clarifying line: app terms govern the app; the
-in-person PPI service is governed by the PPI Service Agreement presented at
-booking. Do not state that AutoClarity provides "information only" in a way
-that would contradict selling a physical inspection.
+The published Terms should distinguish the products: app-specific terms govern
+the iPhone app, while the in-person PPI service is governed by the exact quote
+and current PPI agreements presented before payment.
 
 ## Where the agreement texts live
 
@@ -73,5 +74,5 @@ The nine customer-facing PPI documents (service agreement, scope & limitations,
 cancellation policy, seller access, road test, photo consent, underbody
 limitations, privacy notice, e-communications consent) are versioned in
 `functions/lib/agreements.ts` and shown to customers in the portal at
-acceptance time. Counsel edits should be applied there (bump the version), so
-acceptances always bind to an exact document hash.
+acceptance time. Publish any content change as a new version so existing
+acceptance evidence remains bound to its original document hash.

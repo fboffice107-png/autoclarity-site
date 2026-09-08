@@ -9,6 +9,7 @@ import { modeFlags } from '../../lib/types.ts';
 import { getConfig } from '../../lib/config.ts';
 import { requirePortal } from '../../lib/portal.ts';
 import { errorJson, json, newId, nowIso, clampStr, originAllowed } from '../../lib/util.ts';
+import { readMultipartFormData, requestBodyErrorResponse } from '../../lib/request-body.ts';
 
 const KIND_OPTIONS = ['listing', 'vin', 'dashboard', 'damage', 'other'] as const;
 
@@ -45,11 +46,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   if (!auth.ok) return auth.response;
   const config = await getConfig(env.DB);
 
-  const contentLength = Number(request.headers.get('content-length') ?? '0');
-  if (contentLength > config.uploads.maxBytes + 64 * 1024) {
-    return errorJson('too_large', `Each image must be under ${Math.round(config.uploads.maxBytes / 1048576)} MB.`, 413);
-  }
-
   const existing = await env.DB
     .prepare(`SELECT COUNT(*) AS n FROM request_uploads WHERE request_id = ? AND deleted_at IS NULL`)
     .bind(auth.requestId)
@@ -60,9 +56,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   let form: FormData;
   try {
-    form = await request.formData();
-  } catch {
-    return errorJson('bad_form', 'Expected multipart form data.', 400);
+    form = await readMultipartFormData(request, config.uploads.maxBytes + 1024 * 1024);
+  } catch (error) {
+    return requestBodyErrorResponse(error);
   }
   const file = form.get('file');
   if (!(file instanceof File)) return errorJson('validation', 'No file provided.', 422);

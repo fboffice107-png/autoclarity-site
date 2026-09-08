@@ -95,6 +95,7 @@ export const DEFAULT_CONFIG: PpiConfig = {
         label: 'Standard Vehicle PPI',
         priceCents: 19900, // regular/target
         launchPriceCents: 14900, // introductory
+        startingAt: true,
         blurb: 'Common unmodified domestic, Japanese and Korean passenger vehicles and light trucks.',
       },
       euro_luxury_performance: {
@@ -102,7 +103,8 @@ export const DEFAULT_CONFIG: PpiConfig = {
         label: 'European, Luxury or Performance PPI',
         priceCents: 29900,
         launchPriceCents: 24900,
-        blurb: 'Examples include Corvette, BMW, Mercedes-Benz, Audi, Land Rover, Porsche, and modified or higher-complexity vehicles.',
+        startingAt: true,
+        blurb: 'Examples include Corvette, BMW, Mercedes-Benz, Audi, Land Rover, Porsche, and other luxury or higher-complexity vehicles.',
       },
       exotic_collector: {
         key: 'exotic_collector',
@@ -245,11 +247,9 @@ function deepMergeOverrides(base: Record<string, unknown>, patch: unknown): Reco
 export function promoActive(config: PpiConfig, now = new Date()): boolean {
   const p = config.pricing.promo;
   if (!p.enabled) return false;
-  if (p.endsAt) {
-    const ends = new Date(p.endsAt);
-    if (!Number.isNaN(ends.getTime()) && now > ends) return false;
-  }
-  return true;
+  if (!p.endsAt) return false;
+  const ends = new Date(p.endsAt);
+  return !Number.isNaN(ends.getTime()) && now <= ends;
 }
 
 /**
@@ -286,6 +286,13 @@ export function tierDisplayPrice(
   const startingAt = tier.startingAt === true;
   if (launchActive(config, now) && typeof tier.launchPriceCents === 'number' && tier.launchPriceCents < tier.priceCents) {
     return { priceCents: tier.launchPriceCents, wasCents: tier.priceCents, startingAt };
+  }
+  if (
+    tierKey === 'standard'
+    && promoActive(config, now)
+    && config.pricing.promo.priceCents < tier.priceCents
+  ) {
+    return { priceCents: config.pricing.promo.priceCents, wasCents: tier.priceCents, startingAt };
   }
   return { priceCents: tier.priceCents, wasCents: null, startingAt };
 }

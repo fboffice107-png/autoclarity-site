@@ -16,7 +16,9 @@ those on is an owner decision gated by the production checklist.**
    - URL: `https://<preview-host>/api/stripe/webhook`
    - Events: `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
      `checkout.session.async_payment_failed`, `checkout.session.expired`,
-     `charge.refunded`, `charge.dispute.created`, `refund.updated`, and
+     `charge.refunded`, `charge.dispute.created`, `charge.dispute.updated`,
+     `charge.dispute.closed`, `charge.dispute.funds_reinstated`,
+     `charge.dispute.funds_withdrawn`, `refund.created`, `refund.updated`, and
      `refund.failed`
    - Set the webhook endpoint to Stripe API version `2024-10-28.acacia` or a
      later compatible version, then exercise the refund tests before rollout.
@@ -36,21 +38,33 @@ those on is an owner decision gated by the production checklist.**
 - The **webhook** is the only thing that confirms bookings. Signatures are
   HMAC-verified with a 5-minute tolerance; event ids are recorded in
   `stripe_events` so replays are acknowledged but never reprocessed.
-- Refund attempts are recorded and reconciled from `refund.updated` and
-  `refund.failed`; Stripe's `charge.refunded` remains the final refunded-balance
-  authority.
+- Individual Stripe Refund objects are recorded from `refund.created`,
+  `refund.updated`, and `refund.failed`. Payment totals are rebuilt from the
+  currently succeeded Refund ledger, so a later authoritative failure can
+  reduce a previously reported refund. `charge.refunded` remains a
+  compatibility/final-balance cross-check and cannot override a newer Refund
+  event.
+- Stripe Dispute lifecycle and funds movement are recorded on independent,
+  ordered clocks from `charge.dispute.created`, `charge.dispute.updated`,
+  `charge.dispute.closed`, `charge.dispute.funds_reinstated`, and
+  `charge.dispute.funds_withdrawn`. A favorable outcome can release only the
+  payment's economic dispute latch after reinstated funds are recorded. It
+  never reopens a request, booking, slot, portal link, or capacity; those
+  require deliberate manual follow-up.
 - No card data ever touches the AutoClarity database.
 
-## Going live (LATER — owner-gated)
+## Production activation
 
-Do not do any of this until the production checklist passes and you have
-explicitly approved production deployment:
+Complete these steps only as part of an approved production deployment after
+the production checklist passes:
 
 1. Activate the Stripe account (business details, bank account).
 2. Live mode → API keys → `sk_live_...` → set as the **Production** secret.
 3. Live webhook endpoint at `https://getautoclarity.com/api/stripe/webhook`
-   with the same eight events and a compatible webhook API version → live
+   with the same thirteen events and a compatible webhook API version → live
    `whsec_...` secret.
 4. Production env vars: `STRIPE_ENV=live`, `PAYMENTS_ENABLED=true`,
    `PPI_MODE=live`, `PPI_ENV=production`.
-5. One small controlled live payment test with immediate refund (checklist item).
+5. Verify a live Checkout Session can be initialized from a genuine approved
+   quote without completing a charge. Do not use Stripe test cards in live mode.
+   A live charge/refund test requires separate explicit authorization.

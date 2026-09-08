@@ -18,6 +18,14 @@
     try { token = sessionStorage.getItem("ppi-portal-token") || ""; } catch (e) {}
   } else {
     try { sessionStorage.setItem("ppi-portal-token", token); } catch (e) {}
+    // The bearer link is needed only long enough to move it into this tab's
+    // session storage. Remove it from the address bar and browser history so
+    // screenshots, copied URLs and later history inspection do not expose it.
+    try {
+      params.delete("t");
+      var safeQuery = params.toString();
+      history.replaceState(null, "", location.pathname + (safeQuery ? "?" + safeQuery : "") + location.hash);
+    } catch (e) {}
   }
 
   if (!token) {
@@ -87,6 +95,53 @@
       .replace(/'/g, "&#39;");
   }
 
+  // Agreement source is controlled, immutable Markdown. Render only the small
+  // subset used by those documents, after escaping every source character, so
+  // headings, lists and emphasis are readable without admitting raw HTML.
+  function renderAgreementMarkdown(source) {
+    var lines = String(source == null ? "" : source).split(/\r?\n/);
+    var html = [];
+    var paragraph = [];
+    var inList = false;
+
+    function inline(text) {
+      return esc(text).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    }
+    function flushParagraph() {
+      if (!paragraph.length) return;
+      html.push("<p>" + inline(paragraph.join(" ")) + "</p>");
+      paragraph = [];
+    }
+    function closeList() {
+      if (!inList) return;
+      html.push("</ul>");
+      inList = false;
+    }
+
+    lines.forEach(function (line) {
+      var heading = line.match(/^##\s+(.+)$/);
+      var item = line.match(/^-\s+(.+)$/);
+      if (heading) {
+        flushParagraph();
+        closeList();
+        html.push("<h3>" + inline(heading[1]) + "</h3>");
+      } else if (item) {
+        flushParagraph();
+        if (!inList) { html.push("<ul>"); inList = true; }
+        html.push("<li>" + inline(item[1]) + "</li>");
+      } else if (!line.trim()) {
+        flushParagraph();
+        closeList();
+      } else {
+        closeList();
+        paragraph.push(line.trim());
+      }
+    });
+    flushParagraph();
+    closeList();
+    return html.join("");
+  }
+
   function money(cents) {
     return (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
   }
@@ -104,7 +159,8 @@
     quote_prepared: "", quote_sent: "good", awaiting_time_selection: "good",
     awaiting_agreement: "warn", awaiting_payment: "warn", confirmed: "good",
     inspection_in_progress: "good", report_in_progress: "good", completed: "good",
-    customer_cancelled: "bad", admin_cancelled: "bad", expired: "bad", refunded: "", disputed: "bad"
+    customer_cancelled: "bad", admin_cancelled: "bad", expired: "bad", refunded: "",
+    refund_reconciliation_needed: "bad", disputed: "bad"
   };
 
   function render() {
@@ -115,6 +171,13 @@
     var v = view;
     var html = "";
     var paidReselection = v.status === "awaiting_time_selection" && v.payment && ["succeeded", "partially_refunded"].indexOf(v.payment.status) !== -1;
+    var acceptedAgreementIds = new Set(v.agreements.accepted || []);
+    var needsCurrentAgreements = v.agreements.required.length > 0 && v.agreements.required.some(function (doc) {
+      return !acceptedAgreementIds.has(doc.id);
+    });
+    var hasHeldSlot = v.slots.some(function (slot) { return slot.status === "held"; });
+    var currentQuoteAndHold = Boolean(v.quote && !v.quote.expired && hasHeldSlot);
+    var canAcceptCurrentAgreements = needsCurrentAgreements && currentQuoteAndHold;
 
     html += '<div class="portal-topbar">' +
       "<h1>Request " + esc(v.ref) + "</h1>" +
@@ -124,7 +187,7 @@
     // ---------- summary ----------
     html += '<section class="portal-card"><h2>Vehicle &amp; location</h2><dl class="kv">' +
       "<dt>Vehicle</dt><dd>" + esc([v.vehicle.year, v.vehicle.make, v.vehicle.model, v.vehicle.trim].filter(Boolean).join(" ")) + "</dd>" +
-      "<dt>VIN</dt><dd>" + esc(v.vehicle.vin || "Not provided yet — required before the appointment is finalized") + "</dd>" +
+      "<dt>VIN</dt><dd>" + esc(v.vehicle.vin || "Not provided yet — share it with AutoClarity before the inspection when available") + "</dd>" +
       "<dt>Inspection area</dt><dd>" + esc([v.location.street, v.location.city, v.location.state, v.location.zip].filter(Boolean).join(", ")) + "</dd>" +
       "</dl></section>";
 
@@ -137,8 +200,14 @@
       quote_prepared: "Your quote is being finalized.",
       quote_sent: "Your exact price is ready below. Choose an appointment window to continue.",
       awaiting_time_selection: "Choose one of the offered appointment windows below.",
-      awaiting_agreement: "Almost there — review and accept the service agreements below.",
-      awaiting_payment: v.paymentsEnabled ? "Last step: secure payment reserves your appointment time." : "Online payment is currently unavailable. Contact AutoClarity to finish scheduling; your appointment is not confirmed.",
+      awaiting_agreement: canAcceptCurrentAgreements
+        ? "Almost there — review and accept the service agreements below."
+        : "The quote or held appointment needs to be refreshed before agreement acceptance. AutoClarity will provide the next available step.",
+      awaiting_payment: canAcceptCurrentAgreements
+        ? "Before payment, review and accept the current service agreements for this exact quote and appointment."
+        : (!needsCurrentAgreements && currentQuoteAndHold && v.paymentsEnabled
+          ? "Last step: pay the exact approved quote through Stripe. Successful payment confirms your appointment."
+          : "Payment is not available until the current quote, appointment hold and agreements are ready. AutoClarity will provide the next step."),
       confirmed: "You’re booked. The technician will meet the vehicle at the scheduled time.",
       inspection_in_progress: "Your inspection is underway.",
       report_in_progress: "The inspection is done — your written results are being prepared.",
@@ -147,7 +216,8 @@
       admin_cancelled: "This request was cancelled by AutoClarity.",
       expired: "This request expired. Submit a new one whenever you’re ready.",
       refunded: "This request was refunded.",
-      disputed: "This payment is under dispute review."
+      refund_reconciliation_needed: "Stripe changed the status of a previously completed refund. Your appointment remains closed while AutoClarity reconciles the payment record; you do not need to pay again.",
+      disputed: "This payment is under dispute review. Your original appointment remains closed even if the payment provider later resolves the dispute; AutoClarity will contact you before any new scheduling step."
     };
     if (guidance[v.status]) {
       html += '<div class="notice info">' + esc(guidance[v.status]) + "</div>";
@@ -193,13 +263,13 @@
     }
 
     // ---------- agreements ----------
-    if (v.status === "awaiting_agreement") {
+    if ((v.status === "awaiting_agreement" || v.status === "awaiting_payment") && canAcceptCurrentAgreements) {
       html += '<section class="portal-card"><h2>Service agreements</h2>' +
-        '<p style="color:var(--text-2);font-size:14.5px;margin-bottom:12px;">Please open and accept each document. One typed signature covers all of them.</p>' +
+        '<p style="color:var(--text-2);font-size:14.5px;margin-bottom:12px;">These are the current agreements for the exact quote and appointment time shown above. Please open and accept each document. One typed signature covers all of them.</p>' +
         '<form id="agreeForm">';
       v.agreements.required.forEach(function (doc) {
         html += '<details class="agree-doc"><summary>' + esc(doc.title) + ' <span class="opt">(v' + doc.version + ')</span></summary>' +
-          '<div class="agree-body">' + esc(doc.bodyMd) + "</div></details>" +
+          '<div class="agree-body">' + renderAgreementMarkdown(doc.bodyMd) + "</div></details>" +
           '<div class="agree-check"><input type="checkbox" id="agree_' + esc(doc.id) + '" data-agree="' + esc(doc.id) + '" />' +
           '<label for="agree_' + esc(doc.id) + '">I have read and accept the ' + esc(doc.title) + "</label></div>";
       });
@@ -210,15 +280,16 @@
     }
 
     // ---------- payment ----------
-    if (v.status === "awaiting_payment" && v.paymentsEnabled) {
+    if (v.status === "awaiting_payment" && !needsCurrentAgreements && currentQuoteAndHold && v.paymentsEnabled) {
       html += '<section class="portal-card"><h2>Payment</h2>' +
-        '<p style="color:var(--text-2);font-size:15px;">Full payment reserves the approved appointment time. Your appointment is not confirmed until payment is successfully completed.</p>' +
-        '<button class="btn btn-primary btn-lg" id="checkoutBtn" style="width:100%;margin-top:14px;">Pay securely with Stripe' +
+        '<p style="color:var(--text-2);font-size:15px;">Stripe will charge the exact server-approved quote total shown above. Your appointment is confirmed only after payment succeeds.</p>' +
+        '<p class="field-hint">The cancellation, rescheduling, vehicle-transfer, mobile-service, and refund terms you accepted apply to this booking. A transfer to a replacement vehicle has no transfer fee, but AutoClarity re-reviews and re-quotes that vehicle: you pay any increase before the replacement booking is confirmed, receive a refund of any decrease, or carry the same payment forward when the approved totals match.</p>' +
+        '<button class="btn btn-primary btn-lg" id="checkoutBtn" style="width:100%;margin-top:14px;">Pay exact quote securely with Stripe' +
         (v.quote ? " — " + money(v.quote.totalCents) : "") + "</button>" +
         '<p class="form-status" id="checkoutStatus" role="status" aria-live="polite"></p></section>';
-    } else if (v.status === "awaiting_payment") {
+    } else if (v.status === "awaiting_payment" && !canAcceptCurrentAgreements) {
       html += '<section class="portal-card"><h2>Payment unavailable</h2>' +
-        '<div class="notice warn">Online payment is currently unavailable. Contact AutoClarity to finish scheduling. No charge has been started, and your appointment is not confirmed.</div></section>';
+        '<div class="notice warn">Online payment cannot start until the current quote, held appointment, current agreements, and payment service are all ready. Contact AutoClarity to finish scheduling. No charge has been started, and your appointment is not confirmed.</div></section>';
     }
 
     // ---------- confirmed booking ----------
@@ -254,10 +325,10 @@
       '<p class="form-status" id="msgStatus" role="status" aria-live="polite"></p></form></section>';
 
     // ---------- cancel ----------
-    var terminal = ["customer_cancelled", "admin_cancelled", "expired", "refunded", "completed", "disputed"];
+    var terminal = ["customer_cancelled", "admin_cancelled", "expired", "refunded", "refund_reconciliation_needed", "completed", "disputed"];
     if (terminal.indexOf(v.status) === -1) {
       html += '<section class="portal-card"><h2>Need to cancel or reschedule?</h2>' +
-        '<p style="color:var(--text-2);font-size:14.5px;">Before payment, cancelling is instant and free. After payment, requests are reviewed personally under the cancellation policy you accepted — nothing is forfeited automatically.</p>' +
+        '<p style="color:var(--text-2);font-size:14.5px;">Before payment, cancelling is instant and free. After payment, requests are reviewed personally under the cancellation policy you accepted — nothing is forfeited automatically. Your approved quote shows any separate mobile-service charge relevant to that review.</p>' +
         '<button class="btn btn-ghost" id="cancelBtn" style="margin-top:12px;">Request cancellation / reschedule</button>' +
         '<p class="form-status" id="cancelStatus" role="status" aria-live="polite"></p></section>';
     }

@@ -168,9 +168,14 @@ export async function loadPortalView(env: Env, config: PpiConfig, requestId: str
 
   const agreementDocs = await latestAgreements(db);
   const acceptances = await db
-    .prepare(`SELECT agreement_version_id, typed_name FROM agreement_acceptances WHERE request_id = ?`)
-    .bind(requestId)
+    .prepare(
+      `SELECT agreement_version_id, typed_name FROM agreement_acceptances
+       WHERE request_id = ? AND quote_id = ? AND accepted = 1`,
+    )
+    .bind(requestId, quote?.id ?? '')
     .all<{ agreement_version_id: string; typed_name: string }>();
+  const currentAgreementIds = new Set(agreementDocs.map((doc) => doc.id));
+  const currentAcceptances = (acceptances.results ?? []).filter((acceptance) => currentAgreementIds.has(acceptance.agreement_version_id));
 
   const paymentRow = await db
     .prepare(`SELECT status, amount_cents FROM payments WHERE request_id = ? ORDER BY created_at DESC LIMIT 1`)
@@ -227,8 +232,8 @@ export async function loadPortalView(env: Env, config: PpiConfig, requestId: str
     })),
     agreements: {
       required: agreementDocs.map((d) => ({ id: d.id, docKey: d.doc_key, title: d.title, version: d.version, bodyMd: d.body_md })),
-      accepted: (acceptances.results ?? []).map((a) => a.agreement_version_id),
-      typedName: acceptances.results?.[0]?.typed_name ?? null,
+      accepted: currentAcceptances.map((a) => a.agreement_version_id),
+      typedName: currentAcceptances[0]?.typed_name ?? null,
     },
     payment: paymentRow ? { status: paymentRow.status, amountCents: paymentRow.amount_cents } : null,
     booking: bookingRow ? { status: bookingRow.status, startsAt: bookingRow.starts_at, endsAt: bookingRow.ends_at } : null,

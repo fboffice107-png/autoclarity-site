@@ -16,8 +16,10 @@
   };
 
   var intakeShell = document.getElementById("intakeShell");
-  var waitlistShell = document.getElementById("waitlistShell");
-  var fallbackShell = document.getElementById("fallbackShell");
+  var waitlistTemplate = document.getElementById("waitlistTemplate");
+  var fallbackTemplate = document.getElementById("fallbackTemplate");
+  var waitlistShell = null;
+  var fallbackShell = null;
   var form = document.getElementById("intakeForm");
   if (!form) return;
 
@@ -31,6 +33,80 @@
   var submissionKey = "";
   var ATTRIBUTION_KEY = "ppi-attribution-v1";
   var attributionSource = getAttributionSource();
+
+  /* Dormant waitlist/outage copy lives in inert templates. Mount only the
+     state confirmed by runtime configuration, then remove both templates from
+     the rendered document so healthy live mode exposes no contradictory UI. */
+  function mountConditionalShell(template, fallbackAnchor) {
+    if (!template || !template.content || !template.content.firstElementChild) return null;
+    var node = template.content.firstElementChild.cloneNode(true);
+    var anchor = fallbackAnchor || (template.parentNode ? template : null);
+    if (!anchor || !anchor.parentNode) return null;
+    anchor.parentNode.insertBefore(node, anchor);
+    node.classList.add("in-view");
+    return node;
+  }
+
+  function removeRuntimeTemplates() {
+    if (waitlistTemplate && waitlistTemplate.parentNode) waitlistTemplate.remove();
+    if (fallbackTemplate && fallbackTemplate.parentNode) fallbackTemplate.remove();
+  }
+
+  function runtimeConfigIsValid(cfg) {
+    return Boolean(
+      cfg &&
+      ["live", "request", "waitlist"].indexOf(cfg.mode) !== -1 &&
+      typeof cfg.paymentsEnabled === "boolean" &&
+      typeof cfg.bookingEnabled === "boolean" &&
+      typeof cfg.uploadsEnabled === "boolean" &&
+      typeof cfg.turnstileSiteKey === "string" &&
+      cfg.turnstileSiteKey.length > 0 &&
+      cfg.pricing && Array.isArray(cfg.pricing.tiers) && cfg.pricing.tiers.length > 0 &&
+      cfg.travel && Array.isArray(cfg.travel.bands)
+    );
+  }
+
+  function applyWaitlistCopy() {
+    document.querySelectorAll("[data-request-cta]").forEach(function (cta) {
+      cta.textContent = "Join the Launch List";
+    });
+    var title = document.getElementById("request-title");
+    var subtitle = title && title.parentNode ? title.parentNode.querySelector(".section-sub") : null;
+    if (title) title.textContent = "Join the Las Vegas inspection launch list";
+    if (subtitle) subtitle.textContent = "Share your email and ZIP code to hear when Las Vegas appointments open.";
+  }
+
+  function activateWaitlistState(moveFocus) {
+    if (fallbackShell && fallbackShell.parentNode) fallbackShell.remove();
+    intakeShell.hidden = true;
+    if (!waitlistShell || !waitlistShell.isConnected) {
+      waitlistShell = mountConditionalShell(waitlistTemplate, intakeShell);
+    }
+    if (!waitlistShell) throw new Error("waitlist template unavailable");
+    applyWaitlistCopy();
+    setupWaitlist();
+    removeRuntimeTemplates();
+    if (moveFocus) {
+      var heading = waitlistShell.querySelector("h3");
+      if (heading) {
+        heading.setAttribute("tabindex", "-1");
+        heading.focus({ preventScroll: true });
+      }
+    }
+  }
+
+  function activateFallbackState() {
+    intakeShell.hidden = false;
+    if (waitlistShell && waitlistShell.parentNode) waitlistShell.remove();
+    if (!fallbackShell || !fallbackShell.isConnected) {
+      fallbackShell = mountConditionalShell(fallbackTemplate, intakeShell);
+    }
+    if (!fallbackShell) throw new Error("fallback template unavailable");
+    removeRuntimeTemplates();
+    if (!document.activeElement || document.activeElement === document.body) {
+      fallbackShell.focus({ preventScroll: true });
+    }
+  }
 
   /* Fetch JSON without leaving the form stuck forever. The caller still owns
      the important ambiguity: a timed-out submission may have reached the
@@ -75,7 +151,7 @@
     bar.id = "ppiSticky";
     bar.className = "ppi-sticky";
     bar.setAttribute("aria-label", "Quick actions");
-    var html = '<a class="ppi-sticky-primary" href="#request" data-analytics="ppi_cta_click" data-step="sticky">Request Inspection</a>';
+    var html = '<a class="ppi-sticky-primary" href="#request" data-request-cta data-analytics="ppi_cta_click" data-step="request_intent_sticky">Request an Inspection</a>';
     if (contact && contact.configured && contact.callEnabled) html += '<a class="ppi-sticky-secondary" href="tel:' + tel + '" data-analytics="ppi_call_click" data-step="sticky" aria-label="Call ' + escapeHtml(display) + '">Call</a>';
     if (contact && contact.configured && contact.smsEnabled) html += '<a class="ppi-sticky-secondary" href="sms:' + tel + '" data-analytics="ppi_text_click" data-step="sticky">Text</a>';
     html += '<button type="button" class="ppi-sticky-close" id="ppiStickyClose" aria-label="Dismiss">✕</button>';
@@ -102,15 +178,41 @@
   }
 
   /* ---------- analytics (no PII ever) ---------- */
+  var ALLOWED_ATTRIBUTIONS = [
+    "ppi_unknown", "ppi_direct", "ppi_internal", "ppi_search_organic", "ppi_social_social",
+    "ppi_directory_referral", "ppi_referral_referral", "ppi_google_cpc", "ppi_google_organic",
+    "ppi_bing_cpc", "ppi_bing_organic", "ppi_yahoo_organic", "ppi_duckduckgo_organic",
+    "ppi_facebook_social", "ppi_facebook_paid_social", "ppi_instagram_social",
+    "ppi_instagram_paid_social", "ppi_tiktok_social", "ppi_tiktok_paid_social",
+    "ppi_youtube_social", "ppi_youtube_paid_social", "ppi_reddit_social",
+    "ppi_reddit_paid_social", "ppi_nextdoor_referral", "ppi_yelp_referral", "ppi_apple_referral",
+    "ppi_email_email", "ppi_campaign_cpc", "ppi_campaign_organic", "ppi_campaign_social",
+    "ppi_campaign_paid_social", "ppi_campaign_email", "ppi_campaign_referral", "ppi_campaign_display",
+    "ppi_google_business_profile", "ppi_bing_places", "ppi_apple_maps", "ppi_chatgpt_search",
+    "ppi_perplexity_search", "ppi_claude_search"
+  ];
+
   function isAllowedAttribution(value) {
-    return /^ppi_(unknown|direct|internal|search|social|directory|referral|campaign|google|bing|yahoo|duckduckgo|facebook|instagram|tiktok|youtube|reddit|nextdoor|yelp|apple|email)(_(cpc|organic|social|paid_social|email|referral|display))?$/.test(String(value || ""));
+    return ALLOWED_ATTRIBUTIONS.indexOf(String(value || "")) !== -1;
   }
 
   function referrerCategory(host) {
-    if (/(^|\.)(google\.|bing\.com$|search\.yahoo\.com$|duckduckgo\.com$)/.test(host)) return { source: "search", medium: "organic" };
-    if (/(^|\.)(facebook\.com$|instagram\.com$|tiktok\.com$|youtube\.com$|reddit\.com$)/.test(host)) return { source: "social", medium: "social" };
-    if (/(^|\.)(nextdoor\.com$|yelp\.com$|maps\.apple\.com$)/.test(host)) return { source: "directory", medium: "referral" };
-    return { source: "referral", medium: "referral" };
+    if (/(^|\.)chatgpt\.com$/.test(host)) return "ppi_chatgpt_search";
+    if (/(^|\.)perplexity\.(ai|com)$/.test(host)) return "ppi_perplexity_search";
+    if (/(^|\.)claude\.ai$/.test(host)) return "ppi_claude_search";
+    if (/(^|\.)google\.[a-z.]+$/.test(host)) return "ppi_google_organic";
+    if (/(^|\.)bing\.com$/.test(host)) return "ppi_bing_organic";
+    if (/(^|\.)search\.yahoo\.com$/.test(host)) return "ppi_yahoo_organic";
+    if (/(^|\.)duckduckgo\.com$/.test(host)) return "ppi_duckduckgo_organic";
+    if (/(^|\.)facebook\.com$/.test(host)) return "ppi_facebook_social";
+    if (/(^|\.)instagram\.com$/.test(host)) return "ppi_instagram_social";
+    if (/(^|\.)tiktok\.com$/.test(host)) return "ppi_tiktok_social";
+    if (/(^|\.)youtube\.com$/.test(host)) return "ppi_youtube_social";
+    if (/(^|\.)reddit\.com$/.test(host)) return "ppi_reddit_social";
+    if (/(^|\.)nextdoor\.com$/.test(host)) return "ppi_nextdoor_referral";
+    if (/(^|\.)yelp\.com$/.test(host)) return "ppi_yelp_referral";
+    if (/(^|\.)maps\.apple\.com$/.test(host)) return "ppi_apple_maps";
+    return "ppi_referral_referral";
   }
 
   function getAttributionSource() {
@@ -129,32 +231,45 @@
       youtube: "youtube", reddit: "reddit", nextdoor: "nextdoor", yelp: "yelp",
       apple: "apple", newsletter: "email", email: "email"
     };
+    var dedicatedSourceMap = {
+      gbp: "ppi_google_business_profile", googlebusinessprofile: "ppi_google_business_profile",
+      google_business_profile: "ppi_google_business_profile", bingplaces: "ppi_bing_places",
+      bing_places: "ppi_bing_places", applemaps: "ppi_apple_maps", apple_maps: "ppi_apple_maps",
+      chatgpt: "ppi_chatgpt_search", openai: "ppi_chatgpt_search",
+      perplexity: "ppi_perplexity_search", claude: "ppi_claude_search", anthropic: "ppi_claude_search"
+    };
     var mediumMap = {
       cpc: "cpc", ppc: "cpc", paidsearch: "cpc", paid_search: "cpc",
       organic: "organic", social: "social", paidsocial: "paid_social",
       paid_social: "paid_social", email: "email", referral: "referral",
       display: "display"
     };
-    var source = "";
-    var medium = "";
+    var result = "";
     try {
       var params = new URLSearchParams(window.location.search);
       var rawSource = String(params.get("utm_source") || "").toLowerCase().replace(/[^a-z_]/g, "");
       var rawMedium = String(params.get("utm_medium") || "").toLowerCase().replace(/[^a-z_]/g, "");
-      source = sourceMap[rawSource] || (rawSource ? "campaign" : "");
-      medium = mediumMap[rawMedium] || "";
-      if (!source && medium) source = "campaign";
-      if (!source && document.referrer) {
+      if (dedicatedSourceMap[rawSource]) {
+        result = dedicatedSourceMap[rawSource];
+      } else if (rawSource || rawMedium) {
+        var source = sourceMap[rawSource] || (rawSource ? "campaign" : "");
+        var medium = mediumMap[rawMedium] || "";
+        if (!medium && /^(google|bing|yahoo|duckduckgo)$/.test(source)) medium = "organic";
+        if (!medium && /^(facebook|instagram|tiktok|youtube|reddit)$/.test(source)) medium = "social";
+        if (!medium && /^(nextdoor|yelp|apple)$/.test(source)) medium = "referral";
+        if (!medium && source === "email") medium = "email";
+        if (!source && medium) source = "campaign";
+        result = "ppi_" + source + (medium ? "_" + medium : "");
+        if (!isAllowedAttribution(result)) result = medium ? "ppi_campaign_" + medium : "ppi_direct";
+      }
+      if (!result && document.referrer) {
         var ref = new URL(document.referrer);
-        if (ref.origin === window.location.origin) source = "internal";
-        else {
-          var category = referrerCategory(ref.hostname.toLowerCase());
-          source = category.source;
-          medium = category.medium;
-        }
+        result = ref.origin === window.location.origin
+          ? "ppi_internal"
+          : referrerCategory(ref.hostname.toLowerCase());
       }
     } catch (e) {}
-    var result = "ppi_" + (source || "direct") + (medium ? "_" + medium : "");
+    if (!result) result = "ppi_direct";
     if (!isAllowedAttribution(result)) result = "ppi_direct";
     try { sessionStorage.setItem(ATTRIBUTION_KEY, result); } catch (e) {}
     return result;
@@ -187,18 +302,20 @@
     .then(function (response) {
       if (!response.ok) throw new Error("config " + response.status);
       var cfg = response.body;
+      if (!runtimeConfigIsValid(cfg)) throw new Error("invalid runtime config");
       runtime = cfg;
       applyPricing(cfg);
+      applyTravel(cfg);
       applyScanLanguage(cfg);
       applyPaymentLanguage(cfg);
-      applyContact(cfg);
       applyReviews(cfg);
       if (cfg.mode === "waitlist") {
-        intakeShell.hidden = true;
-        waitlistShell.hidden = false;
-        setupWaitlist();
+        activateWaitlistState();
       } else {
+        intakeShell.hidden = false;
+        applyContact(cfg);
         setupForm();
+        removeRuntimeTemplates();
       }
       track("ppi_page_view");
     })
@@ -206,12 +323,20 @@
       // No API reachable (e.g. static hosting): keep the multi-step form usable
       // and offer a prefilled email handoff. This is never called a receipt.
       staticMode = true;
-      fallbackShell.hidden = false;
+      activateFallbackState();
       setupForm();
       track("ppi_page_view");
     });
 
-  function money(cents) { return "$" + Math.round(cents / 100); }
+  function money(cents) {
+    var amount = Number(cents) / 100;
+    return amount.toLocaleString("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: Number(cents) % 100 === 0 ? 0 : 2,
+      maximumFractionDigits: 2
+    });
+  }
 
   function applyPricing(cfg) {
     if (!cfg.pricing) return;
@@ -222,15 +347,34 @@
       // window is active and a lower price is set for this tier.
       var wasEl = document.querySelector('[data-was="' + tier.key + '"]');
       var launchEl = document.querySelector('[data-launch="' + tier.key + '"]');
-      var prefixEl = document.querySelector('[data-prefix="' + tier.key + '"]');
       if (tier.wasCents && tier.wasCents > tier.priceCents) {
         if (wasEl) { wasEl.textContent = money(tier.wasCents); wasEl.hidden = false; }
-        if (prefixEl) prefixEl.textContent = tier.startingAt ? "Launch price, starting at" : "Launch price";
         if (launchEl) { launchEl.textContent = "Introductory Las Vegas launch pricing"; launchEl.hidden = false; }
-      } else if (prefixEl) {
-        prefixEl.textContent = tier.startingAt ? "Starting at" : "Flat rate";
       }
     });
+  }
+
+  function applyTravel(cfg) {
+    var table = document.getElementById("travelRows");
+    var travel = cfg && cfg.travel;
+    var bands = travel && Array.isArray(travel.bands) ? travel.bands : [];
+    if (!table || !bands.length) return;
+
+    var priorMax = -1;
+    var rows = [];
+    for (var i = 0; i < bands.length; i++) {
+      var maxMiles = Number(bands[i].maxMiles);
+      var feeCents = Number(bands[i].feeCents);
+      if (!Number.isInteger(maxMiles) || maxMiles <= priorMax || !Number.isSafeInteger(feeCents) || feeCents < 0) return;
+      var startMiles = priorMax + 1;
+      rows.push("<tr><th scope=\"row\">" + startMiles + "–" + maxMiles + " miles</th><td>" +
+        (feeCents === 0 ? "Included" : "+" + money(feeCents) + " mobile-service charge") + "</td></tr>");
+      priorMax = maxMiles;
+    }
+    var customBeyond = Number(travel.customBeyondMiles);
+    if (!Number.isInteger(customBeyond) || customBeyond < priorMax) return;
+    rows.push("<tr><th scope=\"row\">Beyond " + customBeyond + " miles</th><td>Custom review</td></tr>");
+    table.innerHTML = rows.join("");
   }
 
   function applyReviews(cfg) {
@@ -286,13 +430,16 @@
   }
 
   /* ---------- Turnstile ---------- */
-  function loadTurnstile(cb) {
+  function loadTurnstile(cb, onError) {
     if (window.turnstile) return cb();
     var script = document.createElement("script");
     script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
     script.async = true;
     script.onload = cb;
-    script.onerror = function () { setStatus("Human-verification service failed to load. Please refresh and try again."); };
+    script.onerror = function () {
+      if (onError) onError();
+      else setStatus("Human-verification service failed to load. Please refresh and try again.");
+    };
     document.head.appendChild(script);
   }
 
@@ -311,8 +458,12 @@
   /* ---------- waitlist ---------- */
   function setupWaitlist() {
     var wlForm = document.getElementById("waitlistForm");
+    if (!wlForm || wlForm.dataset.waitlistReady === "1") return;
+    wlForm.dataset.waitlistReady = "1";
     var slot = waitlistShell.querySelector("[data-turnstile]");
-    loadTurnstile(function () { renderTurnstile(slot); });
+    loadTurnstile(function () { renderTurnstile(slot); }, function () {
+      wlForm.querySelector(".form-status").textContent = "Human-verification service failed to load. Please refresh and try again.";
+    });
     wlForm.addEventListener("submit", function (e) {
       e.preventDefault();
       var status = wlForm.querySelector(".form-status");
@@ -361,7 +512,7 @@
     showStep(current, true);
 
     form.addEventListener("input", function () {
-      if (!formStarted) { formStarted = true; track("ppi_form_started"); }
+      if (!formStarted) { formStarted = true; track("ppi_form_started", "request_intake"); }
       saveDraft();
     });
 
@@ -681,23 +832,6 @@
   }
 
   /* ---------- review + submit ---------- */
-  // Lightweight client-side tier hint (PRELIMINARY only — the server computes
-  // the real suggestion and the owner confirms the final quote).
-  function preliminaryTier() {
-    var make = val("make").toLowerCase();
-    var model = val("model").toLowerCase();
-    var trim = val("trim").toLowerCase();
-    var mods = val("modStatus");
-    var exotic = /ferrari|lamborghini|mclaren|aston martin|bentley|rolls|maserati|lotus|bugatti|pagani/.test(make);
-    var euro = /bmw|mercedes|audi|porsche|land rover|range rover|jaguar|volvo|volkswagen|mini|tesla|lexus|genesis|maserati/.test(make);
-    var perf = /corvette|gt-r|gtr|supra|nsx|hellcat|demon|trackhawk|raptor|trx|type r|wrx|sti|golf r|gti|911|amg|shelby|mustang|camaro|challenger|charger|m3|m4|m5/.test(model + " " + trim);
-    var year = parseInt(val("year"), 10);
-    var classic = year && (new Date().getFullYear() - year) >= 25;
-    if (exotic || classic || mods === "heavy") return "Exotic, Collector or Heavily Modified";
-    if (euro || perf || mods === "light") return "European, Luxury or Performance";
-    return "Standard Vehicle";
-  }
-
   function buildReview() {
     var card = document.getElementById("reviewCard");
     var rows = [
@@ -713,7 +847,7 @@
     }).join("");
     var tierEl = document.getElementById("reviewTier");
     if (tierEl) {
-      tierEl.innerHTML = "Estimated tier: <strong>" + escapeHtml(preliminaryTier()) + " PPI</strong> — <em>preliminary; your exact price and any travel charge are confirmed after AutoClarity reviews the vehicle.</em>";
+      tierEl.innerHTML = "Pricing review: <strong>AutoClarity confirms the vehicle tier</strong> after reviewing the vehicle, location and scope. Your approved quote shows the exact price and any travel charge before you accept or pay.";
     }
   }
 
@@ -906,6 +1040,13 @@
           setStatus("Please correct the highlighted fields. Your other answers are still saved.");
           return;
         }
+        if (r.status === 409 && r.body && r.body.error && r.body.error.code === "waitlist_mode") {
+          resetTurnstile();
+          activateWaitlistState(true);
+          var waitlistStatus = waitlistShell.querySelector(".form-status");
+          waitlistStatus.textContent = r.body.error.message || "Inspection requests are not open right now. Join the launch list instead.";
+          return;
+        }
         setStatus(submissionErrorMessage(r));
         resetTurnstile();
       })
@@ -955,7 +1096,7 @@
     var subject = "Las Vegas PPI request — " + [val("year"), val("make"), val("model")].filter(Boolean).join(" ");
     var href = "mailto:" + support + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(lines.join("\n"));
     saveDraft();
-    fallbackShell.hidden = false;
+    if (!fallbackShell || !fallbackShell.isConnected) activateFallbackState();
     setStatus("Opening a prepared email. Your request has not been received yet — review it and choose Send in your email app. This draft remains saved here.");
     window.location.href = href;
   }

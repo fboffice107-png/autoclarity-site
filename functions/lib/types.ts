@@ -45,16 +45,52 @@ export interface ModeFlags {
   uploadsEnabled: boolean;
 }
 
+function canonicalProductionBase(value: string | undefined): boolean {
+  if (!value) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:'
+      && url.hostname === 'getautoclarity.com'
+      && url.port === ''
+      && url.username === ''
+      && url.password === ''
+      && (url.pathname === '' || url.pathname === '/')
+      && url.search === ''
+      && url.hash === '';
+  } catch {
+    return false;
+  }
+}
+
 export function modeFlags(env: Env): ModeFlags {
   const ppiEnv = env.PPI_ENV === 'production' ? 'production' : 'preview';
-  const rawMode = env.PPI_MODE ?? 'request';
-  const mode = rawMode === 'waitlist' || rawMode === 'live' ? rawMode : 'request';
+  const rawMode = env.PPI_MODE;
+  const mode = rawMode === 'waitlist' || rawMode === 'request' || rawMode === 'live'
+    ? rawMode
+    : ppiEnv === 'production' ? 'waitlist' : 'request';
+  const stripeEnv = env.STRIPE_ENV === 'live' ? 'live' : 'test';
+  const requestedPayments = env.PAYMENTS_ENABLED === 'true';
+  const keyMatchesEnvironment = stripeEnv === 'live'
+    ? env.STRIPE_SECRET_KEY?.startsWith('sk_live_') === true
+    : env.STRIPE_SECRET_KEY?.startsWith('sk_test_') === true;
+  const productionWebhookReady = env.STRIPE_WEBHOOK_SECRET?.startsWith('whsec_') === true
+    && (env.STRIPE_WEBHOOK_SECRET?.length ?? 0) >= 16;
+  const productionBaseReady = canonicalProductionBase(env.PUBLIC_BASE_URL);
+
+  // Production Checkout is exposed only when every launch control agrees.
+  // Preview remains able to exercise test-mode Checkout in request/live modes,
+  // but a live key is never effective outside the explicit production tuple.
+  const paymentsEnabled = requestedPayments && keyMatchesEnvironment && (
+    ppiEnv === 'production'
+      ? mode === 'live' && stripeEnv === 'live' && productionWebhookReady && productionBaseReady
+      : stripeEnv === 'test'
+  );
   return {
     env: ppiEnv,
     mode,
-    paymentsEnabled: env.PAYMENTS_ENABLED === 'true',
-    stripeEnv: env.STRIPE_ENV === 'live' ? 'live' : 'test',
-    bookingEnabled: env.BOOKING_ENABLED !== 'false',
-    uploadsEnabled: env.UPLOADS_ENABLED !== 'false',
+    paymentsEnabled,
+    stripeEnv,
+    bookingEnabled: env.BOOKING_ENABLED === 'true',
+    uploadsEnabled: env.UPLOADS_ENABLED === 'true',
   };
 }

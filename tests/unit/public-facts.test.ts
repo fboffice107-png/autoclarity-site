@@ -46,6 +46,8 @@ describe('verified public fact projection', () => {
     expect(app.pricing.includedCompletedReports).toBe(1);
     expect(app.pricing.introductoryPrice).toBe(9.99);
     expect(app.pricing.renewalPrice).toBe(29.99);
+    expect(app.pricing).not.toHaveProperty('introductoryOfferStarts');
+    expect(app.pricing).not.toHaveProperty('introductoryOfferEnds');
     expect(app.pricing.introductoryEligibility).toContain('Eligible new subscribers in the United States');
     expect(app.limitations.join(' ')).toContain('Only the United States App Store listing was verified');
     expect(app.nextStep).toContain('App Store listing');
@@ -90,6 +92,7 @@ describe('verified public fact projection', () => {
     expect(homeGraph.map((node) => node['@type'])).toEqual(['Organization', 'MobileApplication']);
     const app = homeGraph.find((node) => node['@type'] === 'MobileApplication')!;
     expect(app.offers.map((item: Json) => Number(item.price))).toEqual([0, 9.99, 29.99]);
+    expect(app.offers.every((item: Json) => !('priceValidUntil' in item))).toBe(true);
     const ppiBlocks = jsonLd(ppi);
     expect(ppiBlocks).toHaveLength(3);
     const service = ppiBlocks[0]!['@graph'].find((node: Json) => node['@type'] === 'Service');

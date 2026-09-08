@@ -5,7 +5,7 @@
 | Surface | Auth | Notes |
 |---|---|---|
 | Public API (`/api/ppi/*`) | none | Turnstile (server-verified) + rate limits + validation |
-| Customer API (`/api/portal/*`) | magic token | 256-bit token, SHA-256 hash at rest, TTL 14d, rotation on reissue, verification rate-limited |
+| Customer API (`/api/portal/*`) | magic token | 256-bit token; credential table stores SHA-256 only; TTL 14d; rotation on reissue; verification rate-limited. Sent-email outbox bodies necessarily contain the bearer URL until the documented redaction pass. |
 | Admin API (`/api/admin/*`) + `/ppi/admin` | Cloudflare Access JWT | RS256 verified against team JWKS, aud/iss/exp checked. Preview fallback: `ADMIN_DEV_KEY` bearer (≥16 chars, constant-time compare). **Production without Access = 503 fail-closed.** |
 | Stripe webhook | HMAC signature | `stripe-signature` v1 HMAC-SHA256, 300s tolerance, constant-time compare, replay guard via `stripe_events` PK |
 
@@ -21,7 +21,8 @@
   strict `script-src 'self'` CSP (no `unsafe-inline`) is a second layer, not
   the only one. Listing URLs are additionally normalized through the URL
   parser server-side before storage.
-- **Uploads**: private R2 bucket; MIME allowlist + magic-byte sniffing; 8 MB and
+- **Uploads**: private R2 bucket; total multipart bodies are stream-counted and
+  capped before parsing; MIME allowlist + magic-byte sniffing; 8 MB and
   6-file caps; randomized object keys; filenames sanitized to display-only;
   served back only through authenticated endpoints with
   `Content-Security-Policy: default-src 'none'; sandbox`, `nosniff`, `no-store`.
@@ -29,9 +30,15 @@
 - **Rate limiting** (D1 fixed-window, daily-salted hashed identity — raw IPs
   are not stored in the limits table): submissions 5/h, VIN 30/h, token
   verification 60/h, messages 20/h, analytics 120/h.
-- **CSRF/origin**: mutation endpoints reject cross-origin browser requests
-  (Origin must match the deployment or `PUBLIC_BASE_URL`); customer auth is a
-  bearer token, not cookies, so classic CSRF doesn't apply.
+- **CSRF/origin**: mutation endpoints reject cross-origin browser requests.
+  Admin mutations require an Origin header matching the deployment or
+  `PUBLIC_BASE_URL` before Access authentication/body parsing and accept JSON
+  only. Customer mutations apply the same exact-origin comparison; customer
+  auth is a bearer token rather than a cookie.
+- **Request bodies**: actual stream bytes are counted before JSON, Stripe
+  webhook or multipart parsing. Ordinary JSON is capped at 32 KiB, analytics
+  at 8 KiB, VIN at 4 KiB, Stripe webhooks at 1 MiB, and multipart at the
+  configured file maximum plus 1 MiB of bounded overhead.
 - **Headers**: CSP per path (`_headers` for static, middleware for API),
   `nosniff`, `DENY` framing, strict referrer policy, HSTS, restrictive
   Permissions-Policy (camera allowed only on the intake page for VIN scan).
@@ -51,8 +58,11 @@
   columns; event names and step labels are allowlisted server-side.
 - **Magic-link URLs**: tokens are secrets-in-URL by design (standard for
   passwordless email links). Mitigations: `Referrer-Policy: no-referrer` on
-  portal pages, `noindex`, token rotation on every re-issue, expiry, and hashes
-  (not tokens) at rest. The portal page warns the customer not to share it.
+  portal pages, immediate removal from the browser address/history after
+  capture, `noindex`, token rotation on every re-issue, expiry, and hashes in
+  the credential table. The exact sent email (including its bearer URL) is
+  retained in the restricted D1 outbox for support/retry until redaction; the
+  portal warns the customer not to share it.
 - **State machine**: all transitions validated (`status.ts`); concurrent
   transitions guarded by conditional UPDATE; every change lands in
   `status_history`. Double-booking is prevented by a partial unique index —
@@ -70,6 +80,9 @@
   validation UI yet.
 - Magic-link tokens live in email; email account compromise = request access.
   This is inherent to passwordless email links.
+- Restricted outbox rows contain still-live bearer URLs until expiry. The
+  operator must redact linked message bodies no later than link expiry while
+  retaining non-secret delivery/audit metadata; automation is future work.
 - No custom WAF rules are tracked in this repository; Cloudflare edge controls
   are configured and reviewed separately from application releases.
 

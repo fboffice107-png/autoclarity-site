@@ -38,8 +38,10 @@ you'll sign in through Cloudflare Access with your email instead.
 All money values are **cents**. Common edits:
 
 - Prices: `pricing.tiers.standard.priceCents` (19900 = $199), etc.
-- Launch promo: `pricing.promo.enabled: true`, `priceCents: 14900`,
-  `endsAt: "2026-08-31"` — shows a truthful time-limited price on the page.
+- Launch pricing: enable `pricing.launch`, set a real future `endsAt`, and set
+  each tier's lower `launchPriceCents` as needed. The legacy Standard-only
+  `pricing.promo` path also requires a real future `endsAt`; either active path
+  is reflected on the public page and in the server-owned quote suggestion.
 - Travel: `travel.bands` (`maxMiles`/`feeCents`), origin lat/lng (keep it the
   public central-Vegas point, never your home).
 - Schedule: `scheduling.slotTemplates`, `daysOfOperation` (0=Sun…6=Sat),
@@ -67,6 +69,11 @@ The examples below are data-policy sketches, not unattended runbooks.
   `UPDATE customers SET full_name='deleted', email='deleted@example.invalid', phone='' WHERE id = '...';`
 - Purge stale magic links:
   `DELETE FROM magic_links WHERE expires_at < datetime('now','-90 days');`
+- Redact outbound bodies containing portal bearer URLs after the 14-day link
+  lifetime while retaining delivery metadata:
+  `UPDATE messages SET body_text='[Outbound email body redacted after secure-link expiry.]' WHERE direction='outbound' AND channel='email' AND created_at < datetime('now','-14 days') AND body_text LIKE '%/ppi/portal/?t=%';`
+  Run at least every 14 days, record the row count, and review retention with
+  counsel before changing the interval.
 
 ## Analytics event definitions (no PII by design)
 
@@ -89,16 +96,28 @@ The examples below are data-policy sketches, not unattended runbooks.
 
 Stored as counters in `analytics_events` (event, step, source, timestamp) —
 the table has no columns for names, emails, VINs or addresses. Each request also
-stores one allowlisted first-touch category so payment and completion can be
-reported by source. Raw URLs, campaign names, search terms, referrer paths, and
+stores one client-derived, allowlisted first-touch category so payment and
+completion can be grouped directionally by source. It is not independently
+verified and must not be treated as payment-grade proof or the sole basis for
+advertising spend. Raw URLs, campaign names, search terms, referrer paths, and
 customer data are not attribution fields; invalid or missing sources become
 `ppi_unknown` and display with direct traffic as “Direct / unknown.”
 
-The Overview revenue cards use payment records: gross is the original amount,
-refunded is the recorded refund amount, and net is gross minus refunds for the
-30-day payment cohort. Disputes are surfaced separately and excluded from net.
-The verified funnel uses request, status-history, payment, and booking records;
-interaction counters are diagnostics and do not prove installs or revenue.
+The Overview exposes fixed 7-, 30-, and 90-day windows. Operational milestones
+use their first server-recorded event time. Checkout starts require an actual
+Stripe Session id; successful payment time comes from the deterministic webhook
+event. Successful Refund rows and Dispute cases use provider-created times.
+Payment-cohort gross is the original captured amount, current refunds are shown
+separately, and recognized net subtracts both refunds and currently withdrawn
+disputes. It is collected revenue, not profit: processor fees, tax, labor,
+travel, and overhead are not deducted. Missing webhook confirmation timestamps
+are surfaced as data-quality exceptions rather than assigned a guessed time.
+
+Source tables are request-created cohorts whose outcomes can mature after the
+window closes. They show raw numerators; conversion percentages remain hidden
+until a source has at least 20 requests. App Store outbound clicks remain a
+separate directional interaction and never mean an install, subscription, or
+revenue. Other interaction counters are diagnostics, not business outcomes.
 
 ## Things the system will NOT do (on purpose)
 

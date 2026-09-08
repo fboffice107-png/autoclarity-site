@@ -55,7 +55,7 @@ admin. No frontend framework was introduced.
   production live mode.
 - `auth.ts` — Cloudflare Access JWT verification (JWKS cached, RS256, aud/iss/
   exp checked); preview-only `ADMIN_DEV_KEY`; production fails closed (503).
-- `agreements.ts` — versioned owner-review legal drafts seeded idempotently;
+- `agreements.ts` — versioned customer agreement source documents seeded idempotently and verified byte-for-byte;
   acceptances record doc hash, typed name, IP, UA, timestamps.
 
 ## The money path (the part that must never lie)

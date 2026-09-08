@@ -12,13 +12,20 @@ import { requirePortal, releaseExpiredHolds } from '../../lib/portal.ts';
 import { applyStatus, isStatus, type Status } from '../../lib/status.ts';
 import { quoteExpired, cancellationOutcome } from '../../lib/pricing.ts';
 import { latestAgreements } from '../../lib/agreements.ts';
-import { createCheckoutSession, expireCheckoutSession, StripeApiError, StripeConfigError } from '../../lib/stripe.ts';
+import {
+  createCheckoutSession,
+  expireCheckoutSession,
+  STRIPE_CHECKOUT_CURRENCY,
+  StripeApiError,
+  StripeConfigError,
+} from '../../lib/stripe.ts';
 import { expireOpenCheckoutAttempts } from '../../lib/payment-lifecycle.ts';
 import { applyTerminalLifecycle } from '../../lib/lifecycle.ts';
 import { sendTemplate } from '../../lib/email.ts';
 import { portalUrl } from '../../lib/magic.ts';
 import { clampStr, clientIp, errorJson, formatCents, json, newId, nowIso, originAllowed } from '../../lib/util.ts';
 import { rateLimit } from '../../lib/ratelimit.ts';
+import { readJsonBody, requestBodyErrorResponse } from '../../lib/request-body.ts';
 
 interface ActionBody {
   action?: string;
@@ -41,6 +48,25 @@ function fmtSlot(startsAt: string, timezone: string): string {
   });
 }
 
+// Used in every durable Checkout claim/finalization CAS. Keeping this as one
+// SQL predicate prevents the preflight check from drifting from the checks
+// immediately before and after the provider call.
+const LATEST_QUOTE_AGREEMENTS_ACCEPTED_SQL = `
+  EXISTS (SELECT 1 FROM agreement_versions)
+  AND NOT EXISTS (
+    SELECT 1
+    FROM agreement_versions av
+    JOIN (
+      SELECT doc_key, MAX(version) AS version
+      FROM agreement_versions GROUP BY doc_key
+    ) latest ON latest.doc_key = av.doc_key AND latest.version = av.version
+    WHERE NOT EXISTS (
+      SELECT 1 FROM agreement_acceptances accepted
+      WHERE accepted.request_id = ? AND accepted.quote_id = ?
+        AND accepted.agreement_version_id = av.id AND accepted.accepted = 1
+    )
+  )`;
+
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { request, env } = context;
   if (!originAllowed(request, env.PUBLIC_BASE_URL)) {
@@ -55,9 +81,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   let body: ActionBody;
   try {
-    body = (await request.json()) as ActionBody;
-  } catch {
-    return errorJson('bad_json', 'Request body must be JSON.', 400);
+    body = await readJsonBody<ActionBody>(request);
+  } catch (error) {
+    return requestBodyErrorResponse(error);
   }
 
   // Run before loading the request so every action sees the selectable state
@@ -295,17 +321,20 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     // ------------------------------------------------------ accept_agreements
     case 'accept_agreements': {
-      if (status !== 'awaiting_agreement') {
+      if (status !== 'awaiting_agreement' && status !== 'awaiting_payment') {
         return errorJson('wrong_state', 'Agreements are not awaiting acceptance for this request.', 409);
       }
       const typedName = clampStr(body.typedName, 120);
       if (typedName.length < 2) return errorJson('validation', 'Please type your full name to accept.', 422);
 
       const required = await latestAgreements(db);
-      const provided = new Set((body.versionIds ?? []).map((v) => clampStr(v, 80)));
-      const missing = required.filter((d) => !provided.has(d.id));
-      if (missing.length > 0) {
-        return errorJson('validation', `Please review and accept every document (${missing.length} remaining).`, 422, {
+      const providedIds = (body.versionIds ?? []).map((v) => clampStr(v, 80));
+      const provided = new Set(providedIds);
+      const requiredIds = new Set(required.map((doc) => doc.id));
+      const missing = required.filter((doc) => !provided.has(doc.id));
+      const hasUnexpected = providedIds.length !== provided.size || [...provided].some((id) => !requiredIds.has(id));
+      if (required.length === 0 || missing.length > 0 || hasUnexpected || provided.size !== required.length) {
+        return errorJson('validation', `Please review and accept every current document (${missing.length} remaining).`, 422, {
           missing: missing.map((m) => m.title),
         });
       }
@@ -314,20 +343,121 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       const ip = clientIp(request);
       const ua = clampStr(request.headers.get('user-agent'), 300);
       const quote = await db
-        .prepare(`SELECT id FROM quotes WHERE request_id = ? AND status = 'sent' ORDER BY version DESC LIMIT 1`)
+        .prepare(`SELECT id, expires_at FROM quotes WHERE request_id = ? AND status = 'sent' ORDER BY version DESC LIMIT 1`)
+        .bind(requestId)
+        .first<{ id: string; expires_at: string }>();
+      if (!quote) return errorJson('no_quote', 'There is no active quote for this request.', 409);
+      if (quoteExpired(quote.expires_at)) {
+        return errorJson('quote_expired', 'This quote has expired. AutoClarity will send you a refreshed quote.', 409);
+      }
+      const heldSlot = await db
+        .prepare(`SELECT id FROM appointment_slots WHERE request_id = ? AND status = 'held' LIMIT 1`)
         .bind(requestId)
         .first<{ id: string }>();
-      await db.batch(
-        required.map((doc) =>
+      if (!heldSlot) {
+        return errorJson('hold_lapsed', 'Your held appointment lapsed. AutoClarity will refresh the available times.', 409);
+      }
+
+      // A newly published agreement version can reach a customer who had
+      // already advanced to awaiting_payment under the prior version. Let that
+      // customer accept the current quote-bound set without releasing their
+      // held appointment or fabricating acceptance during deployment.
+      const existingAcceptances = await db
+        .prepare(
+          `SELECT agreement_version_id FROM agreement_acceptances
+           WHERE request_id = ? AND quote_id = ? AND accepted = 1`,
+        )
+        .bind(requestId, quote.id)
+        .all<{ agreement_version_id: string }>();
+      const existingIds = new Set((existingAcceptances.results ?? []).map((row) => row.agreement_version_id));
+      const documentsToAccept = required.filter((doc) => !existingIds.has(doc.id));
+      if (documentsToAccept.length === 0) {
+        return errorJson('wrong_state', 'The current agreements are already accepted for this quote.', 409);
+      }
+
+      const historyId = newId('sh');
+      const acceptanceIds = documentsToAccept.map(() => newId('aa'));
+      const acceptanceIdPlaceholders = acceptanceIds.map(() => '?').join(',');
+      const results = await db.batch([
+        ...documentsToAccept.map((doc, index) =>
           db
             .prepare(
               `INSERT INTO agreement_acceptances (id, request_id, quote_id, agreement_version_id, typed_name, accepted, ip, user_agent, created_at)
-               VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+               SELECT ?, ?, ?, ?, ?, 1, ?, ?, ?
+               WHERE EXISTS (
+                 SELECT 1 FROM ppi_requests
+                 WHERE id = ? AND status = ? AND deleted_at IS NULL
+               )
+                 AND EXISTS (SELECT 1 FROM quotes WHERE id = ? AND request_id = ? AND status = 'sent')
+                 AND EXISTS (
+                   SELECT 1 FROM agreement_versions av
+                   WHERE av.id = ?
+                     AND NOT EXISTS (
+                       SELECT 1 FROM agreement_versions newer
+                       WHERE newer.doc_key = av.doc_key AND newer.version > av.version
+                     )
+                 )
+                 AND NOT EXISTS (
+                   SELECT 1 FROM agreement_acceptances
+                   WHERE request_id = ? AND quote_id = ? AND agreement_version_id = ? AND accepted = 1
+                 )`,
             )
-            .bind(newId('aa'), requestId, quote?.id ?? null, doc.id, typedName, ip, ua, now),
+            .bind(
+              acceptanceIds[index], requestId, quote.id, doc.id, typedName, ip, ua, now,
+              requestId, status, quote.id, requestId, doc.id, requestId, quote.id, doc.id,
+            ),
         ),
-      );
-      await applyStatus(db, requestId, 'awaiting_agreement', 'awaiting_payment', 'customer', 'All agreements accepted');
+        db
+          .prepare(
+            `UPDATE ppi_requests SET status = 'awaiting_payment', updated_at = ?
+             WHERE id = ? AND status = ? AND deleted_at IS NULL
+               AND EXISTS (SELECT 1 FROM quotes WHERE id = ? AND request_id = ? AND status = 'sent')
+               AND EXISTS (SELECT 1 FROM appointment_slots WHERE request_id = ? AND status = 'held')
+               AND (
+                 SELECT COUNT(*) FROM agreement_acceptances
+                 WHERE id IN (${acceptanceIdPlaceholders}) AND request_id = ? AND quote_id = ?
+               ) = ?
+               AND EXISTS (SELECT 1 FROM agreement_versions)
+               AND NOT EXISTS (
+                 SELECT 1
+                 FROM agreement_versions av
+                 JOIN (
+                   SELECT doc_key, MAX(version) AS version
+                   FROM agreement_versions GROUP BY doc_key
+                 ) latest ON latest.doc_key = av.doc_key AND latest.version = av.version
+                 WHERE NOT EXISTS (
+                   SELECT 1 FROM agreement_acceptances accepted
+                   WHERE accepted.request_id = ? AND accepted.quote_id = ?
+                     AND accepted.agreement_version_id = av.id AND accepted.accepted = 1
+                 )
+              )`,
+          )
+          .bind(
+            now, requestId, status, quote.id, requestId, requestId,
+            ...acceptanceIds, requestId, quote.id, documentsToAccept.length,
+            requestId, quote.id,
+          ),
+        db
+          .prepare(
+            `INSERT INTO status_history
+               (id, request_id, from_status, to_status, actor, reason, related_id, created_at)
+             SELECT ?, ?, ?, 'awaiting_payment', 'customer', ?, ?, ?
+             WHERE changes() = 1`,
+          )
+          .bind(
+            historyId,
+            requestId,
+            status,
+            status === 'awaiting_payment' ? 'Current agreement versions accepted' : 'All agreements accepted',
+            quote.id,
+            now,
+          ),
+      ]);
+      const transitioned = (results[documentsToAccept.length]?.meta?.changes ?? 0) === 1;
+      const historyRecorded = (results[documentsToAccept.length + 1]?.meta?.changes ?? 0) === 1;
+      if (!transitioned || !historyRecorded) {
+        return errorJson('conflict', 'This request changed before the agreements were accepted. Reload and review its current state.', 409);
+      }
       return json({ ok: true });
     }
 
@@ -352,10 +482,17 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       }
 
       const quote = await db
-        .prepare(`SELECT id, expires_at, total_cents FROM quotes WHERE request_id = ? AND status = 'sent' ORDER BY version DESC LIMIT 1`)
+        .prepare(`SELECT id, expires_at, total_cents, currency FROM quotes WHERE request_id = ? AND status = 'sent' ORDER BY version DESC LIMIT 1`)
         .bind(requestId)
-        .first<{ id: string; expires_at: string; total_cents: number }>();
+        .first<{ id: string; expires_at: string; total_cents: number; currency: string }>();
       if (!quote) return errorJson('no_quote', 'There is no active quote for this request.', 409);
+      if (
+        !Number.isSafeInteger(quote.total_cents)
+        || quote.total_cents <= 0
+        || quote.currency !== STRIPE_CHECKOUT_CURRENCY
+      ) {
+        return errorJson('quote_reconciliation_required', 'The approved quote amount or currency requires support review before payment.', 409);
+      }
       if (quoteExpired(quote.expires_at)) {
         return errorJson('quote_expired', 'This quote has expired. AutoClarity will send you a refreshed quote.', 409);
       }
@@ -368,12 +505,16 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         return errorJson('hold_lapsed', 'Your held time lapsed. Please choose an appointment window again.', 409);
       }
 
-      const acceptedCount = await db
-        .prepare(`SELECT COUNT(DISTINCT agreement_version_id) AS n FROM agreement_acceptances WHERE request_id = ?`)
-        .bind(requestId)
-        .first<{ n: number }>();
       const required = await latestAgreements(db);
-      if ((acceptedCount?.n ?? 0) < required.length) {
+      const acceptedLatest = required.length > 0
+        ? await db
+            .prepare(
+              `SELECT CASE WHEN ${LATEST_QUOTE_AGREEMENTS_ACCEPTED_SQL} THEN 1 ELSE 0 END AS ok`,
+            )
+            .bind(requestId, quote.id)
+            .first<{ ok: number }>()
+        : null;
+      if (required.length === 0 || acceptedLatest?.ok !== 1) {
         return errorJson('agreements_missing', 'Please accept the service agreements first.', 409);
       }
 
@@ -389,9 +530,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       // Booking row (one per request) — created/reused before the session.
       const now = nowIso();
       let booking = await db
-        .prepare(`SELECT id FROM bookings WHERE request_id = ?`)
+        .prepare(`SELECT id, quote_id FROM bookings WHERE request_id = ?`)
         .bind(requestId)
-        .first<{ id: string }>();
+        .first<{ id: string; quote_id: string }>();
       if (!booking) {
         const bookingId = newId('bkg');
         try {
@@ -407,21 +548,51 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         } catch {
           // A concurrent checkout may have created the one-per-request row.
         }
-        booking = await db.prepare(`SELECT id FROM bookings WHERE request_id = ?`).bind(requestId).first<{ id: string }>();
+        booking = await db
+          .prepare(`SELECT id, quote_id FROM bookings WHERE request_id = ?`)
+          .bind(requestId)
+          .first<{ id: string; quote_id: string }>();
         if (!booking) {
           return errorJson('conflict', 'This request changed before checkout could start. Reload before trying again.', 409);
         }
       } else {
+        // The request owns one booking across refreshed quotes. Rebind it only
+        // after every older attempt is provider-terminal; each old payment row
+        // keeps its original quote/session/amount identity as evidence.
         const bookingUpdate = await db
           .prepare(
             `UPDATE bookings SET quote_id = ?, slot_id = ?, status = 'pending_payment', updated_at = ?
              WHERE id = ?
                AND EXISTS (SELECT 1 FROM ppi_requests WHERE id = ? AND status = 'awaiting_payment')
-               AND EXISTS (SELECT 1 FROM appointment_slots WHERE id = ? AND request_id = ? AND status = 'held')`,
+               AND EXISTS (SELECT 1 FROM appointment_slots WHERE id = ? AND request_id = ? AND status = 'held')
+               AND (
+                 quote_id = ?
+                 OR NOT EXISTS (
+                   SELECT 1 FROM payments prior_attempt
+                   WHERE prior_attempt.booking_id = bookings.id
+                     AND prior_attempt.status NOT IN ('failed','expired')
+                 )
+               )`,
           )
-          .bind(quote.id, slot.id, now, booking.id, requestId, slot.id, requestId)
+          .bind(quote.id, slot.id, now, booking.id, requestId, slot.id, requestId, quote.id)
           .run();
         if ((bookingUpdate.meta?.changes ?? 0) !== 1) {
+          const blockingAttempt = booking.quote_id !== quote.id
+            ? await db
+                .prepare(
+                  `SELECT id FROM payments
+                   WHERE booking_id = ? AND status NOT IN ('failed','expired') LIMIT 1`,
+                )
+                .bind(booking.id)
+                .first<{ id: string }>()
+            : null;
+          if (blockingAttempt) {
+            return errorJson(
+              'payment_reconciliation_required',
+              'The prior Checkout attempt must be verified as expired or failed before this refreshed quote can open. No new charge was started.',
+              409,
+            );
+          }
           return errorJson('conflict', 'This request changed before checkout could start. Reload before trying again.', 409);
         }
       }
@@ -431,6 +602,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         status: string;
         stripe_session_id: string | null;
         checkout_attempt: number | null;
+        amount_cents: number;
+        currency: string;
         created_at: string;
       };
       let claim: AttemptRow | null = null;
@@ -438,13 +611,20 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       try {
         const attempts = await db
           .prepare(
-            `SELECT id, status, stripe_session_id, checkout_attempt, created_at
+            `SELECT id, status, stripe_session_id, checkout_attempt, amount_cents, currency, created_at
              FROM payments WHERE request_id = ? AND quote_id = ? AND booking_id = ?
              ORDER BY created_at DESC`,
           )
           .bind(requestId, quote.id, booking.id)
           .all<AttemptRow>();
         const rows = attempts.results ?? [];
+        if (rows.some((row) => row.amount_cents !== quote.total_cents || row.currency !== quote.currency)) {
+          return errorJson(
+            'payment_reconciliation_required',
+            'A prior payment record does not match the approved quote. No new charge was started.',
+            409,
+          );
+        }
         const active = rows.filter((row) => row.status === 'created' || row.status === 'pending');
         if (active.length > 1) {
           return errorJson(
@@ -486,13 +666,18 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
               .prepare(
                 `UPDATE payments SET status = 'pending', updated_at = ?
                  WHERE id = ? AND status = 'failed' AND stripe_session_id IS NULL
+                   AND amount_cents = ? AND currency = ?
                    AND NOT EXISTS (
                      SELECT 1 FROM payments other
                      WHERE other.request_id = ? AND other.status IN ('created','pending')
                    )
-                   AND EXISTS (SELECT 1 FROM ppi_requests WHERE id = ? AND status = 'awaiting_payment')`,
+                   AND EXISTS (SELECT 1 FROM ppi_requests WHERE id = ? AND status = 'awaiting_payment')
+                   AND ${LATEST_QUOTE_AGREEMENTS_ACCEPTED_SQL}`,
               )
-              .bind(nowIso(), reusable.id, requestId, requestId)
+              .bind(
+                nowIso(), reusable.id, quote.total_cents, quote.currency,
+                requestId, requestId, requestId, quote.id,
+              )
               .run();
             if ((reclaimed.meta?.changes ?? 0) !== 1) {
               return errorJson('payment_reconciliation_required', 'Another checkout attempt started first. No new charge was started.', 409);
@@ -504,11 +689,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             const inserted = await db
               .prepare(
                 `INSERT INTO payments
-                   (id, request_id, quote_id, booking_id, amount_cents, status, checkout_attempt, created_at, updated_at)
-                 SELECT ?, ?, ?, ?, ?, 'pending', ?, ?, ?
+                   (id, request_id, quote_id, booking_id, amount_cents, currency, status, checkout_attempt, created_at, updated_at)
+                 SELECT ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?
                  WHERE EXISTS (SELECT 1 FROM ppi_requests WHERE id = ? AND status = 'awaiting_payment')
                    AND EXISTS (SELECT 1 FROM bookings WHERE id = ? AND request_id = ? AND slot_id = ? AND status = 'pending_payment')
                    AND EXISTS (SELECT 1 FROM appointment_slots WHERE id = ? AND request_id = ? AND status = 'held')
+                   AND ${LATEST_QUOTE_AGREEMENTS_ACCEPTED_SQL}
                    AND NOT EXISTS (
                      SELECT 1 FROM payments other
                      WHERE other.request_id = ? AND other.status IN ('created','pending','succeeded','partially_refunded','refunded','disputed')
@@ -520,6 +706,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
                 quote.id,
                 booking.id,
                 quote.total_cents,
+                quote.currency,
                 attempt,
                 now,
                 now,
@@ -529,6 +716,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
                 slot.id,
                 slot.id,
                 requestId,
+                requestId,
+                quote.id,
                 requestId,
               )
               .run();
@@ -540,6 +729,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
               status: 'pending',
               stripe_session_id: null,
               checkout_attempt: attempt,
+              amount_cents: quote.total_cents,
+              currency: quote.currency,
               created_at: now,
             };
           }
@@ -554,9 +745,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             `UPDATE appointment_slots SET hold_expires_at = ?, updated_at = ?
              WHERE id = ? AND request_id = ? AND status = 'held'
                AND EXISTS (SELECT 1 FROM ppi_requests WHERE id = ? AND status = 'awaiting_payment')
-               AND EXISTS (SELECT 1 FROM payments WHERE id = ? AND status IN ('pending','created'))`,
+               AND EXISTS (SELECT 1 FROM payments WHERE id = ? AND status IN ('pending','created'))
+               AND ${LATEST_QUOTE_AGREEMENTS_ACCEPTED_SQL}`,
           )
-          .bind(extended, nowIso(), slot.id, requestId, requestId, claim.id)
+          .bind(extended, nowIso(), slot.id, requestId, requestId, claim.id, requestId, quote.id)
           .run();
         if ((extendedHold.meta?.changes ?? 0) !== 1) {
           if (claimWasPending) {
@@ -571,6 +763,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           quoteId: quote.id,
           bookingId: booking.id,
           amountCents: quote.total_cents,
+          currency: quote.currency,
           customerEmail: req.email,
           publicBaseUrl: env.PUBLIC_BASE_URL ?? new URL(request.url).origin,
           attempt: claim.checkout_attempt ?? 1,
@@ -605,9 +798,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
              WHERE id = ? AND status IN ('pending','created') AND stripe_session_id = ?
                AND EXISTS (SELECT 1 FROM ppi_requests WHERE id = ? AND status = 'awaiting_payment')
                AND EXISTS (SELECT 1 FROM bookings WHERE id = ? AND request_id = ? AND slot_id = ? AND status = 'pending_payment')
-               AND EXISTS (SELECT 1 FROM appointment_slots WHERE id = ? AND request_id = ? AND status = 'held')`,
+               AND EXISTS (SELECT 1 FROM appointment_slots WHERE id = ? AND request_id = ? AND status = 'held')
+               AND ${LATEST_QUOTE_AGREEMENTS_ACCEPTED_SQL}`,
           )
-          .bind(nowIso(), claim.id, session.id, requestId, booking.id, requestId, slot.id, slot.id, requestId)
+          .bind(
+            nowIso(), claim.id, session.id, requestId,
+            booking.id, requestId, slot.id, slot.id, requestId,
+            requestId, quote.id,
+          )
           .run();
         if ((finalized.meta?.changes ?? 0) !== 1) {
           try {

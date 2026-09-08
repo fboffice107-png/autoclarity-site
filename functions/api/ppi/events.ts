@@ -3,7 +3,9 @@
 
 import type { Env } from '../../lib/types.ts';
 import { rateLimit } from '../../lib/ratelimit.ts';
-import { clientIp, json, newId, nowIso } from '../../lib/util.ts';
+import { clientIp, json, newId, nowIso, originAllowed } from '../../lib/util.ts';
+import { readJsonBody, REQUEST_BODY_LIMITS } from '../../lib/request-body.ts';
+import { normalizeAttributionSource } from '../../lib/validate.ts';
 
 const ALLOWED_EVENTS = new Set([
   'ppi_page_view',
@@ -33,27 +35,28 @@ const STEP_RE = /^[a-z0-9_-]{0,40}$/;
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { request, env } = context;
+  if (!originAllowed(request, env.PUBLIC_BASE_URL)) return json({ ok: true });
 
   const limited = await rateLimit(env.DB, clientIp(request), 'events', 120, 3600);
   if (!limited.allowed) return json({ ok: true }); // silently drop; analytics is best-effort
 
   let body: { event?: string; step?: string; source?: string };
   try {
-    body = (await request.json()) as typeof body;
+    body = await readJsonBody<typeof body>(request, REQUEST_BODY_LIMITS.event);
   } catch {
     return json({ ok: true });
   }
 
   const event = String(body.event ?? '');
   const step = String(body.step ?? '');
-  const source = String(body.source ?? '');
-  if (!ALLOWED_EVENTS.has(event) || !STEP_RE.test(step) || !STEP_RE.test(source)) {
+  const source = normalizeAttributionSource(body.source);
+  if (!ALLOWED_EVENTS.has(event) || !STEP_RE.test(step)) {
     return json({ ok: true });
   }
 
   await env.DB
     .prepare(`INSERT INTO analytics_events (id, event, step, source, created_at) VALUES (?, ?, ?, ?, ?)`)
-    .bind(newId('ev'), event, step || null, source || null, nowIso())
+    .bind(newId('ev'), event, step || null, source, nowIso())
     .run();
 
   return json({ ok: true });

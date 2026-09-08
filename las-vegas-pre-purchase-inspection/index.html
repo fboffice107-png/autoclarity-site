@@ -28,8 +28,8 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/img/favicon-32.png" />
   <link rel="apple-touch-icon" href="/assets/img/icon-180.png" />
 
-  <link rel="stylesheet" href="/assets/css/site.css?v=ac-ai-20260907-r1" />
-  <link rel="stylesheet" href="/assets/css/ppi.css?v=ac-ai-20260907-r1" />
+  <link rel="stylesheet" href="/assets/css/site.css?v=ac-ai-20260907-r2" />
+  <link rel="stylesheet" href="/assets/css/ppi.css?v=ac-ai-20260907-r2" />
 
   <!-- PUBLIC_FACTS:PPI_JSONLD:START -->
   <script type="application/ld+json">
@@ -221,7 +221,7 @@
         <a href="#pricing">Pricing</a>
         <a href="#faq">FAQ</a>
       </nav>
-      <a class="btn btn-primary btn-nav" href="#request">Request an inspection</a>
+      <a class="btn btn-service btn-nav" href="#request" data-request-cta data-analytics="ppi_cta_click" data-step="request_intent_header">Request an Inspection</a>
     </div>
   </header>
 
@@ -239,8 +239,7 @@
         <div class="hero-copy">
           <p class="eyebrow">
             <span class="eyebrow-dot" aria-hidden="true"></span>
-            <span class="eyebrow-label-full">Las Vegas · Mobile pre-purchase inspections</span>
-            <span class="eyebrow-label-short" aria-hidden="true">Las Vegas · Pre-purchase inspections</span>
+            <span>Las Vegas · Mobile Pre-Purchase Inspections</span>
           </p>
           <h1>Buying a used car in Las&nbsp;Vegas? Know what you’re buying <em>before</em> you pay.</h1>
           <p class="lede">
@@ -251,7 +250,7 @@
           </p>
 
           <div class="hero-ctas">
-            <a class="btn btn-primary btn-lg" href="#request" data-analytics="ppi_founder_cta_click" data-step="hero">Request an Inspection</a>
+            <a class="btn btn-service btn-lg" href="#request" data-request-cta data-analytics="ppi_founder_cta_click" data-step="request_intent_hero">Request an Inspection</a>
             <a class="btn btn-ghost btn-lg" href="sample-report/" data-analytics="ppi_sample_report_view" data-step="hero">View a Sample Report</a>
           </div>
 
@@ -348,12 +347,12 @@
         <ol class="ppi-steps">
           <li class="reveal"><strong>Submit the vehicle and location.</strong> Tell us what you’re looking at and where it is — it takes a few minutes.</li>
           <li class="reveal"><strong>AutoClarity reviews the request.</strong> Vehicle, location and seller access are checked personally. AutoClarity typically responds within 24 hours with scheduling details.</li>
-          <li class="reveal"><strong>Receive your exact price and available times.</strong> No surprises — the full price is shown before you commit to anything.</li>
+          <li class="reveal"><strong>Receive your exact price and available times.</strong> AutoClarity reviews and approves the quote before it is sent, and the full price is shown before you commit to anything.</li>
           <li class="reveal">
-            <div data-payment="off"><strong>Confirm the quote and scheduling details.</strong> Submitting is free. If online payment is offered after review, completing it reserves the appointment.</div>
-            <div data-payment="on" hidden><strong>Select a time, accept the agreement, and pay securely.</strong> Payment through Stripe reserves your appointment.</div>
+            <div data-payment="off"><strong>Confirm the quote and scheduling details.</strong> Submitting is free. If online payment is unavailable, contact AutoClarity to finish scheduling; the request itself does not confirm an appointment.</div>
+            <div data-payment="on" hidden><strong>Select a time, accept the current agreements, and pay securely.</strong> Stripe charges the exact approved quote amount, and successful payment confirms your appointment.</div>
           </li>
-          <li class="reveal"><strong>The technician inspects the vehicle.</strong> At the dealership or seller’s location, including a road test where permitted and safe<span data-scan="on" hidden>, plus a diagnostic scan where included in your confirmed scope</span>.</li>
+          <li class="reveal"><strong>The technician inspects the vehicle.</strong> At the dealership or seller’s location, including a road test where permitted and safe.</li>
           <li class="reveal"><strong>Receive your written results.</strong> Findings, photos, repair priorities, and a clear Proceed / Negotiate / Do Not Proceed recommendation.</li>
         </ol>
         <p class="ppi-note reveal">
@@ -392,7 +391,7 @@
             <!-- Reserved founder-video slot: revealed by JS only when a real
                  video asset is configured (never an empty player). -->
             <div class="inspector-video" id="inspectorVideo" hidden></div>
-            <a class="btn btn-primary btn-lg" href="#request" data-analytics="ppi_founder_cta_click" data-step="inspector">Request an Inspection</a>
+            <a class="btn btn-service btn-lg" href="#request" data-request-cta data-analytics="ppi_founder_cta_click" data-step="request_intent_inspector">Request an Inspection</a>
           </div>
         </div>
       </div>
@@ -446,12 +445,10 @@
             </ul>
           </div>
           <div class="inspect-card reveal">
-            <h3>Road test &amp; diagnostics</h3>
+            <h3>Road test &amp; warning-light review</h3>
             <ul>
               <li>Road test when authorized and safe</li>
-              <li data-scan="on" hidden>Diagnostic scan where supported and included in the confirmed inspection scope</li>
-              <li data-scan="on" hidden>Emissions readiness status where supported</li>
-              <li data-scan="off">Warning-light review and documentation of any lights present</li>
+              <li>Warning-light review and documentation of any lights present</li>
             </ul>
           </div>
           <div class="inspect-card reveal">
@@ -524,19 +521,19 @@
         <div class="price-grid" id="priceGrid">
           <article class="price-card reveal" data-tier="standard">
             <h3>Standard Vehicle PPI</h3>
-            <p class="price-amount"><span class="price-prefix" data-prefix="standard">Starting at</span> <span class="price-value" data-price="standard">$199</span> <s class="price-was" data-was="standard" hidden></s></p>
+            <p class="price-amount"><span class="price-prefix">Starting at</span> <span class="price-value" data-price="standard">$199</span> <s class="price-was" data-was="standard" hidden></s></p>
             <p class="price-launch" data-launch="standard" hidden></p>
             <p class="price-blurb">Common unmodified domestic, Japanese and Korean passenger vehicles and light trucks.</p>
           </article>
           <article class="price-card price-card-mid reveal" data-tier="euro_luxury_performance">
             <h3>European, Luxury or Performance PPI</h3>
-            <p class="price-amount"><span class="price-prefix" data-prefix="euro_luxury_performance">Starting at</span> <span class="price-value" data-price="euro_luxury_performance">$299</span> <s class="price-was" data-was="euro_luxury_performance" hidden></s></p>
+            <p class="price-amount"><span class="price-prefix">Starting at</span> <span class="price-value" data-price="euro_luxury_performance">$299</span> <s class="price-was" data-was="euro_luxury_performance" hidden></s></p>
             <p class="price-launch" data-launch="euro_luxury_performance" hidden></p>
-            <p class="price-blurb">Examples include Corvette, BMW, Mercedes-Benz, Audi, Land Rover, Porsche — and modified or higher-complexity vehicles.</p>
+            <p class="price-blurb">Examples include Corvette, BMW, Mercedes-Benz, Audi, Land Rover, Porsche — and other luxury or higher-complexity vehicles.</p>
           </article>
           <article class="price-card reveal" data-tier="exotic_collector">
             <h3>Exotic, Collector or Heavily Modified PPI</h3>
-            <p class="price-amount"><span class="price-prefix" data-prefix="exotic_collector">Starting at</span> <span class="price-value" data-price="exotic_collector">$399</span></p>
+            <p class="price-amount"><span class="price-prefix">Starting at</span> <span class="price-value" data-price="exotic_collector">$399</span></p>
             <p class="price-blurb">Final quote required after reviewing the exact vehicle, location and inspection scope.</p>
           </article>
         </div>
@@ -552,15 +549,15 @@
           The AutoClarity app subscription (informational symptom guidance, billed separately by Apple)
           is a separate product. Las&nbsp;Vegas PPI services are separately scheduled and priced
           physical services — you do not need the app to request one.
-          <span data-payment="off">Submitting is free. After review, AutoClarity confirms the quote and timing; if online payment is offered, payment reserves the appointment.</span>
-          <span data-payment="on" hidden>After review, you can select a time, accept the service agreement, and pay securely through this website to reserve the appointment.</span>
+          <span data-payment="off">Submitting is free. After review, AutoClarity confirms the exact quote and timing. If online payment is unavailable, contact AutoClarity to complete scheduling.</span>
+          <span data-payment="on" hidden>After review, select a time, accept the current service agreements, and pay the exact approved quote amount securely through Stripe. Successful payment confirms the appointment.</span>
         </div>
 
         <div class="travel-card reveal" aria-labelledby="travel-title">
           <h3 id="travel-title">Mobile-service travel</h3>
           <table class="travel-table">
             <caption class="sr-only">Mobile-service charges by distance from the Las Vegas service area</caption>
-            <tbody>
+            <tbody id="travelRows">
               <tr><th scope="row">0–15 miles</th><td>Included</td></tr>
               <tr><th scope="row">16–25 miles</th><td>+$25 mobile-service charge</td></tr>
               <tr><th scope="row">26–40 miles</th><td>+$50 mobile-service charge</td></tr>
@@ -581,27 +578,29 @@
           <p class="section-sub">A few minutes now can save you thousands later. AutoClarity typically responds within 24 hours with scheduling details.</p>
         </header>
 
-        <!-- Waitlist variant (PPI_MODE=waitlist) -->
-        <div class="form-shell reveal" id="waitlistShell" hidden>
-          <h3>Booking opens soon</h3>
-          <p>Las Vegas appointments aren’t open quite yet. Join the launch list and you’ll be first to know.</p>
-          <form id="waitlistForm" novalidate>
-            <div class="field">
-              <label for="wlEmail">Email address</label>
-              <input id="wlEmail" name="email" type="email" autocomplete="email" required />
-            </div>
-            <div class="field">
-              <label for="wlZip">ZIP code <span class="opt">(optional)</span></label>
-              <input id="wlZip" name="zip" inputmode="numeric" autocomplete="postal-code" maxlength="10" />
-            </div>
-            <div class="turnstile-slot" data-turnstile></div>
-            <button class="btn btn-primary btn-lg" type="submit">Join the launch list</button>
-            <p class="form-status" role="status" aria-live="polite"></p>
-          </form>
-        </div>
+        <!-- Inert until runtime configuration explicitly reports waitlist mode. -->
+        <template id="waitlistTemplate">
+          <div class="form-shell reveal" id="waitlistShell">
+            <h3>Booking opens soon</h3>
+            <p>Las Vegas appointments aren’t open quite yet. Join the launch list and you’ll be first to know.</p>
+            <form id="waitlistForm" novalidate>
+              <div class="field">
+                <label for="wlEmail">Email address</label>
+                <input id="wlEmail" name="email" type="email" autocomplete="email" required />
+              </div>
+              <div class="field">
+                <label for="wlZip">ZIP code <span class="opt">(optional)</span></label>
+                <input id="wlZip" name="zip" inputmode="numeric" autocomplete="postal-code" maxlength="10" />
+              </div>
+              <div class="turnstile-slot" data-turnstile></div>
+              <button class="btn btn-service btn-lg" type="submit">Join the launch list</button>
+              <p class="form-status" role="status" aria-live="polite"></p>
+            </form>
+          </div>
+        </template>
 
         <!-- Full intake (PPI_MODE=request|live) -->
-        <div class="form-shell reveal" id="intakeShell">
+        <div class="form-shell reveal" id="intakeShell" hidden>
           <div class="form-progress" aria-hidden="true">
             <div class="form-progress-bar" id="progressBar"></div>
           </div>
@@ -802,10 +801,6 @@
                 <input id="permInspection" name="permInspection" type="checkbox" />
                 <label for="permInspection">The seller has agreed to an independent inspection</label>
               </div>
-              <div class="field field-check" data-scan="on" hidden>
-                <input id="permScan" name="permScan" type="checkbox" />
-                <label for="permScan">The seller has agreed to reasonable diagnostic scanning</label>
-              </div>
               <div class="field-row">
                 <div class="field">
                   <label for="permRoadTest">Road test permitted?</label>
@@ -944,23 +939,25 @@
             <div class="upload-block" id="uploadBlock">
               <h4>Optional: add photos now</h4>
               <p class="field-hint">Listing screenshots, the VIN plate, dashboard warning lights, or damage the seller disclosed. Up to 6 images, 8&nbsp;MB each.</p>
-              <input type="file" id="uploadInput" accept="image/jpeg,image/png,image/webp,image/heic" multiple />
+              <input type="file" id="uploadInput" aria-label="Choose optional vehicle photos to upload" accept="image/jpeg,image/png,image/webp,image/heic" multiple />
               <ul class="upload-list" id="uploadList"></ul>
             </div>
             <p class="success-help">Questions or a correction? Email <a href="mailto:support@getautoclarity.com">support@getautoclarity.com</a> and include your reference if one is shown above.</p>
           </div>
         </div>
 
-        <!-- Static fallback when the API isn't reachable. A mailto handoff is
-             never presented as a stored request. -->
-        <div class="form-shell reveal" id="fallbackShell" hidden>
-          <h3>Online requests are temporarily unavailable</h3>
-          <p>
-            Your answers stay saved on this device. Complete the form and choose Submit to
-            open a prepared email to <a href="mailto:support@getautoclarity.com?subject=Las%20Vegas%20PPI%20request">support@getautoclarity.com</a>.
-            AutoClarity does not receive the request until you send that email.
-          </p>
-        </div>
+        <!-- Inert until the runtime API is genuinely unavailable. The mailto
+             handoff is never presented as a stored request. -->
+        <template id="fallbackTemplate">
+          <div class="form-shell reveal" id="fallbackShell" role="status" aria-live="polite" tabindex="-1">
+            <h3>Online requests are temporarily unavailable</h3>
+            <p>
+              Your answers stay saved on this device. Complete the form and choose Submit to
+              open a prepared email to <a href="mailto:support@getautoclarity.com?subject=Las%20Vegas%20PPI%20request">support@getautoclarity.com</a>.
+              AutoClarity does not receive the request until you send that email.
+            </p>
+          </div>
+        </template>
       </div>
     </section>
 
@@ -1007,16 +1004,16 @@
           </details>
           <details class="faq-item reveal">
             <summary>What if the vehicle sells before my appointment?</summary>
-            <p>You can transfer the inspection to a different vehicle once for free. Details are in the cancellation policy shown before you pay.</p>
+            <p>You may transfer the inspection to one replacement vehicle with no transfer fee. AutoClarity re-reviews the replacement vehicle, location, scope and seller access and sends an updated approved quote. If the total is higher, you pay the difference before the replacement booking is confirmed; if it is lower, AutoClarity refunds the difference; and if it is the same, your existing payment transfers with no additional charge. Details are in the cancellation policy shown before you pay.</p>
           </details>
           <details class="faq-item reveal">
             <summary>What if the seller refuses access?</summary>
-            <p>If access is refused before travel begins, you can reschedule or transfer to another vehicle at no charge. If it happens after the technician is already en route, the mobile-service portion may be retained.</p>
+            <p>If access is refused before travel begins, you can reschedule for free or make one vehicle transfer with no transfer fee. A replacement vehicle is re-reviewed and repriced, with any difference collected or refunded as described in the cancellation policy shown before you pay. If access is refused after the technician is already en route, only a separately disclosed travel or mobile-service charge in your approved quote may be retained.</p>
           </details>
           <details class="faq-item reveal">
             <summary>When do I pay?</summary>
-            <p data-payment="off">Submitting is free. After review, AutoClarity confirms your exact quote and available timing. If online payment is offered, completing it reserves the appointment.</p>
-            <p data-payment="on" hidden>Only after your request is reviewed and you’ve seen your exact quote, chosen a time, and accepted the service agreement. Payment is processed securely by Stripe and reserves your appointment.</p>
+            <p data-payment="off">Submitting is free. After review, AutoClarity confirms your exact quote and available timing. If online payment is unavailable, contact AutoClarity to complete scheduling.</p>
+            <p data-payment="on" hidden>Only after your request is reviewed and you’ve seen the exact approved quote, chosen a time, and accepted the current service agreements. Stripe charges that exact quoted amount, and successful payment confirms your appointment.</p>
           </details>
           <details class="faq-item reveal">
             <summary>What areas do you serve?</summary>
@@ -1028,7 +1025,7 @@
           </details>
           <details class="faq-item reveal">
             <summary>Do I need the VIN to request an inspection?</summary>
-            <p>No — you can submit without it. The VIN is confirmed before the appointment is finalized so the inspection matches the exact vehicle.</p>
+            <p>No — you can submit without it. Share the VIN with AutoClarity before the inspection when it becomes available so the stored request matches the vehicle presented.</p>
           </details>
           <details class="faq-item reveal">
             <summary>Is the service available outside Las Vegas?</summary>
@@ -1055,7 +1052,7 @@
       <div class="section-inner section-narrow reveal">
         <img class="final-icon" src="/assets/img/icon-180.png" alt="" width="88" height="88" />
         <h2 id="cta-title">Don’t gamble thousands on a vehicle you haven’t had independently inspected.</h2>
-        <a class="btn btn-primary btn-xl" href="#request" data-analytics="ppi_cta_click" data-step="final">Request Your Las Vegas PPI</a>
+        <a class="btn btn-service btn-xl" href="#request" data-request-cta data-analytics="ppi_cta_click" data-step="request_intent_final">Request an Inspection</a>
         <p class="hero-fineprint">Reviewed personally · Exact price before you pay · No repair upsell</p>
       </div>
     </section>
@@ -1094,7 +1091,7 @@
     </div>
   </footer>
 
-  <script src="/assets/js/main.js?v=ac-ai-20260907-r1" defer></script>
-  <script src="/assets/js/ppi-form.js?v=ac-ai-20260907-r1" defer></script>
+  <script src="/assets/js/main.js?v=ac-ai-20260907-r2" defer></script>
+  <script src="/assets/js/ppi-form.js?v=ac-ai-20260907-r2" defer></script>
 </body>
 </html>

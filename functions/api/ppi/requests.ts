@@ -16,6 +16,7 @@ import { queueTemplate, type EmailResult } from '../../lib/email.ts';
 import { persistNotificationIssue } from '../../lib/notification-issues.ts';
 import { queueTransactionalSms } from '../../lib/sms.ts';
 import { clientIp, errorJson, json, newId, newRef, nowIso, originAllowed, sha256Hex, toCents } from '../../lib/util.ts';
+import { readJsonBody, requestBodyErrorResponse } from '../../lib/request-body.ts';
 
 const SUBMISSION_KEY_RE = /^[A-Za-z0-9_-]{16,128}$/;
 
@@ -73,9 +74,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   let raw: Record<string, unknown>;
   try {
-    raw = (await request.json()) as Record<string, unknown>;
-  } catch {
-    return errorJson('bad_json', 'Request body must be JSON.', 400);
+    raw = await readJsonBody<Record<string, unknown>>(request);
+  } catch (error) {
+    return requestBodyErrorResponse(error);
   }
 
   const turnstile = await verifyTurnstile(

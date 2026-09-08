@@ -28,6 +28,34 @@
   window.addEventListener("scroll", onScroll, { passive: true });
   onScroll();
 
+  /* ---------- Compact homepage navigation ---------- */
+  var mobileMenu = document.querySelector(".nav-mobile-menu");
+  if (mobileMenu) {
+    var mobileMenuSummary = mobileMenu.querySelector("summary");
+
+    function syncMobileMenuLabel() {
+      if (!mobileMenuSummary) return;
+      var open = mobileMenu.open;
+      mobileMenuSummary.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
+      mobileMenuSummary.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+
+    mobileMenu.addEventListener("toggle", syncMobileMenuLabel);
+    mobileMenu.querySelectorAll("a").forEach(function (link) {
+      link.addEventListener("click", function () { mobileMenu.open = false; });
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && mobileMenu.open) {
+        mobileMenu.open = false;
+        if (mobileMenuSummary) mobileMenuSummary.focus();
+      }
+    });
+    document.addEventListener("pointerdown", function (event) {
+      if (mobileMenu.open && !mobileMenu.contains(event.target)) mobileMenu.open = false;
+    });
+    syncMobileMenuLabel();
+  }
+
   /* ---------- Scroll reveals ---------- */
   var reveals = document.querySelectorAll(".reveal");
   if ("IntersectionObserver" in window && !reducedMotion.matches) {
@@ -240,11 +268,31 @@
   /* ---------- Homepage conversion analytics (allowlisted, no PII) ---------- */
   if (document.body.dataset.page === "home") {
     var attributionKey = "ppi-attribution-v1";
+    var allowedAttributions = [
+      "ppi_unknown", "ppi_direct", "ppi_internal", "ppi_search_organic", "ppi_social_social",
+      "ppi_directory_referral", "ppi_referral_referral", "ppi_google_cpc", "ppi_google_organic",
+      "ppi_bing_cpc", "ppi_bing_organic", "ppi_yahoo_organic", "ppi_duckduckgo_organic",
+      "ppi_facebook_social", "ppi_facebook_paid_social", "ppi_instagram_social",
+      "ppi_instagram_paid_social", "ppi_tiktok_social", "ppi_tiktok_paid_social",
+      "ppi_youtube_social", "ppi_youtube_paid_social", "ppi_reddit_social",
+      "ppi_reddit_paid_social", "ppi_nextdoor_referral", "ppi_yelp_referral", "ppi_apple_referral",
+      "ppi_email_email", "ppi_campaign_cpc", "ppi_campaign_organic", "ppi_campaign_social",
+      "ppi_campaign_paid_social", "ppi_campaign_email", "ppi_campaign_referral", "ppi_campaign_display",
+      "ppi_google_business_profile", "ppi_bing_places", "ppi_apple_maps", "ppi_chatgpt_search",
+      "ppi_perplexity_search", "ppi_claude_search"
+    ];
     var sourceMap = {
       google: "google", bing: "bing", yahoo: "yahoo", duckduckgo: "duckduckgo",
       facebook: "facebook", instagram: "instagram", tiktok: "tiktok",
       youtube: "youtube", reddit: "reddit", nextdoor: "nextdoor", yelp: "yelp",
       apple: "apple", newsletter: "email", email: "email"
+    };
+    var dedicatedSourceMap = {
+      gbp: "ppi_google_business_profile", googlebusinessprofile: "ppi_google_business_profile",
+      google_business_profile: "ppi_google_business_profile", bingplaces: "ppi_bing_places",
+      bing_places: "ppi_bing_places", applemaps: "ppi_apple_maps", apple_maps: "ppi_apple_maps",
+      chatgpt: "ppi_chatgpt_search", openai: "ppi_chatgpt_search",
+      perplexity: "ppi_perplexity_search", claude: "ppi_claude_search", anthropic: "ppi_claude_search"
     };
     var mediumMap = {
       cpc: "cpc", ppc: "cpc", paidsearch: "cpc", paid_search: "cpc",
@@ -254,14 +302,41 @@
     };
 
     function allowedAttribution(value) {
-      return /^ppi_(unknown|direct|internal|search|social|directory|referral|campaign|google|bing|yahoo|duckduckgo|facebook|instagram|tiktok|youtube|reddit|nextdoor|yelp|apple|email)(_(cpc|organic|social|paid_social|email|referral|display))?$/.test(String(value || ""));
+      return allowedAttributions.indexOf(String(value || "")) !== -1;
     }
 
     function homepageReferrerCategory(host) {
-      if (/(^|\.)(google\.|bing\.com$|search\.yahoo\.com$|duckduckgo\.com$)/.test(host)) return { source: "search", medium: "organic" };
-      if (/(^|\.)(facebook\.com$|instagram\.com$|tiktok\.com$|youtube\.com$|reddit\.com$)/.test(host)) return { source: "social", medium: "social" };
-      if (/(^|\.)(nextdoor\.com$|yelp\.com$|maps\.apple\.com$)/.test(host)) return { source: "directory", medium: "referral" };
-      return { source: "referral", medium: "referral" };
+      if (/(^|\.)chatgpt\.com$/.test(host)) return "ppi_chatgpt_search";
+      if (/(^|\.)perplexity\.(ai|com)$/.test(host)) return "ppi_perplexity_search";
+      if (/(^|\.)claude\.ai$/.test(host)) return "ppi_claude_search";
+      if (/(^|\.)google\.[a-z.]+$/.test(host)) return "ppi_google_organic";
+      if (/(^|\.)bing\.com$/.test(host)) return "ppi_bing_organic";
+      if (/(^|\.)search\.yahoo\.com$/.test(host)) return "ppi_yahoo_organic";
+      if (/(^|\.)duckduckgo\.com$/.test(host)) return "ppi_duckduckgo_organic";
+      if (/(^|\.)facebook\.com$/.test(host)) return "ppi_facebook_social";
+      if (/(^|\.)instagram\.com$/.test(host)) return "ppi_instagram_social";
+      if (/(^|\.)tiktok\.com$/.test(host)) return "ppi_tiktok_social";
+      if (/(^|\.)youtube\.com$/.test(host)) return "ppi_youtube_social";
+      if (/(^|\.)reddit\.com$/.test(host)) return "ppi_reddit_social";
+      if (/(^|\.)nextdoor\.com$/.test(host)) return "ppi_nextdoor_referral";
+      if (/(^|\.)yelp\.com$/.test(host)) return "ppi_yelp_referral";
+      if (/(^|\.)maps\.apple\.com$/.test(host)) return "ppi_apple_maps";
+      return "ppi_referral_referral";
+    }
+
+    function campaignAttribution(rawSource, rawMedium) {
+      if (dedicatedSourceMap[rawSource]) return dedicatedSourceMap[rawSource];
+      var source = sourceMap[rawSource] || (rawSource ? "campaign" : "");
+      var medium = mediumMap[rawMedium] || "";
+      if (!medium && /^(google|bing|yahoo|duckduckgo)$/.test(source)) medium = "organic";
+      if (!medium && /^(facebook|instagram|tiktok|youtube|reddit)$/.test(source)) medium = "social";
+      if (!medium && /^(nextdoor|yelp|apple)$/.test(source)) medium = "referral";
+      if (!medium && source === "email") medium = "email";
+      if (!source && medium) source = "campaign";
+      var candidate = "ppi_" + source + (medium ? "_" + medium : "");
+      if (allowedAttribution(candidate)) return candidate;
+      candidate = medium ? "ppi_campaign_" + medium : "ppi_direct";
+      return allowedAttribution(candidate) ? candidate : "ppi_direct";
     }
 
     function homepageAttribution() {
@@ -271,26 +346,20 @@
         if (saved) sessionStorage.removeItem(attributionKey);
       } catch (e) {}
 
-      var source = "";
-      var medium = "";
+      var result = "";
       try {
         var params = new URLSearchParams(window.location.search);
         var rawSource = String(params.get("utm_source") || "").toLowerCase().replace(/[^a-z_]/g, "");
         var rawMedium = String(params.get("utm_medium") || "").toLowerCase().replace(/[^a-z_]/g, "");
-        source = sourceMap[rawSource] || (rawSource ? "campaign" : "");
-        medium = mediumMap[rawMedium] || "";
-        if (!source && medium) source = "campaign";
-        if (!source && document.referrer) {
+        if (rawSource || rawMedium) result = campaignAttribution(rawSource, rawMedium);
+        if (!result && document.referrer) {
           var ref = new URL(document.referrer);
-          if (ref.origin === window.location.origin) source = "internal";
-          else {
-            var category = homepageReferrerCategory(ref.hostname.toLowerCase());
-            source = category.source;
-            medium = category.medium;
-          }
+          result = ref.origin === window.location.origin
+            ? "ppi_internal"
+            : homepageReferrerCategory(ref.hostname.toLowerCase());
         }
       } catch (e) {}
-      var result = "ppi_" + (source || "direct") + (medium ? "_" + medium : "");
+      if (!result) result = "ppi_direct";
       if (!allowedAttribution(result)) result = "ppi_direct";
       try { sessionStorage.setItem(attributionKey, result); } catch (e) {}
       return result;

@@ -4,7 +4,8 @@
 import type { Env } from '../../lib/types.ts';
 import { requireAdmin, auditLog } from '../../lib/auth.ts';
 import { getConfig, setConfig } from '../../lib/config.ts';
-import { errorJson, json } from '../../lib/util.ts';
+import { errorJson, json, originAllowed } from '../../lib/util.ts';
+import { readJsonBody, requestBodyErrorResponse } from '../../lib/request-body.ts';
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
   const auth = await requireAdmin(context.request, context.env);
@@ -13,13 +14,16 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 };
 
 export const onRequestPut: PagesFunction<Env> = async (context) => {
+  if (!originAllowed(context.request, context.env.PUBLIC_BASE_URL, true)) {
+    return errorJson('bad_origin', 'Cross-origin requests are not accepted.', 403);
+  }
   const auth = await requireAdmin(context.request, context.env);
   if (!auth.ok) return auth.response;
   let patch: unknown;
   try {
-    patch = await context.request.json();
-  } catch {
-    return errorJson('bad_json', 'Request body must be JSON.', 400);
+    patch = await readJsonBody<unknown>(context.request);
+  } catch (error) {
+    return requestBodyErrorResponse(error);
   }
   const updated = await setConfig(context.env.DB, patch, auth.actor);
   await auditLog(context.env.DB, auth.actor, 'update_config', 'configuration', 'ppi', patch);

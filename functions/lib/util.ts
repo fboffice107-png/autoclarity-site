@@ -75,10 +75,16 @@ export function clientIp(request: Request): string {
   return request.headers.get('cf-connecting-ip') ?? '0.0.0.0';
 }
 
-/** Reject cross-origin mutations. Same-origin or configured base URL only. */
-export function originAllowed(request: Request, publicBaseUrl: string | undefined): boolean {
+/** Reject cross-origin mutations. Same-origin or configured base URL only.
+ * Authenticated browser-only admin mutations can also require Origin so the
+ * check fails closed instead of treating a missing header as a CLI client. */
+export function originAllowed(
+  request: Request,
+  publicBaseUrl: string | undefined,
+  requireOrigin = false,
+): boolean {
   const origin = request.headers.get('origin');
-  if (!origin) return true; // non-browser clients (tests, curl) — auth still applies
+  if (!origin) return !requireOrigin;
   const requestOrigin = new URL(request.url).origin;
   if (origin === requestOrigin) return true;
   if (publicBaseUrl) {

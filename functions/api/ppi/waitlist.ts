@@ -6,6 +6,7 @@ import { verifyTurnstile } from '../../lib/turnstile.ts';
 import { rateLimit } from '../../lib/ratelimit.ts';
 import { validEmail } from '../../lib/validate.ts';
 import { clampStr, clientIp, errorJson, json, newId, nowIso, originAllowed } from '../../lib/util.ts';
+import { readJsonBody, requestBodyErrorResponse } from '../../lib/request-body.ts';
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { request, env } = context;
@@ -20,9 +21,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   let body: { email?: string; zip?: string; turnstileToken?: string };
   try {
-    body = (await request.json()) as typeof body;
-  } catch {
-    return errorJson('bad_json', 'Request body must be JSON.', 400);
+    body = await readJsonBody<typeof body>(request);
+  } catch (error) {
+    return requestBodyErrorResponse(error);
   }
 
   const turnstile = await verifyTurnstile(

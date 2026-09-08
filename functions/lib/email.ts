@@ -676,6 +676,18 @@ export const EMAIL_TEMPLATES = {
     subject: `AutoClarity — refund issued (${ctx.ref})`,
     text: [`A refund has been issued: ${ctx.extra?.['amount'] ?? ''}`, '', 'Your bank or payment provider controls when the credit appears on your account.', footer(ctx)].join('\n'),
   }),
+  refund_reconciliation_needed: (ctx: TemplateCtx) => ({
+    subject: `AutoClarity — refund status update (${ctx.ref})`,
+    text: [
+      'Stripe reported that a previously completed refund did not remain successful.',
+      '',
+      `The currently confirmed refunded amount is ${ctx.extra?.['amount'] ?? '$0.00'}.`,
+      'Your original appointment has not been restored or rebooked. AutoClarity is reviewing the payment record and will contact you with the next step.',
+      '',
+      `You do not need to submit another payment. Questions? Contact ${ctx.supportEmail}.`,
+      footer(ctx),
+    ].join('\n'),
+  }),
   report_ready: (ctx: TemplateCtx) => ({
     subject: `AutoClarity — your inspection results are ready (${ctx.ref})`,
     text: ['Your written inspection results and recommendation are ready.', '', 'View them securely here:', ctx.portalUrl ?? '', footer(ctx)].join('\n'),
@@ -705,6 +717,22 @@ export const EMAIL_TEMPLATES = {
   owner_notify: (ctx: TemplateCtx) => ({
     subject: `PPI ${ctx.extra?.['kind'] ?? 'update'} — ${ctx.ref}`,
     text: [`Event: ${ctx.extra?.['kind'] ?? 'update'}`, `Request: ${ctx.ref}`, ctx.extra?.['detail'] ?? '', '', `Admin: ${ctx.extra?.['adminUrl'] ?? ''}`].join('\n'),
+  }),
+  owner_dispute_update: (ctx: TemplateCtx) => ({
+    subject: `PPI payment dispute update — ${ctx.ref}`,
+    text: [
+      `Event: ${ctx.extra?.['kind'] ?? 'PAYMENT DISPUTE UPDATE'}`,
+      `Request: ${ctx.ref}`,
+      `Stripe dispute: ${ctx.extra?.['disputeId'] ?? 'unknown'}`,
+      `Amount: ${ctx.extra?.['amount'] ?? 'unknown'}`,
+      `Provider status: ${ctx.extra?.['status'] ?? 'unknown'}`,
+      `Funds state: ${ctx.extra?.['fundsState'] ?? 'unknown'}`,
+      `Local payment status: ${ctx.extra?.['paymentStatus'] ?? 'unknown'}`,
+      '',
+      'The request, booking, and capacity remain closed even if Stripe reports a win or reinstated funds. Review the ledger and decide any customer or scheduling follow-up manually.',
+      '',
+      `Admin: ${ctx.extra?.['adminUrl'] ?? ''}`,
+    ].join('\n'),
   }),
 } as const;
 

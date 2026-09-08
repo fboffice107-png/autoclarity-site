@@ -21,6 +21,33 @@ if (!process.argv.includes('--submit')) {
 for (const url of [keyLocation, ...urlList]) {
   const response = await fetch(url, { redirect: 'follow' });
   if (!response.ok) throw new Error(`IndexNow preflight failed: ${url} returned ${response.status}`);
+  if (response.url !== url) {
+    throw new Error(`IndexNow preflight failed: ${url} resolved to unexpected URL ${response.url}`);
+  }
+
+  const contentType = (response.headers.get('content-type') ?? '').toLowerCase();
+  if (url.endsWith('.json')) {
+    if (!contentType.includes('application/json')) {
+      throw new Error(`IndexNow preflight failed: ${url} is not JSON (${contentType || 'missing type'})`);
+    }
+    const catalog = await response.json();
+    if (catalog?.canonicalUrl !== 'https://getautoclarity.com/las-vegas-pre-purchase-inspection/') {
+      throw new Error(`IndexNow preflight failed: ${url} does not contain the expected canonical service URL`);
+    }
+  } else {
+    const body = await response.text();
+    if (url === keyLocation) {
+      if (!contentType.includes('text/plain') || body.trim() !== key) {
+        throw new Error(`IndexNow preflight failed: ${url} is not the exact key file`);
+      }
+    } else if (url.endsWith('/llms.txt')) {
+      if (!contentType.includes('text/plain') || !body.startsWith('# AutoClarity')) {
+        throw new Error(`IndexNow preflight failed: ${url} is not the expected llms.txt document`);
+      }
+    } else if (!contentType.includes('text/html') || !body.includes('<html')) {
+      throw new Error(`IndexNow preflight failed: ${url} is not an HTML document`);
+    }
+  }
 }
 
 const response = await fetch('https://api.indexnow.org/indexnow', {

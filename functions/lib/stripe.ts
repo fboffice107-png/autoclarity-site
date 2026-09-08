@@ -7,6 +7,7 @@ import type { Env } from './types.ts';
 import { modeFlags } from './types.ts';
 
 const STRIPE_API = 'https://api.stripe.com/v1';
+export const STRIPE_CHECKOUT_CURRENCY = 'usd' as const;
 
 /** Real Stripe in production, always. Overridable only outside production so
  *  integration tests can exercise the full payment path against a mock. */
@@ -95,6 +96,7 @@ export interface CheckoutInput {
   quoteId: string;
   bookingId: string;
   amountCents: number;
+  currency: string;
   customerEmail: string;
   publicBaseUrl: string;
   attempt: number;
@@ -142,12 +144,18 @@ export function decideCheckoutAttempt(
  * carries ONLY internal ids — never VIN, address, notes or diagnostics.
  */
 export async function createCheckoutSession(env: Env, input: CheckoutInput): Promise<CheckoutSession> {
+  if (!Number.isSafeInteger(input.amountCents) || input.amountCents <= 0) {
+    throw new StripeConfigError('Checkout amount must be a positive safe integer in cents.');
+  }
+  if (input.currency !== STRIPE_CHECKOUT_CURRENCY) {
+    throw new StripeConfigError(`Checkout currency must be ${STRIPE_CHECKOUT_CURRENCY}.`);
+  }
   const key = stripeKey(env);
   const base = input.publicBaseUrl.replace(/\/$/, '');
   const session = await stripePost(env, key, '/checkout/sessions', {
     mode: 'payment',
     'line_items[0][quantity]': '1',
-    'line_items[0][price_data][currency]': 'usd',
+    'line_items[0][price_data][currency]': input.currency,
     'line_items[0][price_data][unit_amount]': String(input.amountCents),
     'line_items[0][price_data][product_data][name]': `AutoClarity Pre-Purchase Inspection — ${input.requestRef}`,
     customer_email: input.customerEmail,
@@ -274,18 +282,27 @@ export async function verifyStripeSignature(
 }
 
 /**
- * Idempotency guard: records the event id; returns false for a processed or
- * currently-owned replay. An unprocessed claim older than five minutes can be
- * reclaimed, recovering a Worker termination between claim and completion.
+ * Idempotency guard: records the event id and distinguishes a processed replay
+ * from a currently-owned delivery. An unprocessed claim older than five
+ * minutes can be reclaimed, recovering a Worker termination between claim and
+ * completion. In-flight duplicates must receive a retryable non-2xx response;
+ * acknowledging them could lose the event if the first Worker later fails.
  */
-export async function claimStripeEvent(db: D1Database, eventId: string, type: string, payloadSha256: string): Promise<boolean> {
+export type StripeEventClaim = 'claimed' | 'processed' | 'in_progress';
+
+export async function claimStripeEvent(
+  db: D1Database,
+  eventId: string,
+  type: string,
+  payloadSha256: string,
+): Promise<StripeEventClaim> {
   const now = new Date();
   const receivedAt = now.toISOString();
   const result = await db
     .prepare(`INSERT OR IGNORE INTO stripe_events (event_id, type, payload_sha256, received_at) VALUES (?, ?, ?, ?)`)
     .bind(eventId, type, payloadSha256, receivedAt)
     .run();
-  if ((result.meta?.changes ?? 0) === 1) return true;
+  if ((result.meta?.changes ?? 0) === 1) return 'claimed';
 
   const staleBefore = new Date(now.getTime() - 5 * 60_000).toISOString();
   const reclaimed = await db
@@ -296,7 +313,16 @@ export async function claimStripeEvent(db: D1Database, eventId: string, type: st
     )
     .bind(receivedAt, eventId, type, payloadSha256, staleBefore)
     .run();
-  return (reclaimed.meta?.changes ?? 0) === 1;
+  if ((reclaimed.meta?.changes ?? 0) === 1) return 'claimed';
+
+  const existing = await db
+    .prepare(`SELECT type, payload_sha256, processed_at FROM stripe_events WHERE event_id = ?`)
+    .bind(eventId)
+    .first<{ type: string; payload_sha256: string; processed_at: string | null }>();
+  if (existing?.type === type && existing.payload_sha256 === payloadSha256 && existing.processed_at) {
+    return 'processed';
+  }
+  return 'in_progress';
 }
 
 export async function markStripeEventProcessed(db: D1Database, eventId: string): Promise<void> {

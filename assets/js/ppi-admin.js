@@ -132,6 +132,11 @@
     return value.replace(/^ppi_/, "").replace(/_/g, " ");
   }
 
+  function reportedRate(value, denominator) {
+    if (Number(denominator || 0) < 20 || value == null) return "— (<20 sample)";
+    return Number(value).toLocaleString("en-US", { maximumFractionDigits: 1 }) + "%";
+  }
+
   /* ================= Overview ================= */
   function renderOverview(preloaded) {
     var proceed = function (data) {
@@ -148,41 +153,64 @@
         stat(c(["confirmed"]), "Confirmed") +
         stat(c(["completed"]), "Completed") +
         notificationStat(data.notificationIssues || 0) +
-        stat(money(data.revenue30d.grossCents), "Gross collected (30d)") +
-        stat(money(data.revenue30d.refundedCents), "Refunded (30d)") +
-        stat(money(data.revenue30d.netCents), "Net collected (30d)") +
         "</div>";
 
-      if (data.revenue30d.disputedPayments) {
-        html += '<div class="notice warn">' + esc(data.revenue30d.disputedPayments) +
-          " disputed payment record(s), totaling " + esc(money(data.revenue30d.disputedCents)) +
-          ", are excluded from net collected.</div>";
-      }
-
-      var verified = data.authoritativeFunnel30d || {};
-      html += '<section class="portal-card"><h2>Verified service funnel (30 days)</h2>' +
-        '<p style="color:var(--text-2);">Saved records and workflow/payment state—not browser clicks.</p><div class="admin-grid">' +
-        stat(verified.requests_saved || 0, "Requests saved") +
-        stat(verified.quotes_sent || 0, "Quotes sent") +
-        stat(verified.checkouts_created || 0, "Checkouts created") +
-        stat(verified.payments_succeeded || 0, "Payments succeeded") +
-        stat(verified.bookings_confirmed || 0, "Bookings confirmed") +
-        stat(verified.completed || 0, "Inspections completed") +
-        "</div></section>";
-
-      html += '<section class="portal-card"><h2>Request cohorts by source (30 days)</h2>' +
-        '<p style="color:var(--text-2);">First-touch source is reduced to an allowlisted category. Missing or direct referrers remain “Direct / unknown.” Revenue comes from payment records.</p>';
-      if (!(data.attribution30d || []).length) html += '<p style="color:var(--text-3);">No requests in this period.</p>';
-      else {
-        html += '<div style="overflow-x:auto;"><table class="admin-table"><thead><tr><th>Source</th><th>Requests</th><th>Paid</th><th>Completed</th><th>Gross</th><th>Refunded</th><th>Net</th><th>Disputed</th></tr></thead><tbody>';
-        data.attribution30d.forEach(function (row) {
-          html += "<tr><td>" + esc(attributionLabel(row.source)) + "</td><td>" + esc(row.requests) +
-            "</td><td>" + esc(row.paid_requests) + "</td><td>" + esc(row.completed) +
-            "</td><td>" + esc(money(row.gross_cents)) + "</td><td>" + esc(money(row.refunded_cents)) +
-            "</td><td>" + esc(money(row.net_cents)) + "</td><td>" + esc(row.disputed_requests) + "</td></tr>";
+      var revenueWindows = data.revenueWindows || [];
+      html += '<section class="portal-card"><h2>Verified service and revenue scoreboard</h2>' +
+        '<p style="color:var(--text-2);">Workflow columns count events inside each window. Money columns are current outcomes for payments first created in that window. “Recognized net” subtracts recorded refunds and currently withdrawn disputes; it is collected revenue, not profit. App Store clicks are directional browser events and stay separate from paid inspection outcomes.</p>';
+      if (!revenueWindows.length) {
+        html += '<p style="color:var(--text-3);">No scoreboard data is available.</p>';
+      } else {
+        html += '<div style="overflow-x:auto;"><table class="admin-table"><thead><tr><th>Window</th><th>Saved</th><th>Qualified</th><th>Quoted</th><th>Checkouts</th><th>Paid</th><th>Booked</th><th>Completed</th><th>Refunds</th><th>Dispute cases</th><th>Gross</th><th>Refunded</th><th>Disputed</th><th>Recognized net</th><th>Avg ticket</th><th>App Store clicks</th></tr></thead><tbody>';
+        revenueWindows.forEach(function (window) {
+          var s = window.operations || {};
+          var p = window.paymentCohort || {};
+          html += "<tr><td><strong>" + esc(window.days) + " days</strong></td><td>" + esc(s.saved_requests) +
+            "</td><td>" + esc(s.qualified_requests) + "</td><td>" + esc(s.quoted_requests) +
+            "</td><td>" + esc(s.checkout_starts) + "</td><td>" + esc(s.successful_payments) +
+            "</td><td>" + esc(s.confirmed_bookings) + "</td><td>" + esc(s.completed_inspections) +
+            "</td><td>" + esc(s.successful_refunds) + "</td><td>" + esc(s.dispute_cases_opened) +
+            "</td><td>" + esc(money(p.gross_collected_cents || 0)) + "</td><td>" + esc(money(p.refunded_cents || 0)) +
+            "</td><td>" + esc(money(p.disputed_excluded_cents || 0)) + "</td><td>" + esc(money(p.recognized_net_cents || 0)) +
+            "</td><td>" + esc(p.average_paid_ticket_cents == null ? "—" : money(p.average_paid_ticket_cents)) +
+            "</td><td>" + esc(window.appStoreOutboundClicks || 0) + "</td></tr>";
         });
         html += "</tbody></table></div>";
+        var missingPaymentTimes = revenueWindows.reduce(function (largest, window) {
+          return Math.max(largest, Number((window.dataQuality || {}).capturedPaymentsMissingConfirmationEvent || 0));
+        }, 0);
+        if (missingPaymentTimes) {
+          html += '<div class="notice warn">' + esc(missingPaymentTimes) +
+            ' captured payment cohort record(s) lack a deterministic server confirmation event across these overlapping windows. They are excluded from time-based gross/net until reconciled.</div>';
+        }
       }
+      html += "</section>";
+
+      html += '<section class="portal-card"><h2>Request cohorts by source</h2>' +
+        '<p style="color:var(--text-2);">Each table follows requests first saved in its window through their current outcomes. First touch is client-derived and reduced to an exact allowlist; it is directional, not independently verified. Missing/direct sources appear as “Direct / unknown.”</p>';
+      revenueWindows.forEach(function (window) {
+        var rows = window.sources || [];
+        html += '<details' + (window.days === 30 ? " open" : "") + '><summary><strong>' + esc(window.days) + '-day source cohorts</strong></summary>';
+        if (!rows.length) {
+          html += '<p style="color:var(--text-3);">No requests in this period.</p>';
+        } else {
+          html += '<div style="overflow-x:auto;"><table class="admin-table"><thead><tr><th>Source</th><th>Requests</th><th>Qualified</th><th>Quoted</th><th>Checkouts</th><th>Paid</th><th>Paid rate</th><th>Booked</th><th>Completed</th><th>Complete rate</th><th>Refunds</th><th>Disputes</th><th>Gross</th><th>Refunded</th><th>Disputed</th><th>Recognized net</th><th>Avg ticket</th></tr></thead><tbody>';
+          rows.forEach(function (row) {
+            html += "<tr><td>" + esc(attributionLabel(row.source)) + "</td><td>" + esc(row.requests) +
+              "</td><td>" + esc(row.qualified) + "</td><td>" + esc(row.quoted) +
+              "</td><td>" + esc(row.checkouts) + "</td><td>" + esc(row.paid) +
+              "</td><td>" + esc(reportedRate(row.request_to_paid_rate, row.requests)) + "</td><td>" + esc(row.bookings) +
+              "</td><td>" + esc(row.completed) + "</td><td>" + esc(reportedRate(row.request_to_completed_rate, row.requests)) +
+              "</td><td>" + esc(row.refund_count) + "</td><td>" + esc(row.dispute_cases) +
+              "</td><td>" + esc(money(row.gross_cents || 0)) +
+              "</td><td>" + esc(money(row.refunded_cents || 0)) + "</td><td>" + esc(money(row.disputed_excluded_cents || 0)) +
+              "</td><td>" + esc(money(row.recognized_net_cents || 0)) + "</td><td>" +
+              esc(row.average_paid_ticket_cents == null ? "—" : money(row.average_paid_ticket_cents)) + "</td></tr>";
+          });
+          html += "</tbody></table></div>";
+        }
+        html += "</details>";
+      });
       html += "</section>";
 
       var notificationRequests = data.notificationIssueRequests || [];
@@ -288,7 +316,7 @@
     requestListNotice = "";
     html += '<div class="admin-toolbar"><label for="statusFilter" class="sr-only">Filter by status</label>' +
       '<select id="statusFilter"><option value="">All statuses</option>' +
-      ["submitted", "needs_info", "seller_access_pending", "ready_for_review", "quote_prepared", "quote_sent", "awaiting_time_selection", "awaiting_agreement", "awaiting_payment", "confirmed", "inspection_in_progress", "report_in_progress", "completed", "customer_cancelled", "admin_cancelled", "expired", "refunded", "disputed"]
+      ["submitted", "needs_info", "seller_access_pending", "ready_for_review", "quote_prepared", "quote_sent", "awaiting_time_selection", "awaiting_agreement", "awaiting_payment", "confirmed", "inspection_in_progress", "report_in_progress", "completed", "customer_cancelled", "admin_cancelled", "expired", "refunded", "refund_reconciliation_needed", "disputed"]
         .map(function (s) { return '<option value="' + s + '">' + s.replace(/_/g, " ") + "</option>"; }).join("") +
       '</select></div><div id="requestsTable"></div>';
     content.innerHTML = html;
@@ -421,12 +449,17 @@
       });
       html += "</tbody></table><hr style='border-color:var(--line-soft);margin:16px 0;' />";
     }
-    html += '<h3>New quote version</h3><div class="admin-toolbar">' +
-      '<select id="qTier"><option value="standard">Standard — suggested: ' + esc(req.suggested_tier || "?") + "</option>" +
-      '<option value="euro_luxury_performance">European/Luxury/Performance</option>' +
-      '<option value="exotic_collector">Exotic/Collector/Modified</option></select>' +
+    var suggestedTier = ["standard", "euro_luxury_performance", "exotic_collector"].indexOf(req.suggested_tier) >= 0
+      ? req.suggested_tier
+      : "standard";
+    html += '<h3>New quote version</h3>' +
+      '<p class="field-hint">System suggestion: <strong>' + esc(suggestedTier.replace(/_/g, " ")) + '</strong>. Review the vehicle, location and scope before approving the final tier and amount.</p>' +
+      '<div class="admin-toolbar">' +
+      '<select id="qTier"><option value="standard"' + (suggestedTier === "standard" ? " selected" : "") + '>Standard</option>' +
+      '<option value="euro_luxury_performance"' + (suggestedTier === "euro_luxury_performance" ? " selected" : "") + '>European/Luxury/Performance</option>' +
+      '<option value="exotic_collector"' + (suggestedTier === "exotic_collector" ? " selected" : "") + '>Exotic/Collector/Modified</option></select>' +
       '<input id="qBase" placeholder="Base $ (blank = tier price)" inputmode="decimal" style="width:170px;" />' +
-      '<input id="qTravel" placeholder="Travel $ (blank = suggested)" inputmode="decimal" style="width:180px;" />' +
+      '<input id="qTravel" placeholder="Travel $ (required if custom)" inputmode="decimal" style="width:210px;" />' +
       '<input id="qAddonLabel" placeholder="Add-on label" style="width:150px;" />' +
       '<input id="qAddon" placeholder="Add-on $" inputmode="decimal" style="width:110px;" />' +
       '<input id="qDiscount" placeholder="Discount $" inputmode="decimal" style="width:110px;" />' +
@@ -469,6 +502,7 @@
     // ----- refund tracking -----
     var refundOperations = d.refundOperations || [];
     var refundAttempts = d.refundAttempts || [];
+    var providerRefunds = d.providerRefunds || [];
     html += '<h3>Refund operations</h3>';
     if (refundOperations.length) {
       html += '<p class="field-hint">The operation status below is the current source of truth for the next action. Provider attempts remain visible as immutable history.</p>' +
@@ -505,6 +539,47 @@
       html += "</tbody></table></div>";
     } else {
       html += '<p style="color:var(--text-3);">No refund attempts.</p>';
+    }
+
+    html += '<h3>Stripe refund ledger</h3>';
+    if (providerRefunds.length) {
+      html += '<p class="field-hint">Each Stripe Refund object is tracked independently. The payment balance is the sum of entries currently marked succeeded.</p>' +
+        '<div style="overflow-x:auto;"><table class="admin-table"><thead><tr><th>Stripe refund</th><th>Amount</th><th>Status</th><th>Operation</th><th>Last event</th><th>Updated</th></tr></thead><tbody>';
+      providerRefunds.forEach(function (providerRefund) {
+        html += '<tr><td class="mono">' + esc(providerRefund.provider_refund_id || "—") + '</td>' +
+          '<td>' + esc(money(Number(providerRefund.amount_cents || 0))) + '</td>' +
+          '<td>' + esc(String(providerRefund.status || "unknown").replace(/_/g, " ")) + '</td>' +
+          '<td class="mono">' + esc(providerRefund.operation_id || "external / unmatched") + '</td>' +
+          '<td><span class="mono">' + esc(providerRefund.last_event_id || "—") + '</span>' +
+          (providerRefund.last_event_created == null ? '' : '<span class="msg-meta">' + esc(new Date(Number(providerRefund.last_event_created) * 1000).toLocaleString()) + '</span>') + '</td>' +
+          '<td class="mono">' + esc(when(providerRefund.updated_at)) + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+    } else {
+      html += '<p style="color:var(--text-3);">No Stripe Refund objects recorded.</p>';
+    }
+
+    // ----- dispute tracking -----
+    var paymentDisputes = d.paymentDisputes || [];
+    html += '<h3>Stripe dispute ledger</h3>';
+    if (paymentDisputes.length) {
+      html += '<p class="field-hint">Stripe dispute status and funds movement are tracked independently. A won/closed dispute never reopens the request, booking, or capacity automatically.</p>' +
+        '<div style="overflow-x:auto;"><table class="admin-table"><thead><tr><th>Stripe dispute</th><th>Amount</th><th>Status</th><th>Funds</th><th>Payment / charge</th><th>Status event</th><th>Funds event</th><th>Updated</th></tr></thead><tbody>';
+      paymentDisputes.forEach(function (dispute) {
+        html += '<tr><td class="mono">' + esc(dispute.provider_dispute_id || "—") + '</td>' +
+          '<td>' + esc(money(Number(dispute.amount_cents || 0))) + '</td>' +
+          '<td>' + esc(String(dispute.provider_status || "unknown").replace(/_/g, " ")) + '</td>' +
+          '<td>' + esc(String(dispute.funds_state || "unknown").replace(/_/g, " ")) + '</td>' +
+          '<td><span class="mono">' + esc(dispute.payment_intent || "—") + '</span><span class="msg-meta">' + esc(dispute.provider_charge_id || "—") + '</span></td>' +
+          '<td><span class="mono">' + esc(dispute.status_event_id || "—") + '</span>' +
+          (dispute.status_event_created == null ? '' : '<span class="msg-meta">' + esc(new Date(Number(dispute.status_event_created) * 1000).toLocaleString()) + '</span>') + '</td>' +
+          '<td><span class="mono">' + esc(dispute.funds_event_id || "—") + '</span>' +
+          (dispute.funds_event_created == null ? '' : '<span class="msg-meta">' + esc(new Date(Number(dispute.funds_event_created) * 1000).toLocaleString()) + '</span>') + '</td>' +
+          '<td class="mono">' + esc(when(dispute.updated_at)) + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+    } else {
+      html += '<p style="color:var(--text-3);">No Stripe Dispute objects recorded.</p>';
     }
     html += "</section>";
 
@@ -555,9 +630,11 @@
 
   function yn(v) { return Number(v) === 1 ? "yes" : "no"; }
 
-  function dollarsToCents(str) {
-    var n = Number(String(str || "").replace(/[$,\s]/g, ""));
-    if (!isFinite(n) || n <= 0) return null;
+  function dollarsToCents(str, allowZero) {
+    var raw = String(str == null ? "" : str).replace(/[$,\s]/g, "");
+    if (!raw) return null;
+    var n = Number(raw);
+    if (!isFinite(n) || n < 0 || (!allowZero && n === 0)) return null;
     return Math.round(n * 100);
   }
 
@@ -592,12 +669,13 @@
     document.getElementById("qCreate").addEventListener("click", function () {
       var addons = [];
       var addonCents = dollarsToCents(document.getElementById("qAddon").value);
+      var travelCents = dollarsToCents(document.getElementById("qTravel").value, true);
       if (addonCents) addons.push({ label: document.getElementById("qAddonLabel").value || "Add-on", amountCents: addonCents });
       act({
         action: "create_quote",
         tier: document.getElementById("qTier").value,
         basePriceCents: dollarsToCents(document.getElementById("qBase").value) || undefined,
-        travelCents: dollarsToCents(document.getElementById("qTravel").value) !== null ? dollarsToCents(document.getElementById("qTravel").value) : undefined,
+        travelCents: travelCents !== null ? travelCents : undefined,
         addons: addons,
         discountCents: dollarsToCents(document.getElementById("qDiscount").value) || undefined,
         customerNote: document.getElementById("qNote").value,

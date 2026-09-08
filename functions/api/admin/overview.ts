@@ -10,6 +10,198 @@ import {
   type NotificationMessageIssueRow,
 } from '../../lib/notification-issues.ts';
 
+const SCORECARD_WINDOWS = [7, 30, 90] as const;
+const CAPTURED_PAYMENT_STATUSES = "'succeeded','partially_refunded','refunded','disputed'";
+
+interface RevenueWindow {
+  days: number;
+  since: string;
+  operations: Record<string, number>;
+  paymentCohort: Record<string, number | null>;
+  sources: Array<Record<string, unknown>>;
+  appStoreOutboundClicks: number;
+  dataQuality: { capturedPaymentsMissingConfirmationEvent: number };
+}
+
+function numberFields(row: Record<string, unknown> | null): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(row ?? {}).map(([key, value]) => [key, Number(value ?? 0)]),
+  );
+}
+
+function nullableNumberFields(row: Record<string, unknown> | null): Record<string, number | null> {
+  return Object.fromEntries(
+    Object.entries(row ?? {}).map(([key, value]) => [key, value === null ? null : Number(value ?? 0)]),
+  );
+}
+
+export async function loadRevenueWindow(db: D1Database, days: number): Promise<RevenueWindow> {
+  const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+  const cutoffEpoch = Math.floor(Date.parse(cutoff) / 1000);
+  const [operationsRow, paymentCohortRow, sources] = await Promise.all([
+    db.prepare(
+      `WITH params AS (
+         SELECT ? AS cutoff_iso, ? AS cutoff_epoch
+       ), first_milestones AS (
+         SELECT request_id,
+                MIN(CASE WHEN to_status = 'ready_for_review' THEN created_at END) AS qualified_at,
+                MIN(CASE WHEN to_status = 'quote_sent' THEN created_at END) AS quoted_at,
+                MIN(CASE WHEN to_status = 'completed' THEN created_at END) AS completed_at
+         FROM status_history GROUP BY request_id
+       ), window_refunds AS (
+         SELECT * FROM provider_refunds
+         WHERE status = 'succeeded' AND provider_created IS NOT NULL
+           AND provider_created > (SELECT cutoff_epoch FROM params)
+       ), window_disputes AS (
+         SELECT * FROM payment_disputes
+         WHERE provider_created > (SELECT cutoff_epoch FROM params)
+       )
+       SELECT
+         (SELECT COUNT(*) FROM ppi_requests WHERE deleted_at IS NULL
+           AND created_at > (SELECT cutoff_iso FROM params)) AS saved_requests,
+         (SELECT COUNT(*) FROM first_milestones
+           WHERE qualified_at > (SELECT cutoff_iso FROM params)) AS qualified_requests,
+         (SELECT COUNT(*) FROM first_milestones
+           WHERE quoted_at > (SELECT cutoff_iso FROM params)) AS quoted_requests,
+         (SELECT COUNT(DISTINCT stripe_session_id) FROM payments
+           WHERE stripe_session_id IS NOT NULL
+             AND created_at > (SELECT cutoff_iso FROM params)) AS checkout_starts,
+         (SELECT COUNT(*) FROM analytics_events e JOIN payments p
+           ON e.id = 'ev_payment_' || p.id AND e.event = 'ppi_payment_confirmed'
+           WHERE e.created_at > (SELECT cutoff_iso FROM params)) AS successful_payments,
+         (SELECT COUNT(DISTINCT request_id) FROM bookings
+           WHERE confirmed_at IS NOT NULL
+             AND confirmed_at > (SELECT cutoff_iso FROM params)) AS confirmed_bookings,
+         (SELECT COUNT(*) FROM first_milestones
+           WHERE completed_at > (SELECT cutoff_iso FROM params)) AS completed_inspections,
+         (SELECT COUNT(*) FROM window_refunds) AS successful_refunds,
+         (SELECT COALESCE(SUM(amount_cents), 0) FROM window_refunds) AS successful_refund_cents,
+         (SELECT COUNT(*) FROM window_disputes) AS dispute_cases_opened,
+         (SELECT COUNT(DISTINCT payment_id) FROM window_disputes) AS disputed_payments,
+         (SELECT COALESCE(SUM(amount_cents), 0) FROM window_disputes) AS dispute_case_cents,
+         (SELECT COUNT(*) FROM analytics_events
+           WHERE event = 'app_store_outbound_click'
+             AND created_at > (SELECT cutoff_iso FROM params)) AS app_store_outbound_clicks`,
+    ).bind(cutoff, cutoffEpoch).first<Record<string, unknown>>(),
+    db.prepare(
+      `WITH confirmed_payments AS (
+         SELECT p.*
+         FROM payments p
+         JOIN analytics_events e
+           ON e.id = 'ev_payment_' || p.id AND e.event = 'ppi_payment_confirmed'
+         WHERE e.created_at > ? AND p.status IN (${CAPTURED_PAYMENT_STATUSES})
+       ), active_disputes AS (
+         SELECT payment_id, SUM(amount_cents) AS disputed_cents
+         FROM payment_disputes
+         WHERE funds_state = 'withdrawn'
+         GROUP BY payment_id
+       ), captured AS (
+         SELECT p.*,
+                MIN(p.amount_cents, COALESCE(d.disputed_cents, 0)) AS disputed_cents
+         FROM confirmed_payments p
+         LEFT JOIN active_disputes d ON d.payment_id = p.id
+       )
+       SELECT COUNT(*) AS paid_payments,
+              COALESCE(SUM(amount_cents), 0) AS gross_collected_cents,
+              COALESCE(SUM(refunded_cents), 0) AS refunded_cents,
+              COALESCE(SUM(disputed_cents), 0) AS disputed_excluded_cents,
+              COALESCE(SUM(MAX(amount_cents - refunded_cents - disputed_cents, 0)), 0) AS recognized_net_cents,
+              ROUND(AVG(amount_cents)) AS average_paid_ticket_cents,
+              (SELECT COUNT(*) FROM payments missing
+               WHERE missing.status IN (${CAPTURED_PAYMENT_STATUSES})
+                 AND missing.created_at > ?
+                 AND NOT EXISTS (
+                   SELECT 1 FROM analytics_events e
+                   WHERE e.id = 'ev_payment_' || missing.id AND e.event = 'ppi_payment_confirmed'
+                 )) AS captured_payments_missing_confirmation_event
+       FROM captured`,
+    ).bind(cutoff, cutoff).first<Record<string, unknown>>(),
+    db.prepare(
+      `WITH cohort AS (
+         SELECT id, COALESCE(NULLIF(attribution_source, ''), 'ppi_unknown') AS source
+         FROM ppi_requests
+         WHERE deleted_at IS NULL AND created_at > ?
+       ), first_milestones AS (
+         SELECT request_id,
+                MIN(CASE WHEN to_status = 'ready_for_review' THEN created_at END) AS qualified_at,
+                MIN(CASE WHEN to_status = 'quote_sent' THEN created_at END) AS quoted_at,
+                MIN(CASE WHEN to_status = 'completed' THEN created_at END) AS completed_at
+         FROM status_history GROUP BY request_id
+       ), active_disputes AS (
+         SELECT payment_id, SUM(amount_cents) AS disputed_cents
+         FROM payment_disputes
+         WHERE funds_state = 'withdrawn'
+         GROUP BY payment_id
+       ), dispute_cases AS (
+         SELECT payment_id, COUNT(*) AS dispute_cases
+         FROM payment_disputes GROUP BY payment_id
+       ), refund_cases AS (
+         SELECT payment_id, COUNT(*) AS refund_count
+         FROM provider_refunds WHERE status = 'succeeded' GROUP BY payment_id
+       ), payment_rollup AS (
+         SELECT p.request_id,
+                COUNT(DISTINCT p.stripe_session_id) AS checkouts,
+                COUNT(CASE WHEN p.status IN (${CAPTURED_PAYMENT_STATUSES}) THEN 1 END) AS paid_payments,
+                MAX(CASE WHEN p.status IN (${CAPTURED_PAYMENT_STATUSES}) THEN 1 ELSE 0 END) AS paid_request,
+                SUM(CASE WHEN p.status IN (${CAPTURED_PAYMENT_STATUSES}) THEN p.amount_cents ELSE 0 END) AS gross_cents,
+                SUM(CASE WHEN p.status IN (${CAPTURED_PAYMENT_STATUSES}) THEN p.refunded_cents ELSE 0 END) AS refunded_cents,
+                SUM(CASE WHEN p.status IN (${CAPTURED_PAYMENT_STATUSES})
+                         THEN MIN(p.amount_cents, COALESCE(d.disputed_cents, 0)) ELSE 0 END) AS disputed_cents,
+                SUM(CASE WHEN p.status IN (${CAPTURED_PAYMENT_STATUSES})
+                         THEN MAX(p.amount_cents - p.refunded_cents - MIN(p.amount_cents, COALESCE(d.disputed_cents, 0)), 0)
+                         ELSE 0 END) AS recognized_net_cents,
+                SUM(COALESCE(rf.refund_count, 0)) AS refund_count,
+                SUM(COALESCE(dc.dispute_cases, 0)) AS dispute_cases
+         FROM payments p
+         LEFT JOIN active_disputes d ON d.payment_id = p.id
+         LEFT JOIN dispute_cases dc ON dc.payment_id = p.id
+         LEFT JOIN refund_cases rf ON rf.payment_id = p.id
+         GROUP BY p.request_id
+       ), booking_rollup AS (
+         SELECT request_id, MAX(CASE WHEN confirmed_at IS NOT NULL THEN 1 ELSE 0 END) AS booked
+         FROM bookings GROUP BY request_id
+       )
+       SELECT c.source,
+              COUNT(*) AS requests,
+              COALESCE(SUM(CASE WHEN m.qualified_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS qualified,
+              COALESCE(SUM(CASE WHEN m.quoted_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS quoted,
+              COALESCE(SUM(p.checkouts), 0) AS checkouts,
+              COALESCE(SUM(p.paid_request), 0) AS paid,
+              COALESCE(SUM(b.booked), 0) AS bookings,
+              COALESCE(SUM(CASE WHEN m.completed_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS completed,
+              COALESCE(SUM(p.refund_count), 0) AS refund_count,
+              COALESCE(SUM(p.dispute_cases), 0) AS dispute_cases,
+              COALESCE(SUM(p.gross_cents), 0) AS gross_cents,
+              COALESCE(SUM(p.refunded_cents), 0) AS refunded_cents,
+              COALESCE(SUM(p.disputed_cents), 0) AS disputed_excluded_cents,
+              COALESCE(SUM(p.recognized_net_cents), 0) AS recognized_net_cents,
+              ROUND(SUM(p.gross_cents) * 1.0 / NULLIF(SUM(p.paid_payments), 0)) AS average_paid_ticket_cents,
+              CASE WHEN COUNT(*) >= 20 THEN ROUND(100.0 * SUM(p.paid_request) / COUNT(*), 1) END AS request_to_paid_rate,
+              CASE WHEN COUNT(*) >= 20 THEN ROUND(100.0 * SUM(CASE WHEN m.completed_at IS NOT NULL THEN 1 ELSE 0 END) / COUNT(*), 1) END AS request_to_completed_rate
+       FROM cohort c
+       LEFT JOIN first_milestones m ON m.request_id = c.id
+       LEFT JOIN payment_rollup p ON p.request_id = c.id
+       LEFT JOIN booking_rollup b ON b.request_id = c.id
+       GROUP BY c.source
+       ORDER BY recognized_net_cents DESC, requests DESC, c.source`,
+    ).bind(cutoff).all<Record<string, unknown>>(),
+  ]);
+
+  const operations = numberFields(operationsRow);
+  const paymentCohort = nullableNumberFields(paymentCohortRow);
+  const missingConfirmationEvent = Number(paymentCohort['captured_payments_missing_confirmation_event'] ?? 0);
+  delete paymentCohort['captured_payments_missing_confirmation_event'];
+  return {
+    days,
+    since: cutoff,
+    operations,
+    paymentCohort,
+    sources: sources.results ?? [],
+    appStoreOutboundClicks: operations['app_store_outbound_clicks'] ?? 0,
+    dataQuality: { capturedPaymentsMissingConfirmationEvent: missingConfirmationEvent },
+  };
+}
+
 export const onRequestGet: PagesFunction<Env> = async (context) => {
   const auth = await requireAdmin(context.request, context.env);
   if (!auth.ok) return auth.response;
@@ -36,71 +228,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     .all<Record<string, unknown>>();
 
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString();
-  const revenue = await db
-    .prepare(
-      `SELECT COALESCE(SUM(amount_cents), 0) AS gross_cents,
-              COALESCE(SUM(refunded_cents), 0) AS refunded_cents,
-              COALESCE(SUM(amount_cents - refunded_cents), 0) AS net_cents,
-              COUNT(*) AS n
-       FROM payments
-       WHERE status IN ('succeeded','partially_refunded','refunded') AND created_at > ?`,
-    )
-    .bind(thirtyDaysAgo)
-    .first<{ gross_cents: number; refunded_cents: number; net_cents: number; n: number }>();
-
-  // Disputes are excluded from recognized net revenue and surfaced separately.
-  const disputed = await db
-    .prepare(
-      `SELECT COALESCE(SUM(amount_cents - refunded_cents), 0) AS cents, COUNT(*) AS n
-       FROM payments WHERE status = 'disputed' AND created_at > ?`,
-    )
-    .bind(thirtyDaysAgo)
-    .first<{ cents: number; n: number }>();
-
-  const authoritativeFunnel = await db
-    .prepare(
-      `SELECT
-        (SELECT COUNT(*) FROM ppi_requests
-          WHERE deleted_at IS NULL AND created_at > ?) AS requests_saved,
-        (SELECT COUNT(DISTINCT request_id) FROM status_history
-          WHERE to_status = 'quote_sent' AND created_at > ?) AS quotes_sent,
-        (SELECT COUNT(DISTINCT request_id) FROM payments
-          WHERE created_at > ?) AS checkouts_created,
-        (SELECT COUNT(DISTINCT request_id) FROM payments
-          WHERE status IN ('succeeded','partially_refunded','refunded') AND created_at > ?) AS payments_succeeded,
-        (SELECT COUNT(*) FROM bookings
-          WHERE confirmed_at IS NOT NULL AND confirmed_at > ?) AS bookings_confirmed,
-        (SELECT COUNT(DISTINCT request_id) FROM status_history
-          WHERE to_status = 'completed' AND created_at > ?) AS completed`,
-    )
-    .bind(thirtyDaysAgo, thirtyDaysAgo, thirtyDaysAgo, thirtyDaysAgo, thirtyDaysAgo, thirtyDaysAgo)
-    .first<Record<string, number>>();
-
-  const attribution = await db
-    .prepare(
-      `WITH request_revenue AS (
-         SELECT request_id,
-                COALESCE(SUM(CASE WHEN status IN ('succeeded','partially_refunded','refunded') THEN amount_cents ELSE 0 END), 0) AS gross_cents,
-                COALESCE(SUM(CASE WHEN status IN ('succeeded','partially_refunded','refunded') THEN refunded_cents ELSE 0 END), 0) AS refunded_cents,
-                MAX(CASE WHEN status = 'disputed' THEN 1 ELSE 0 END) AS disputed
-         FROM payments GROUP BY request_id
-       )
-       SELECT COALESCE(NULLIF(r.attribution_source, ''), 'ppi_unknown') AS source,
-              COUNT(*) AS requests,
-              COALESCE(SUM(CASE WHEN rr.gross_cents > 0 THEN 1 ELSE 0 END), 0) AS paid_requests,
-              COALESCE(SUM(CASE WHEN r.status = 'completed' THEN 1 ELSE 0 END), 0) AS completed,
-              COALESCE(SUM(rr.gross_cents), 0) AS gross_cents,
-              COALESCE(SUM(rr.refunded_cents), 0) AS refunded_cents,
-              COALESCE(SUM(rr.gross_cents - rr.refunded_cents), 0) AS net_cents,
-              COALESCE(SUM(rr.disputed), 0) AS disputed_requests
-       FROM ppi_requests r
-       LEFT JOIN request_revenue rr ON rr.request_id = r.id
-       WHERE r.deleted_at IS NULL AND r.created_at > ?
-       GROUP BY COALESCE(NULLIF(r.attribution_source, ''), 'ppi_unknown')
-       ORDER BY net_cents DESC, requests DESC`,
-    )
-    .bind(thirtyDaysAgo)
-    .all<Record<string, unknown>>();
+  const revenueWindows = await Promise.all(SCORECARD_WINDOWS.map((days) => loadRevenueWindow(db, days)));
+  const thirtyDayWindow = revenueWindows.find((window) => window.days === 30)!;
 
   const funnel = await db
     .prepare(`SELECT event, COUNT(*) AS n FROM analytics_events WHERE created_at > ? GROUP BY event`)
@@ -186,16 +315,25 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   return json({
     statusCounts: statusCounts.results ?? [],
     upcoming: upcoming.results ?? [],
+    revenueWindows,
     revenue30d: {
-      grossCents: revenue?.gross_cents ?? 0,
-      refundedCents: revenue?.refunded_cents ?? 0,
-      netCents: revenue?.net_cents ?? 0,
-      payments: revenue?.n ?? 0,
-      disputedPayments: disputed?.n ?? 0,
-      disputedCents: disputed?.cents ?? 0,
+      grossCents: thirtyDayWindow.paymentCohort['gross_collected_cents'] ?? 0,
+      refundedCents: thirtyDayWindow.paymentCohort['refunded_cents'] ?? 0,
+      netCents: thirtyDayWindow.paymentCohort['recognized_net_cents'] ?? 0,
+      payments: thirtyDayWindow.paymentCohort['paid_payments'] ?? 0,
+      disputedPayments: thirtyDayWindow.operations['disputed_payments'] ?? 0,
+      disputedCents: thirtyDayWindow.paymentCohort['disputed_excluded_cents'] ?? 0,
     },
-    authoritativeFunnel30d: authoritativeFunnel ?? {},
-    attribution30d: attribution.results ?? [],
+    authoritativeFunnel30d: {
+      requests_saved: thirtyDayWindow.operations['saved_requests'] ?? 0,
+      qualified_requests: thirtyDayWindow.operations['qualified_requests'] ?? 0,
+      quotes_sent: thirtyDayWindow.operations['quoted_requests'] ?? 0,
+      checkouts_created: thirtyDayWindow.operations['checkout_starts'] ?? 0,
+      payments_succeeded: thirtyDayWindow.operations['successful_payments'] ?? 0,
+      bookings_confirmed: thirtyDayWindow.operations['confirmed_bookings'] ?? 0,
+      completed: thirtyDayWindow.operations['completed_inspections'] ?? 0,
+    },
+    attribution30d: thirtyDayWindow.sources,
     funnel30d: funnel.results ?? [],
     activity: activity.results ?? [],
     // Count affected requests, not raw audit/message rows, so one failed

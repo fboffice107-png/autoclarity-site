@@ -51,7 +51,7 @@ describe('suggestTier', () => {
 
   it('bumps heavily modified standard vehicles up a tier with manual review', () => {
     const s = suggestTier(vehicle({ make: 'Honda', model: 'Civic', modStatus: 'heavy' }), NOW);
-    expect(s.tier).toBe('euro_luxury_performance');
+    expect(s.tier).toBe('exotic_collector');
     expect(s.manualReview).toBe(true);
   });
 
@@ -126,6 +126,38 @@ describe('quote totals', () => {
       ]),
     ).toThrow();
   });
+
+  it('refuses zero-dollar quotes', () => {
+    expect(() =>
+      computeQuoteTotals([
+        { kind: 'base', label: 'Standard', amountCents: 1000 },
+        { kind: 'discount', label: 'Invalid free quote', amountCents: -1000 },
+      ]),
+    ).toThrow(/positive/);
+  });
+
+  it('refuses unsafe cents and inverted line signs', () => {
+    expect(() => computeQuoteTotals([
+      { kind: 'base', label: 'Unsafe', amountCents: Number.MAX_SAFE_INTEGER + 1 },
+    ])).toThrow(/safe integer/);
+    expect(() => computeQuoteTotals([
+      { kind: 'base', label: 'Standard', amountCents: -19900 },
+    ])).toThrow(/cannot be negative/);
+    expect(() => computeQuoteTotals([
+      { kind: 'base', label: 'Standard', amountCents: 19900 },
+      { kind: 'discount', label: 'Wrong sign', amountCents: 1000 },
+    ])).toThrow(/must be negative/);
+  });
+
+  it('requires exactly one positive base line', () => {
+    expect(() => computeQuoteTotals([
+      { kind: 'addon', label: 'Only an add-on', amountCents: 5000 },
+    ])).toThrow(/one positive base/);
+    expect(() => computeQuoteTotals([
+      { kind: 'base', label: 'One', amountCents: 19900 },
+      { kind: 'base', label: 'Two', amountCents: 19900 },
+    ])).toThrow(/one positive base/);
+  });
 });
 
 describe('promo pricing', () => {
@@ -136,12 +168,25 @@ describe('promo pricing', () => {
   it('applies the promo to standard tier only while active', () => {
     expect(basePriceForTier('standard', promoConfig, NOW)).toEqual({ priceCents: 14900, promoApplied: true });
     expect(basePriceForTier('euro_luxury_performance', promoConfig, NOW).promoApplied).toBe(false);
+    expect(tierDisplayPrice(promoConfig, 'standard', NOW)).toEqual({
+      priceCents: 14900,
+      wasCents: 19900,
+      startingAt: true,
+    });
   });
 
   it('expires the promo after endsAt — no permanent fake discount', () => {
     const after = new Date('2026-09-01T00:00:00Z');
     expect(promoActive(promoConfig, after)).toBe(false);
     expect(basePriceForTier('standard', promoConfig, after)).toEqual({ priceCents: 19900, promoApplied: false });
+  });
+
+  it('never activates the legacy promo without a real future end date', () => {
+    const noEnd: PpiConfig = JSON.parse(JSON.stringify(promoConfig));
+    noEnd.pricing.promo.endsAt = null;
+    expect(promoActive(noEnd, NOW)).toBe(false);
+    expect(basePriceForTier('standard', noEnd, NOW)).toEqual({ priceCents: 19900, promoApplied: false });
+    expect(tierDisplayPrice(noEnd, 'standard', NOW).wasCents).toBeNull();
   });
 });
 
@@ -168,8 +213,8 @@ describe('launch pricing (introductory, time-boxed)', () => {
   it('applies introductory prices per tier while the window is active', () => {
     const cfg = launchCfg();
     expect(launchActive(cfg, NOW)).toBe(true);
-    expect(tierDisplayPrice(cfg, 'standard', NOW)).toEqual({ priceCents: 14900, wasCents: 19900, startingAt: false });
-    expect(tierDisplayPrice(cfg, 'euro_luxury_performance', NOW)).toEqual({ priceCents: 24900, wasCents: 29900, startingAt: false });
+    expect(tierDisplayPrice(cfg, 'standard', NOW)).toEqual({ priceCents: 14900, wasCents: 19900, startingAt: true });
+    expect(tierDisplayPrice(cfg, 'euro_luxury_performance', NOW)).toEqual({ priceCents: 24900, wasCents: 29900, startingAt: true });
   });
 
   it('exotic tier has no launch price and stays "starting at"', () => {
@@ -218,5 +263,14 @@ describe('cancellation policy calculator', () => {
   it('<24h: never auto-forfeits — admin review', () => {
     expect(cancellationOutcome(appt(5), DEFAULT_CONFIG, NOW).kind).toBe('admin_review');
     expect(cancellationOutcome(appt(-1), DEFAULT_CONFIG, NOW).kind).toBe('admin_review');
+  });
+
+  it('renders thresholds from configuration instead of hard-coded hours', () => {
+    const configured: PpiConfig = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+    configured.cancellation.fullRefundHours = 72;
+    configured.cancellation.rescheduleHours = 36;
+    expect(cancellationOutcome(appt(72), configured, NOW).label).toContain('72 hours or more');
+    expect(cancellationOutcome(appt(48), configured, NOW).label).toContain('At least 36 hours');
+    expect(cancellationOutcome(appt(12), configured, NOW).label).toContain('Less than 36 hours');
   });
 });

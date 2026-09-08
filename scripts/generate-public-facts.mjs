@@ -56,7 +56,6 @@ const appJsonLd = {
       name: 'AutoClarity Annual — introductory first year',
       price: String(facts.app.pricing.introductoryPrice),
       priceCurrency: facts.app.pricing.currency,
-      priceValidUntil: facts.app.pricing.introductoryOfferEnds,
       eligibleRegion: { '@type': 'Country', name: 'United States' },
       description: facts.app.pricing.introductoryEligibility,
     },

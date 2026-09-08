@@ -47,6 +47,10 @@
 
 * { box-sizing: border-box; }
 
+/* The HTML hidden attribute is a hard state boundary. Component display rules
+   such as .btn { display: inline-flex } must never make hidden controls visible. */
+[hidden] { display: none !important; }
+
 html {
   scroll-behavior: smooth;
   scroll-padding-top: calc(84px + env(safe-area-inset-top));

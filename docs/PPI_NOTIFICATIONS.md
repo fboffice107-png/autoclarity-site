@@ -45,7 +45,10 @@ messages remain visible until sent or explicitly superseded by a sent retry.
 
 `functions/lib/sms.ts` is only a provider-neutral Cloudflare Queue producer.
 No queue binding, consumer, phone number, or paid SMS provider is shipped.
-`SMS_ENABLED` defaults to `false`.
+`SMS_ENABLED` defaults to `false`. The public contact selector mounts “Text
+message” only when the flag, queue binding, and owner configuration all agree;
+the server rejects a stale/crafted text preference otherwise and explains that
+email carries transaction records.
 
 Do not enable or bind `SMS_QUEUE` until all of the following are complete:
 

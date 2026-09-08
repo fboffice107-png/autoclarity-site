@@ -16,6 +16,18 @@ import { loadRevenueWindow } from '../../functions/api/admin/overview.ts';
 
 afterEach(() => vi.useRealTimers());
 
+const migrations = [
+  initialMigration,
+  reportsMigration,
+  intakeMigration,
+  paymentSlotMigration,
+  refundLedgerMigration,
+  disputeLedgerMigration,
+  agreementImmutabilityMigration,
+  quotePaymentIntegrityMigration,
+  attributionMigration,
+];
+
 function asD1(db: DatabaseSync): D1Database {
   return {
     prepare(sql: string) {
@@ -79,6 +91,18 @@ function seedPaidRequest(
     .run(`ev_payment_${paymentId}`, source, isoDaysAgo(Math.max(createdDaysAgo - 1.5, 0.1)));
 }
 
+function seedUnpaidRequest(db: DatabaseSync, suffix: string, source: string): void {
+  const createdAt = isoDaysAgo(5);
+  const customerId = `cus_${suffix}`;
+  const vehicleId = `veh_${suffix}`;
+  db.prepare(`INSERT INTO customers (id, full_name, email, phone, created_at, updated_at) VALUES (?, ?, ?, '7025550100', ?, ?)`)
+    .run(customerId, `Customer ${suffix}`, `${suffix}@example.com`, createdAt, createdAt);
+  db.prepare(`INSERT INTO vehicles (id, make, model, created_at, updated_at) VALUES (?, 'Test', 'Vehicle', ?, ?)`)
+    .run(vehicleId, createdAt, createdAt);
+  db.prepare(`INSERT INTO ppi_requests (id, ref, customer_id, vehicle_id, status, attribution_source, created_at, updated_at) VALUES (?, ?, ?, ?, 'submitted', ?, ?, ?)`)
+    .run(`req_${suffix}`, `PPI-${suffix.toUpperCase()}`, customerId, vehicleId, source, createdAt, createdAt);
+}
+
 describe('7/30/90 revenue scoreboard', () => {
   it('keeps operational events, payment cohorts, disputes, refunds, sources and app clicks distinct', async () => {
     vi.useFakeTimers();
@@ -86,28 +110,19 @@ describe('7/30/90 revenue scoreboard', () => {
     const db = new DatabaseSync(':memory:');
     try {
       db.exec('PRAGMA foreign_keys = ON;');
-      for (const migration of [
-        initialMigration,
-        reportsMigration,
-        intakeMigration,
-        paymentSlotMigration,
-        refundLedgerMigration,
-        disputeLedgerMigration,
-        agreementImmutabilityMigration,
-        quotePaymentIntegrityMigration,
-        attributionMigration,
-      ]) db.exec(migration);
+      for (const migration of migrations) db.exec(migration);
 
       seedPaidRequest(db, 'recent', 5, 20_000, 'ppi_google_business_profile', 'disputed', 5_000);
       seedPaidRequest(db, 'month', 20, 30_000, 'ppi_chatgpt_search', 'succeeded');
       seedPaidRequest(db, 'old', 100, 40_000, 'ppi_direct', 'succeeded');
 
       const recentPayment = 'pay_recent';
-      const refundCreated = Math.floor(Date.parse(isoDaysAgo(1)) / 1000);
+      const refundCreated = Math.floor(Date.parse(isoDaysAgo(20)) / 1000);
+      const refundSucceeded = Math.floor(Date.parse(isoDaysAgo(1)) / 1000);
       db.prepare(`INSERT INTO provider_refunds (provider_refund_id, payment_id, amount_cents, currency, provider_created, status, last_event_created, last_event_id, created_at, updated_at) VALUES ('re_recent', ?, 5000, 'usd', ?, 'succeeded', ?, 'evt_refund_recent', ?, ?)`)
-        .run(recentPayment, refundCreated, refundCreated, isoDaysAgo(1), isoDaysAgo(1));
-      db.prepare(`INSERT INTO payment_disputes (provider_dispute_id, payment_id, payment_intent, provider_charge_id, amount_cents, currency, provider_created, provider_status, status_event_created, status_event_id, funds_state, funds_event_created, funds_event_id, created_at, updated_at) VALUES ('du_recent', ?, 'pi_recent', 'ch_recent', 3000, 'usd', ?, 'under_review', ?, 'evt_dispute_status', 'withdrawn', ?, 'evt_dispute_funds', ?, ?)`)
-        .run(recentPayment, refundCreated, refundCreated, refundCreated, isoDaysAgo(1), isoDaysAgo(1));
+        .run(recentPayment, refundCreated, refundSucceeded, isoDaysAgo(1), isoDaysAgo(1));
+      db.prepare(`INSERT INTO payment_disputes (provider_dispute_id, payment_id, payment_intent, provider_charge_id, amount_cents, currency, provider_created, provider_status, status_event_created, status_event_id, funds_state, created_at, updated_at) VALUES ('du_recent', ?, 'pi_recent', 'ch_recent', 3000, 'usd', ?, 'under_review', ?, 'evt_dispute_status', 'unknown', ?, ?)`)
+        .run(recentPayment, refundSucceeded, refundSucceeded, isoDaysAgo(1), isoDaysAgo(1));
       for (const [id, source, days] of [
         ['ev_app_recent', 'ppi_google_business_profile', 1],
         ['ev_app_month', 'ppi_chatgpt_search', 10],
@@ -136,8 +151,8 @@ describe('7/30/90 revenue scoreboard', () => {
         paid_payments: 1,
         gross_collected_cents: 20_000,
         refunded_cents: 5_000,
-        disputed_excluded_cents: 3_000,
-        recognized_net_cents: 12_000,
+        disputed_excluded_cents: 15_000,
+        recognized_net_cents: 0,
         average_paid_ticket_cents: 20_000,
       });
       expect(seven.dataQuality.capturedPaymentsMissingConfirmationEvent).toBe(0);
@@ -149,7 +164,9 @@ describe('7/30/90 revenue scoreboard', () => {
         completed: 1,
         refund_count: 1,
         dispute_cases: 1,
-        recognized_net_cents: 12_000,
+        disputed_requests: 1,
+        disputed_excluded_cents: 15_000,
+        recognized_net_cents: 0,
         request_to_paid_rate: null,
       });
 
@@ -161,8 +178,8 @@ describe('7/30/90 revenue scoreboard', () => {
         paid_payments: 2,
         gross_collected_cents: 50_000,
         refunded_cents: 5_000,
-        disputed_excluded_cents: 3_000,
-        recognized_net_cents: 42_000,
+        disputed_excluded_cents: 15_000,
+        recognized_net_cents: 30_000,
         average_paid_ticket_cents: 25_000,
       });
       expect(thirty.sources.map((row) => row['source'])).toEqual([
@@ -173,6 +190,31 @@ describe('7/30/90 revenue scoreboard', () => {
       const ninety = await loadRevenueWindow(asD1(db), 90);
       expect(ninety.operations.saved_requests).toBe(2);
       expect(ninety.paymentCohort.gross_collected_cents).toBe(50_000);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('reports a mature zero-payment source cohort as a real zero percent rate', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2030-04-01T12:00:00.000Z'));
+    const db = new DatabaseSync(':memory:');
+    try {
+      db.exec('PRAGMA foreign_keys = ON;');
+      for (const migration of migrations) db.exec(migration);
+      for (let index = 0; index < 20; index += 1) {
+        seedUnpaidRequest(db, `zero_${index}`, 'ppi_bing_places');
+      }
+
+      const thirty = await loadRevenueWindow(asD1(db), 30);
+      expect(thirty.sources).toHaveLength(1);
+      expect(thirty.sources[0]).toMatchObject({
+        source: 'ppi_bing_places',
+        requests: 20,
+        paid: 0,
+        request_to_paid_rate: 0,
+        request_to_completed_rate: 0,
+      });
     } finally {
       db.close();
     }

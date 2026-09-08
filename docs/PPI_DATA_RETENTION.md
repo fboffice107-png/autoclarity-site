@@ -33,7 +33,7 @@ information.
 | Completed/cancelled request records incl. agreements & payments | 7 years | Accounting, payment, refund, and dispute records |
 | Uploaded images | 12 months after request closes | Short useful life; admin can delete anytime |
 | Magic links | expire at 14 days; purge rows 90 days after expiry | Access control hygiene |
-| Outbound email bodies containing portal URLs | redact no later than the linked token's 14-day expiry; retain non-secret delivery metadata as required | Prevent expired/live bearer URLs from accumulating in backups and admin views |
+| Outbound email bodies containing portal URLs | redact by day 13, before the linked token's 14-day expiry; retain non-secret delivery metadata as required | Prevent expired/live bearer URLs from accumulating in backups and admin views |
 | `rate_limits` | hours (auto-pruned opportunistically) | Transient |
 | `analytics_events` | 24 months | Trend analysis, no PII |
 | `vin_cache` | 30 days freshness; purge at 12 months | Public data cache |
@@ -46,6 +46,8 @@ delete a customer row while referenced records still depend on it. Document
 each completed request.
 
 There is no automated purge job. Before live operation, the owner must assign a
-named operator and calendar a review at least every 14 days for linked email
-body redaction, plus the broader quarterly retention pass. SQL snippets live in
-`PPI_ADMIN_GUIDE.md`; retain evidence that each pass ran.
+named operator and calendar a linked-email body redaction pass at least every
+24 hours, with missed-run alerts, plus the broader quarterly retention pass.
+The day-13 cutoff leaves a one-day buffer before link expiry. SQL snippets live
+in `PPI_ADMIN_GUIDE.md`; retain evidence that each pass ran and automate it
+before scale.

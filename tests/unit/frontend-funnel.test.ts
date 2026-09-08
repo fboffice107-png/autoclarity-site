@@ -14,9 +14,16 @@ import headers from '../../_headers?raw';
 import eventsApi from '../../functions/api/ppi/events.ts?raw';
 
 type NodeFs = { readFileSync(path: URL, encoding: 'utf8'): string };
-type NodeProcess = { getBuiltinModule(name: 'fs'): NodeFs };
+type NodeVm = {
+  runInNewContext(source: string, context: Record<string, unknown>, options?: { filename?: string }): unknown;
+};
+type NodeProcess = {
+  getBuiltinModule(name: 'fs'): NodeFs;
+  getBuiltinModule(name: 'vm'): NodeVm;
+};
 const nodeProcess = (globalThis as unknown as { process: NodeProcess }).process;
 const nodeFs = nodeProcess.getBuiltinModule('fs');
+const nodeVm = nodeProcess.getBuiltinModule('vm');
 const ppiCss = nodeFs.readFileSync(new URL('../../assets/css/ppi.css', import.meta.url), 'utf8');
 
 type AnchorParts = { attributes: string; content: string };
@@ -31,6 +38,43 @@ function templateContents(id: string): string {
 }
 
 describe('PPI frontend conversion safeguards', () => {
+  it('executes the shipped form bootstrap with first-touch attribution initialized', () => {
+    const form = {};
+    const stored = new Map<string, string>();
+    let configRequests = 0;
+    const pendingConfig = new Promise<never>(() => {});
+    const location = { search: '', origin: 'https://getautoclarity.com' };
+
+    nodeVm.runInNewContext(script, {
+      window: {
+        location,
+        matchMedia: () => ({ matches: false }),
+        setTimeout: () => 0,
+        clearTimeout: () => {},
+      },
+      document: {
+        referrer: '',
+        getElementById: (id: string) => (id === 'intakeForm' ? form : null),
+        querySelectorAll: () => [],
+      },
+      sessionStorage: {
+        getItem: (key: string) => stored.get(key) ?? null,
+        setItem: (key: string, value: string) => stored.set(key, value),
+        removeItem: (key: string) => stored.delete(key),
+      },
+      fetch: () => {
+        configRequests += 1;
+        return pendingConfig;
+      },
+      AbortController: undefined,
+      URL,
+      URLSearchParams,
+    }, { filename: 'assets/js/ppi-form.js' });
+
+    expect(configRequests).toBe(1);
+    expect(stored.get('ppi-attribution-v1')).toBe('ppi_direct');
+  });
+
   it('does not ship disabled diagnostic-scan or emissions claims in indexable HTML', () => {
     expect(page).not.toMatch(/data-scan|diagnostic scan|emissions readiness/iu);
     expect(page).toContain('Road test &amp; warning-light review');
@@ -58,9 +102,12 @@ describe('PPI frontend conversion safeguards', () => {
     };
     const service = graph['@graph'].find((node) => node['@type'] === 'Service')!;
     expect(service.url).toBe('https://getautoclarity.com/las-vegas-pre-purchase-inspection/');
-    expect(service.areaServed!.map((place) => place.name)).toEqual(
-      expect.arrayContaining(['Las Vegas', 'North Las Vegas', 'Henderson', 'Boulder City', 'Clark County']),
-    );
+    expect(service.areaServed!.map((place) => place.name)).toEqual([
+      'Las Vegas',
+      'North Las Vegas',
+      'Henderson',
+      'Boulder City',
+    ]);
     expect(service.offers?.map((item) => Number(item.priceSpecification.price))).toEqual([199, 299, 399]);
     expect(service.offers?.every((item) => item.description.includes('Starting price'))).toBe(true);
     expect(service.description).toContain('founder-performed');
@@ -255,7 +302,8 @@ describe('PPI frontend conversion safeguards', () => {
 
   it('keeps response-time and payments-off language truthful by default', () => {
     expect(page).not.toMatch(/normally receive|never later than|hear back the same day/iu);
-    expect(page).toContain('typically responds within 24 hours with scheduling details');
+    expect(page).not.toMatch(/responds? within \d+ hours/iu);
+    expect(script).toContain('follow up by email with next steps');
     expect(page).toContain('<div data-payment="off">');
     expect(page).toContain('<div data-payment="on" hidden>');
     expect(page).not.toContain('physical services paid through this website');

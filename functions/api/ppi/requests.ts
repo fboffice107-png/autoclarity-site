@@ -89,7 +89,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return errorJson('turnstile_failed', 'Human verification failed. Please retry the check and submit again.', 403);
   }
 
+  const config = await getConfig(env.DB);
   const { payload, errors } = parseIntake(raw);
+  const smsAvailable = env.SMS_ENABLED === 'true'
+    && Boolean(env.SMS_QUEUE)
+    && config.contact.smsEnabled === true;
+  if (payload.preferredContact === 'text' && !smsAvailable) {
+    errors['preferredContact'] = 'Text updates are not currently available. Choose email or phone; transaction records are also sent by email.';
+  }
   const rawSubmissionKey = typeof raw['submissionKey'] === 'string' ? raw['submissionKey'].trim() : '';
   const submissionKey = rawSubmissionKey || null;
   if (submissionKey && !SUBMISSION_KEY_RE.test(submissionKey)) {
@@ -149,8 +156,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   if (existing) {
     return duplicateAcknowledgement();
   }
-
-  const config = await getConfig(env.DB);
 
   const now = nowIso();
   const customerId = newId('cus');
@@ -317,7 +322,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const access = [
     payload.locNotes,
     payload.accessNotes,
-    `scan ${payload.permScan ? 'allowed' : 'not allowed'}`,
     `road test ${payload.permRoadTest}`,
     `photos ${payload.permPhotos}`,
     `underbody ${payload.permUnderbody}`,
@@ -398,6 +402,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     ...(token ? { portalToken: token } : {}),
     emailStatus: customerEmail.status,
     smsStatus,
-    reviewWindow: 'AutoClarity typically responds within 24 hours with scheduling details.',
+    reviewWindow: 'AutoClarity will review the vehicle, location, access, and requested timing, then follow up by email with next steps.',
   });
 };

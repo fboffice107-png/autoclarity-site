@@ -1,5 +1,6 @@
-// PPI request lifecycle state machine. Every change goes through applyStatus,
-// which enforces the transition table and writes status_history.
+// PPI request lifecycle state machine. Plain changes go through applyStatus;
+// transitions with extra evidence gates use dedicated atomic helpers that
+// enforce this table and write status_history.
 
 export const STATUSES = [
   'draft',
@@ -63,7 +64,7 @@ const TRANSITIONS: Record<Status, Status[]> = {
   awaiting_agreement: ['awaiting_payment', 'awaiting_time_selection', ...CANCELS, 'expired', 'refunded', 'disputed'],
   awaiting_payment: ['confirmed', 'awaiting_agreement', 'awaiting_time_selection', ...CANCELS, 'expired', 'refunded', 'disputed'],
   confirmed: ['inspection_in_progress', ...CANCELS, 'refunded', 'disputed'],
-  inspection_in_progress: ['report_in_progress', 'completed', 'admin_cancelled', 'refunded', 'disputed'],
+  inspection_in_progress: ['report_in_progress', 'admin_cancelled', 'refunded', 'disputed'],
   report_in_progress: ['completed', 'admin_cancelled', 'refunded', 'disputed'],
   completed: ['refunded', 'disputed'],
   customer_cancelled: ['refunded', 'disputed'],

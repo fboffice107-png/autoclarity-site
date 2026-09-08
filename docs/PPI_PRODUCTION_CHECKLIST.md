@@ -13,17 +13,42 @@ or insurance readiness — those are real-world facts only the owner can confirm
 
 ## Business and customer policy
 
+- [ ] Nevada and applicable Clark County/city business licenses are current for
+      the actual operating entity, service area, and mobile work performed
+- [ ] Written Nevada-qualified counsel/DMV determination recorded on whether
+      the offered visual PPI work triggers any NRS 487 garage/repair-dealer
+      registration or other occupational requirement; every required approval
+      is in hand before accepting another booking
+- [ ] Insurer confirms in writing that the active policies cover the actual
+      mobile inspection work, road tests, customer/seller vehicles, custody or
+      control, and any lift/facility activity that will really be offered
+- [ ] Nevada-qualified counsel approved the current PPI terms, privacy notice,
+      quote-bound agreements, cancellation/refund policy, and operating flow
+- [ ] Owner evidence register supports current founder experience/capacity,
+      founder-performed service, response-time, independence, report-content,
+      and service-area claims; unsupported claims are softened before release
+- [ ] The shipped iOS binary/SDK data flow, website privacy statement, and App
+      Store privacy answers have been reconciled in App Store Connect and
+      approved by the owner; a public “Data Not Collected” label is not treated
+      as proof without that audit
 - [ ] Public pricing and the production configuration agree, including any
       intentionally active, time-bounded launch pricing or promotion; every
       applicable package remains presented as “Starting at”
 - [ ] Travel bands are 0–15 miles included, 16–25 +$25, 26–40 +$50, and beyond
       40 miles custom review; custom-distance quotes contain an explicit amount
+- [ ] Owner approves the non-private distance origin and documented distance
+      method used for those bands; no home address or inferred private location
+      is disclosed
 - [ ] Cancellation, rescheduling, vehicle-transfer, mobile-service, and refund
       wording matches the owner-approved operating policy
 - [ ] Current PPI agreements and privacy disclosures are published as explicit
       versions and contain no draft, test-mode, or pre-launch warning copy
 - [ ] Public business details approved (support email; NO private home address
       anywhere public)
+- [ ] Any customer review shown publicly has a traceable authentic source,
+      explicit publication permission, faithful wording and attribution, and a
+      separately reviewed code release; runtime configuration alone cannot
+      enable reviews
 
 ## Payments
 
@@ -43,7 +68,16 @@ or insurance readiness — those are real-world facts only the owner can confirm
       project, branch, variables, compatibility settings, D1/R2 binding names
       and resource IDs independently reviewed. Neither `wrangler.local.toml`
       nor `.wrangler/preview/wrangler.toml` is approved for production.
-- [ ] Production D1 backup/export captured before schema work
+- [ ] Production D1 backup/export captured before schema work in a non-repo,
+      access-restricted location; UTC timestamp, byte size, SHA-256, current
+      Time Travel bookmark, database identity, and operator are recorded
+- [ ] Backup restored into a disposable local database; `integrity_check`,
+      `foreign_key_check`, table counts, request/payment counts, gross captured,
+      and refund totals reconcile to the pre-migration read-only snapshot
+- [ ] Candidate migration rehearsed against a copy of that restored backup;
+      post-migration integrity/foreign-key checks and all recorded counts/money
+      invariants match, except for the explicitly reviewed additive schema/data
+      defaults
 - [ ] Production D1 migration history reviewed: if `0002` is absent, exact live
       report table columns/constraints/foreign keys/indexes/trigger and
       `messages.dedupe_key` match source, with no duplicate non-null dedupe keys.
@@ -76,7 +110,8 @@ or insurance readiness — those are real-world facts only the owner can confirm
 - [ ] Production R2 bucket created, binding verified
 - [ ] Turnstile production keys set (site + secret) and verified on the form
 - [ ] Cloudflare Access protecting `/ppi/admin*` and `/api/admin*`
-      (`CF_ACCESS_TEAM_DOMAIN` + `CF_ACCESS_AUD` set; dev key absent in prod)
+      (`CF_ACCESS_TEAM_DOMAIN` + `CF_ACCESS_AUD` set; `ADMIN_DEV_KEY` secret is
+      absent—not merely unused—from production)
 - [ ] Email domain authenticated (SPF/DKIM for the sending domain) and
       `RESEND_API_KEY`/`EMAIL_FROM`/`ADMIN_NOTIFY_EMAIL` set
 - [ ] Production env vars form the complete live-payment tuple:
@@ -88,13 +123,17 @@ or insurance readiness — those are real-world facts only the owner can confirm
       headers before auth/body parsing; JSON/webhook/upload body limits pass
       preview adversarial tests
 - [ ] A named operator owns the linked-email body redaction pass at least every
-      14 days; the first run is scheduled and recorded
+      24 hours with a day-13 cutoff and missed-run alert; the first run is
+      scheduled and recorded
 - [ ] NO fixture/test data in production DB
 
 ## Verification
 
 - [ ] Full test booking completed end-to-end in preview
 - [ ] Test refund completed in preview
+- [ ] Completion is rejected unless an immutable, same-request published report
+      exists; the authenticated portal exposes only that report, and the
+      deduplicated report-ready notice is recorded exactly once
 - [ ] Production smoke flow proves: reviewed quote and times → customer-selected
       appointment → all current quote-bound agreements accepted → Stripe receives
       the exact server-approved total → webhook confirms payment and appointment

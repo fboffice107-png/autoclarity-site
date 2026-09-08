@@ -25,9 +25,12 @@ you'll sign in through Cloudflare Access with your email instead.
 6. Payment confirms automatically via Stripe webhook: slot confirmed, other
    windows released, confirmation emails sent, status → Confirmed. You'll get
    an owner notification.
-7. Day-of: move status to `inspection_in_progress` → `report_in_progress` →
-   `completed`. Use **Messages** to deliver the results link/summary
-   ("report ready" email).
+7. Day-of: move status to `inspection_in_progress` → `report_in_progress`.
+   `completed` is rejected until this same request points to an immutable
+   published report version. On successful completion, the secure portal shows
+   that exact version and the system records one deduplicated “report ready”
+   email. The current repository has no authoring/publish UI, so completion is
+   not an operational production path yet.
 8. Refunds: Payments section → Refund… (full or partial). The final state
    lands when Stripe's webhook confirms. Paid cancellations arrive as
    messages + email alerts and are never auto-forfeited — you decide within
@@ -48,7 +51,13 @@ All money values are **cents**. Common edits:
   `blackoutDates: ["2026-12-25"]`, `minLeadHours`, `holdMinutes`.
 - Quote expiry: `quotes.expiryHours` (48 by default).
 
-Every save is audit-logged. Unknown keys are ignored; broken JSON is rejected.
+Every save is audit-logged. Unknown keys, wrong types, unsupported upload MIME
+types, unsafe ranges, invalid dates/times, and inconsistent policy values are
+rejected before persistence. Diagnostic-scan and public-review capabilities
+also require separate code-reviewed releases. In production, pricing, fees,
+travel rules, and public support identity must be changed in source and
+regenerated together; a runtime-only edit is rejected to prevent visible copy,
+JSON-LD, and the public catalog from drifting apart.
 
 ## Production data operations (owner-approved window only)
 
@@ -69,11 +78,12 @@ The examples below are data-policy sketches, not unattended runbooks.
   `UPDATE customers SET full_name='deleted', email='deleted@example.invalid', phone='' WHERE id = '...';`
 - Purge stale magic links:
   `DELETE FROM magic_links WHERE expires_at < datetime('now','-90 days');`
-- Redact outbound bodies containing portal bearer URLs after the 14-day link
-  lifetime while retaining delivery metadata:
-  `UPDATE messages SET body_text='[Outbound email body redacted after secure-link expiry.]' WHERE direction='outbound' AND channel='email' AND created_at < datetime('now','-14 days') AND body_text LIKE '%/ppi/portal/?t=%';`
-  Run at least every 14 days, record the row count, and review retention with
-  counsel before changing the interval.
+- Redact outbound bodies containing portal bearer URLs by day 13, before the
+  linked credential's 14-day expiry, while retaining delivery metadata:
+  `UPDATE messages SET body_text='[Outbound email body redacted before secure-link expiry.]' WHERE direction='outbound' AND channel='email' AND created_at < datetime('now','-13 days') AND body_text LIKE '%/ppi/portal/?t=%';`
+  Run at least every 24 hours, record the row count, alert on a missed run, and
+  review retention with counsel before changing the interval. Automate this
+  before scale; until then, a named operator must own the daily pass.
 
 ## Analytics event definitions (no PII by design)
 
@@ -101,17 +111,20 @@ completion can be grouped directionally by source. It is not independently
 verified and must not be treated as payment-grade proof or the sole basis for
 advertising spend. Raw URLs, campaign names, search terms, referrer paths, and
 customer data are not attribution fields; invalid or missing sources become
-`ppi_unknown` and display with direct traffic as “Direct / unknown.”
+`ppi_unknown` (“Unknown / unattributed”), while an observed direct visit is
+stored and displayed separately as `ppi_direct` (“Direct”).
 
 The Overview exposes fixed 7-, 30-, and 90-day windows. Operational milestones
 use their first server-recorded event time. Checkout starts require an actual
 Stripe Session id; successful payment time comes from the deterministic webhook
-event. Successful Refund rows and Dispute cases use provider-created times.
-Payment-cohort gross is the original captured amount, current refunds are shown
-separately, and recognized net subtracts both refunds and currently withdrawn
-disputes. It is collected revenue, not profit: processor fees, tax, labor,
-travel, and overhead are not deducted. Missing webhook confirmation timestamps
-are surfaced as data-quality exceptions rather than assigned a guessed time.
+event. A successful Refund enters a window by its latest succeeded provider
+event, while a Dispute case enters by provider-created time. Payment-cohort
+gross is the original captured amount, current refunds are shown separately,
+and recognized net subtracts refunds and conservatively excludes the remaining
+balance of every payment still latched as disputed. It is collected revenue,
+not profit: processor fees, tax, labor, travel, and overhead are not deducted.
+Missing webhook confirmation timestamps are surfaced as data-quality exceptions
+rather than assigned a guessed time.
 
 Source tables are request-created cohorts whose outcomes can mature after the
 window closes. They show raw numerators; conversion percentages remain hidden

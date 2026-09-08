@@ -36,7 +36,14 @@ class PDF(FPDF):
         self.cell(0, 8, f"Page {self.page_no()}", align="R")
 
 
+def ensure_space(pdf, height_mm):
+    """Keep short headings/findings together instead of orphaning a line."""
+    if pdf.get_y() + height_mm > pdf.page_break_trigger:
+        pdf.add_page()
+
+
 def h2(pdf, text):
+    ensure_space(pdf, 16)
     pdf.ln(3)
     pdf.set_font("Helvetica", "B", 12)
     pdf.set_text_color(*BLUE)
@@ -55,6 +62,7 @@ def para(pdf, text):
 
 
 def finding(pdf, sev, color, title, desc, cost=""):
+    ensure_space(pdf, 20)
     pdf.set_font("Helvetica", "B", 8.5)
     pdf.set_text_color(*color)
     pdf.cell(24, 5.4, sev.upper())
@@ -158,6 +166,7 @@ def main():
     finding(pdf, "Moderate", AMBER, "Front bumper stone chips & light curb rash on one wheel",
             "Cosmetic only; noted for negotiation. No structural concern.", "$150-$400")
 
+    ensure_space(pdf, 40)
     h2(pdf, "Maintenance observations")
     finding(pdf, "Note", BLUESOFT, "Brake fluid slightly dark", "Due for a flush based on appearance; inexpensive routine service.", "$100-$180")
     finding(pdf, "Note", BLUESOFT, "Cabin air filter dirty", "Minor; owner-serviceable item.", "$20-$60")
@@ -184,18 +193,21 @@ def main():
 
     h2(pdf, "Underbody review & limitations")
     para(pdf, "Underbody inspected to the extent safely and physically possible at the location. A full lift inspection was "
-              "not performed. Visible undercarriage areas showed no structural damage, active leaks, or crash residue. A "
-              "partner-facility lift can be arranged for a deeper underbody inspection at additional charge.")
+              "not performed. Visible undercarriage areas showed no structural damage, active leaks, or crash residue. If "
+              "deeper access is needed and appropriate, a suitable facility may need to be arranged in advance and confirmed "
+              "in the quote.")
 
     h2(pdf, "Photographic findings")
     para(pdf, "Your real report includes clear photographs of every meaningful finding (rear tire tread, valve-cover "
               "seepage, bumper chips, wheel curb rash, odometer, and the VIN plate).")
 
+    ensure_space(pdf, 45)
     h2(pdf, "Estimated repair-cost ranges & negotiation considerations")
     para(pdf, "Priority + moderate items total roughly $900-$1,900 in the near term (rear tires being the main driver). "
               "These are reasonable, documented points to raise with the seller. None are deal-breakers on their own for a "
               "vehicle that otherwise presents well.")
 
+    ensure_space(pdf, 65)
     h2(pdf, "Inspection limitations")
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(90, 98, 116)

@@ -1,7 +1,7 @@
 {
   "documentType": "AutoClarity public offerings catalog",
   "schemaVersion": 1,
-  "verifiedAt": "2026-09-07",
+  "lastReviewedAt": "2026-09-07",
   "canonicalUrl": "https://getautoclarity.com/autoclarity-services.json",
   "notice": "This is a static informational document, not a booking, availability, quote, or checkout API.",
   "organization": {
@@ -40,15 +40,15 @@
       "sourceReferences": [
         {
           "url": "https://apps.apple.com/us/app/autoclarity/id6761438602",
-          "verifiedAt": "2026-09-07"
+          "reviewedAt": "2026-09-07"
         },
         {
           "url": "https://getautoclarity.com/privacy",
-          "verifiedAt": "2026-09-07"
+          "reviewedAt": "2026-09-07"
         },
         {
           "url": "https://getautoclarity.com/terms",
-          "verifiedAt": "2026-09-07"
+          "reviewedAt": "2026-09-07"
         }
       ]
     },
@@ -89,8 +89,7 @@
           "Las Vegas",
           "North Las Vegas",
           "Henderson",
-          "Boulder City",
-          "surrounding Clark County"
+          "Boulder City"
         ],
         "qualification": "Every location is subject to review.",
         "distanceBasis": "Distance from the central Las Vegas service area; the exact total is shown before payment.",
@@ -129,11 +128,11 @@
       "sourceReferences": [
         {
           "url": "https://getautoclarity.com/las-vegas-pre-purchase-inspection/",
-          "verifiedAt": "2026-09-07"
+          "reviewedAt": "2026-09-07"
         },
         {
           "url": "https://getautoclarity.com/terms",
-          "verifiedAt": "2026-09-07"
+          "reviewedAt": "2026-09-07"
         }
       ]
     }

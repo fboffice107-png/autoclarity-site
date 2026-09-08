@@ -25,4 +25,10 @@ describe('privacy-minimized request attribution', () => {
     const parsed = parseIntake({ attributionSource: 'ppi_bing_organic' });
     expect(parsed.payload.attributionSource).toBe('ppi_bing_organic');
   });
+
+  it('fails closed on scan permission from a stale or crafted client', () => {
+    const parsed = parseIntake({ permScan: true });
+    expect(parsed.payload.permScan).toBe(false);
+    expect(parsed.errors.permScan).toContain('not part');
+  });
 });

@@ -154,6 +154,97 @@
     });
   }
 
+  function reportObject(value) {
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  }
+
+  function reportResultLabel(value) {
+    return ({
+      pass: "Pass",
+      attention: "Needs attention",
+      fail: "Fail",
+      not_inspected: "Not inspected",
+      not_applicable: "Not applicable"
+    })[String(value || "")] || String(value || "Not recorded").replace(/_/g, " ");
+  }
+
+  function renderPublishedReport(report) {
+    var payload = reportObject(report.payload);
+    var overall = reportObject(payload.overall);
+    var sections = Array.isArray(payload.sections) ? payload.sections : [];
+    var limitations = reportObject(payload.limitations);
+    var html = '<section class="portal-card"><h2>Your published inspection report</h2>' +
+      '<dl class="kv"><dt>Version</dt><dd>' + esc(report.version) + (report.amended ? " (amended)" : "") + "</dd>" +
+      "<dt>Published</dt><dd>" + esc(fmtWhen(report.publishedAt)) + "</dd>";
+
+    if (payload.inspector) html += "<dt>Inspector</dt><dd>" + esc(payload.inspector) + "</dd>";
+    if (overall.score !== null && overall.score !== undefined && overall.score !== "") {
+      html += "<dt>Overall score</dt><dd>" + esc(overall.score) + " / 10</dd>";
+    }
+    if (overall.verdictLabel || overall.verdict) {
+      html += "<dt>Recommendation</dt><dd>" + esc(overall.verdictLabel || String(overall.verdict).replace(/_/g, " ")) + "</dd>";
+    }
+    html += "</dl>";
+
+    [
+      ["Summary", overall.executiveSummary],
+      ["Positive findings", overall.positiveFindings],
+      ["Negotiation notes", overall.negotiationSummary]
+    ].forEach(function (entry) {
+      if (entry[1]) html += "<h3>" + esc(entry[0]) + "</h3><p>" + esc(entry[1]) + "</p>";
+    });
+
+    if (sections.length) {
+      html += "<h3>Inspection details</h3>";
+      sections.forEach(function (rawSection) {
+        var section = reportObject(rawSection);
+        var items = Array.isArray(section.items) ? section.items : [];
+        html += '<details class="agree-doc"><summary>' + esc(section.title || "Inspection section") + "</summary>";
+        if (section.performed && section.performed !== "performed") {
+          html += "<p><strong>Scope:</strong> " + esc(String(section.performed).replace(/_/g, " "));
+          if (section.notPerformedReason) html += " — " + esc(String(section.notPerformedReason).replace(/_/g, " "));
+          html += "</p>";
+        }
+        if (section.summary) html += "<p>" + esc(section.summary) + "</p>";
+        if (items.length) {
+          html += '<ul class="msg-list">';
+          items.forEach(function (rawItem) {
+            var item = reportObject(rawItem);
+            var measurement = reportObject(item.measurement);
+            var photos = Array.isArray(item.photos) ? item.photos : [];
+            var details = [];
+            if (item.note) details.push(String(item.note));
+            if (measurement.value) details.push([measurement.label, measurement.value, measurement.unit].filter(Boolean).join(" "));
+            if (Number.isFinite(item.costLowCents) || Number.isFinite(item.costHighCents)) {
+              var low = Number.isFinite(item.costLowCents) ? money(item.costLowCents) : null;
+              var high = Number.isFinite(item.costHighCents) ? money(item.costHighCents) : null;
+              details.push("Estimated cost: " + (low && high && low !== high ? low + "–" + high : (low || high)));
+            }
+            if (item.priority) details.push("Priority: " + String(item.priority).replace(/_/g, " "));
+            if (photos.length) {
+              var captions = photos.map(function (photo) { return reportObject(photo).caption; }).filter(Boolean);
+              details.push(photos.length + " report photo" + (photos.length === 1 ? "" : "s") + (captions.length ? ": " + captions.join("; ") : ""));
+            }
+            html += "<li><strong>" + esc(item.label || "Inspection item") + " — " + esc(reportResultLabel(item.result)) + "</strong>" +
+              (details.length ? "<br>" + esc(details.join(" · ")) : "") + "</li>";
+          });
+          html += "</ul>";
+        }
+        html += "</details>";
+      });
+    }
+
+    var standardLimitations = Array.isArray(limitations.standard) ? limitations.standard : [];
+    if (standardLimitations.length || limitations.additional) {
+      html += "<h3>Limitations</h3><ul>";
+      standardLimitations.forEach(function (item) { html += "<li>" + esc(item) + "</li>"; });
+      if (limitations.additional) html += "<li>" + esc(limitations.additional) + "</li>";
+      html += "</ul>";
+    }
+
+    return html + "</section>";
+  }
+
   var STATUS_KIND = {
     submitted: "", needs_info: "warn", seller_access_pending: "warn", ready_for_review: "",
     quote_prepared: "", quote_sent: "good", awaiting_time_selection: "good",
@@ -193,7 +284,7 @@
 
     // ---------- status-specific guidance ----------
     var guidance = {
-      submitted: "AutoClarity typically responds within 24 hours with scheduling details.",
+      submitted: "AutoClarity will review the vehicle, location, access, and requested timing, then follow up by email with next steps.",
       needs_info: "AutoClarity needs a little more information — check the messages below and reply there.",
       seller_access_pending: "Waiting on the seller to confirm access to the vehicle. You’ll be notified the moment it’s cleared.",
       ready_for_review: "Your request is in review — your exact quote is on its way.",
@@ -210,8 +301,12 @@
           : "Payment is not available until the current quote, appointment hold and agreements are ready. AutoClarity will provide the next step."),
       confirmed: "You’re booked. The technician will meet the vehicle at the scheduled time.",
       inspection_in_progress: "Your inspection is underway.",
-      report_in_progress: "The inspection is done — your written results are being prepared.",
-      completed: "Your inspection is complete. Your results are in the messages below.",
+      report_in_progress: v.report
+        ? "Your published written report is available below while AutoClarity finalizes this request."
+        : "The inspection is done — your written results are being prepared.",
+      completed: v.report
+        ? "Your inspection is complete. Your published written report is available below."
+        : "Your inspection is marked complete, but no published report is available in this secure portal. Contact AutoClarity support for help.",
       customer_cancelled: "This request was cancelled.",
       admin_cancelled: "This request was cancelled by AutoClarity.",
       expired: "This request expired. Submit a new one whenever you’re ready.",
@@ -222,6 +317,9 @@
     if (guidance[v.status]) {
       html += '<div class="notice info">' + esc(guidance[v.status]) + "</div>";
     }
+
+    // ---------- exact published report snapshot ----------
+    if (v.report) html += renderPublishedReport(v.report);
 
     // ---------- quote ----------
     if (v.quote) {

@@ -19,6 +19,12 @@ describe('status state machine', () => {
     expect(canTransition('submitted', 'confirmed')).toBe(false);
   });
 
+  it('requires the report stage before completion', () => {
+    expect(canTransition('inspection_in_progress', 'completed')).toBe(false);
+    expect(canTransition('inspection_in_progress', 'report_in_progress')).toBe(true);
+    expect(canTransition('report_in_progress', 'completed')).toBe(true);
+  });
+
   it('blocks resurrecting terminal states arbitrarily', () => {
     expect(canTransition('completed', 'submitted')).toBe(false);
     expect(canTransition('customer_cancelled', 'confirmed')).toBe(false);

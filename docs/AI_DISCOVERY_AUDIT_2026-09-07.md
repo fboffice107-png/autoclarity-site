@@ -1,9 +1,12 @@
 # AI discovery, search indexing, and revenue attribution audit
 
-Audited 2026-09-07 against source revision `3025bcd`, the live site, the U.S.
-App Store listing, and current first-party crawler documentation. Work is on
+Audited 2026-09-07/08 against the AI-discovery baseline
+`e16c99b11df01ef6378100cd2a73e918927e5abe`, the actual live source revision
+`ce931b0724b05f7483566c7e95602934ca32a5db`, the live site, the U.S. App Store
+listing, and current first-party crawler documentation. The isolated branch is
 `agent/ai-discovery-indexing-2026-09-07`; the pre-existing dirty checkout was
-not modified.
+not modified. The exact final candidate revision is recorded in the release
+handoff because a commit cannot truthfully embed its own hash.
 
 ## Executive result
 
@@ -20,17 +23,26 @@ copy, and first-party interaction counters. Its largest correctness gaps were:
 6. the admin labeled one net-like number simply “Revenue” and could not connect
    a request's acquisition category to payment or completion.
 
-This change adds one dated fact source and generator, precise visible copy,
+This candidate adds one dated fact source and generator, precise visible copy,
 conservative JSON-LD, `/llms.txt`, `/autoclarity-services.json`, an IndexNow
 submission preflight, privacy-minimized request attribution, server-side
 milestone events, and separate gross/refund/net/dispute reporting. It adds no
 ads, training-crawler exception, public customer data, checkout API, MCP server,
 or automated agent transaction surface.
 
-## Verified public facts
+Follow-up review also repaired a form-bootstrap failure, made scan/SMS/review
+features fail closed, rejected malformed runtime configuration, removed
+unsupported response-time copy, corrected conservative revenue calculations,
+and required an exact immutable same-request published report before completion.
+The repository still lacks an operator report-authoring/publish flow; that and
+the external business gates below block production launch.
 
-The canonical maintained source is `scripts/public-facts.json`. Generated
-outputs are checked by `npm run facts:check` and acceptance tests.
+## Reviewed public facts
+
+The canonical maintained source is `scripts/public-facts.json`. Its date means
+“reviewed for source consistency,” not independent proof of every owner operating
+fact. Generated outputs are checked by `npm run facts:check` and acceptance
+tests; owner evidence gates remain explicit.
 
 ### AutoClarity iPhone app
 
@@ -45,8 +57,9 @@ outputs are checked by `npm run facts:check` and acceptance tests.
 
 ### Las Vegas mobile pre-purchase inspection
 
-- Separate founder-performed physical service for reviewed locations in Las
-  Vegas, North Las Vegas, Henderson, Boulder City, and surrounding Clark County.
+- Separate founder-performed physical service for reviewed requests in Las
+  Vegas, North Las Vegas, Henderson, and Boulder City. Broader Clark County
+  coverage is not published as a blanket claim.
 - Starting tiers are $199, $299, and $399. They are not represented as flat or
   guaranteed totals.
 - From the central Las Vegas service area: 0–15 miles included; 16–25 +$25;
@@ -70,7 +83,10 @@ insurance approval, so the production checklist keeps those approvals open.
 
 ## Live technical baseline
 
-Observed 2026-09-07 before any deployment from this branch:
+Observed 2026-09-08 before any deployment from this branch. Production remains
+the successful Pages deployment `e7a9c599-8136-4a1a-9fd1-99d8ce7b5ee6`, source
+`ce931b0724b05f7483566c7e95602934ca32a5db`, build header
+`ac-prod-20260903-r3`:
 
 | Surface | Result | Notes |
 |---|---:|---|
@@ -91,6 +107,20 @@ Public static pages returned `Cache-Control: public, max-age=0,
 must-revalidate`. APIs returned `no-store`. The new generated fact documents
 have explicit one-hour caches. The repository intentionally has no tracked
 production `wrangler.toml`; production bindings remain outside source control.
+
+The production D1 journal contains `0001` through `0008`; candidate migration
+`0009_request_attribution.sql` is not applied. A private pre-migration export
+was restored successfully and `0009` was rehearsed on its copy with clean
+integrity/foreign-key checks, unchanged counts and money, a conservative
+`ppi_unknown` default on all 23 existing requests, and the expected index. No
+remote schema or record was changed. Full sanitized evidence is in
+`docs/PRODUCTION_PREFLIGHT_2026-09-07.md`.
+
+Production contains obvious fixture/integration-pattern records, including all
+of the apparent $299 post-refund amount. Unlabeled rows were not opened or
+asserted to be real customers. Production also still has an `ADMIN_DEV_KEY`
+secret name. Those are release blockers even though the deployed code refuses
+the preview key when `PPI_ENV=production`.
 
 ## Search and answer-engine evaluation
 
@@ -153,8 +183,8 @@ For the service funnel, each request now stores one first-touch category such
 as `ppi_google_cpc` or `ppi_search_organic`. Inputs are allowlisted; raw campaign
 names, URLs, hosts, search text, referrer paths, and customer fields are not
 stored in analytics. Missing or invalid values become `ppi_unknown`; the UI
-combines direct and unknown as “Direct / unknown” rather than fabricating an AI
-source.
+reports “Direct” and “Unknown / unattributed” separately rather than fabricating
+an AI source.
 
 The admin now separates:
 
@@ -181,29 +211,35 @@ service request page, distraction, latency, trust loss, consent overhead, and
 booking cannibalization are plausible; the decision is deferred pending real
 traffic and funnel-value data.
 
-A potentially valuable future agent product is a permissioned, sanitized
-inspection-request and verified-report feed for dealers, fleets, or buyer
-platforms. It was not built: customer demand, data rights, authentication,
-least-privilege authorization, audit logs, abuse controls, service-level terms,
-and evidence that automation outperforms the current human flow are all missing.
+A potentially valuable future agent product is a permissioned request, quote,
+checkout, assignment, and exact published-report flow. It was not built:
+customer demand, data rights, authenticated delegation and spend approval,
+fulfillment capacity, least-privilege authorization, audit logs, abuse controls,
+service-level terms, and positive unit economics are all missing. The bounded
+future design and technician-network migration path are recorded in
+`docs/PPI_ARCHITECTURE.md`.
 
 ## Validation and release state
 
 - **Implemented:** source and generated facts, visible copy, JSON-LD, public
   catalog, `llms.txt`, IndexNow preflight, server attribution, authoritative
-  milestones, and revenue/source reporting.
-- **Tested locally:** fact drift check and typecheck passed; 163 unit tests and
-  47 full HTTP workflow tests passed with fresh local D1/R2 and mocked Stripe;
-  all internal links and header checks passed; desktop and 375px mobile rendered
-  checks found no horizontal overflow or console warnings/errors. The public
-  JSON, text summary, and IndexNow key returned 200 with expected content types.
+  milestones, revenue/source reporting, strict runtime-configuration gates, and
+  a completion guard that requires one exact, integrity-checked published report.
+- **Tested locally:** fact drift check and typecheck passed; 245 unit tests and
+  68 full HTTP workflow tests passed with fresh local D1/R2 and mocked Stripe;
+  all internal links and header checks passed; rendered checks at 375px, 768px,
+  and 1440px found no horizontal overflow, fallback form, duplicate IDs,
+  unnamed controls, or console warnings/errors. The public JSON, text summary,
+  and IndexNow key returned 200 with expected content types.
 - **Deployed:** no.
 - **Submitted to search/indexing services:** no.
 - **Indexed:** existing site pages observed; new outputs cannot be indexed before deployment.
 - **Observed in AI answers/citations/referrals:** no.
 - **Observed payments/revenue from this release:** no; tests use mocked payments only.
 
-The highest-value next action is an owner-approved deployment with migration
-`0005`, followed by live smoke tests, the preflighted IndexNow submission, and
-authenticated Search Console/Bing inspection. That action is intentionally not
-performed by this branch.
+Release is blocked. Before migration `0009` or deployment, remove the production
+development-key secret, resolve production fixture contamination without
+touching genuine customer evidence, implement and rehearse report authoring and
+publication, and record the owner/legal/insurance/App Store privacy approvals.
+Only a later clean deployment may be followed by live smoke tests, one
+preflighted IndexNow submission, and authenticated Search Console/Bing work.

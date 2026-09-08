@@ -6,6 +6,7 @@ import { modeFlags } from '../../../lib/types.ts';
 import { requireAdmin, auditLog } from '../../../lib/auth.ts';
 import { getConfig } from '../../../lib/config.ts';
 import { applyStatus, isStatus, canTransition, STATUS_LABELS, type Status } from '../../../lib/status.ts';
+import { completeWithPublishedReport, type PublishedReportVersion } from '../../../lib/published-report.ts';
 import { basePriceForTier, computeQuoteTotals, quoteExpiry, travelFeeForMiles, type QuoteLineInput, type Tier } from '../../../lib/pricing.ts';
 import { issueMagicLink, portalUrl } from '../../../lib/magic.ts';
 import { retryStoredEmail, sendTemplate, type EmailResult, type EmailStatus, type EmailTemplateKey, type StoredEmailMessage } from '../../../lib/email.ts';
@@ -364,6 +365,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         return errorJson('invalid_transition', `Cannot move from ${STATUS_LABELS[status]} to ${STATUS_LABELS[to]}.`, 409);
       }
       const reason = clampStr(body.reason, 300) || 'Admin status change';
+      let completedReport: PublishedReportVersion | null = null;
 
       if (to === 'confirmed') {
         if (flags.paymentsEnabled || flags.env === 'production') {
@@ -488,11 +490,33 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
               )
             : errorJson('conflict', 'Status changed concurrently — reload and retry.', 409);
         }
+      } else if (to === 'completed') {
+        const completion = await completeWithPublishedReport(
+          db,
+          id,
+          actor,
+          clampStr(body.reason, 300) || undefined,
+        );
+        if (!completion.ok) {
+          return completion.code === 'report_required'
+            ? errorJson(
+                'report_required',
+                'Publish this request\'s inspection report before marking it completed.',
+                409,
+              )
+            : errorJson('conflict', 'The request or published report changed concurrently — reload and retry.', 409);
+        }
+        completedReport = completion.report;
       } else {
         const moved = await applyStatus(db, id, status, to, actor, reason);
         if (!moved) return errorJson('conflict', 'Status changed concurrently — reload and retry.', 409);
       }
-      await auditLog(db, actor, 'set_status', 'ppi_request', id, { from: status, to, reason: body.reason });
+      await auditLog(db, actor, 'set_status', 'ppi_request', id, {
+        from: status,
+        to,
+        reason: body.reason,
+        reportVersionId: completedReport?.versionId ?? null,
+      });
       if (to === 'confirmed' || to === 'completed') {
         const event = to === 'confirmed' ? 'ppi_booking_confirmed' : 'ppi_completed';
         await db
@@ -505,6 +529,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       const templateByStatus: Partial<Record<Status, EmailTemplateKey>> = {
         needs_info: 'needs_info',
         seller_access_pending: 'seller_access',
+        completed: 'report_ready',
         customer_cancelled: 'cancellation_confirmed',
         admin_cancelled: 'cancellation_confirmed',
       };
@@ -520,8 +545,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           ref: req.ref,
           portalUrl: portalUrl(base, token),
           supportEmail: config.supportEmail,
-          extra: { note: clampStr(body.note, 1000) },
-        });
+          extra: {
+            note: clampStr(body.note, 1000),
+            version: completedReport ? String(completedReport.version) : '',
+          },
+        }, undefined, completedReport ? `report_ready:${completedReport.versionId}` : undefined);
         const emailFailure = await notificationFailureResponse(db, actor, id, 'set_status', emailResult);
         if (emailFailure) return emailFailure;
         return json({

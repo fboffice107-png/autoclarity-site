@@ -32,7 +32,6 @@
   var DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
   var submissionKey = "";
   var ATTRIBUTION_KEY = "ppi-attribution-v1";
-  var attributionSource = getAttributionSource();
 
   /* Dormant waitlist/outage copy lives in inert templates. Mount only the
      state confirmed by runtime configuration, then remove both templates from
@@ -59,6 +58,7 @@
       typeof cfg.paymentsEnabled === "boolean" &&
       typeof cfg.bookingEnabled === "boolean" &&
       typeof cfg.uploadsEnabled === "boolean" &&
+      typeof cfg.smsAvailable === "boolean" &&
       typeof cfg.turnstileSiteKey === "string" &&
       cfg.turnstileSiteKey.length > 0 &&
       cfg.pricing && Array.isArray(cfg.pricing.tiers) && cfg.pricing.tiers.length > 0 &&
@@ -191,6 +191,7 @@
     "ppi_google_business_profile", "ppi_bing_places", "ppi_apple_maps", "ppi_chatgpt_search",
     "ppi_perplexity_search", "ppi_claude_search"
   ];
+  var attributionSource = getAttributionSource();
 
   function isAllowedAttribution(value) {
     return ALLOWED_ATTRIBUTIONS.indexOf(String(value || "")) !== -1;
@@ -308,6 +309,7 @@
       applyTravel(cfg);
       applyScanLanguage(cfg);
       applyPaymentLanguage(cfg);
+      applySmsAvailability(cfg);
       applyReviews(cfg);
       if (cfg.mode === "waitlist") {
         activateWaitlistState();
@@ -378,18 +380,34 @@
   }
 
   function applyReviews(cfg) {
-    // Only real, owner-configured reviews are shown; the section stays hidden
-    // otherwise. No star ratings are rendered or fabricated.
+    // The page ships no review claims. Mount this section only after real,
+    // owner-approved review records arrive from runtime configuration.
     var items = (cfg && cfg.reviews) || [];
     if (!items.length) return;
+    var finalCta = document.querySelector(".final-cta");
+    if (!finalCta || !finalCta.parentNode || document.getElementById("reviews")) return;
+    var section = document.createElement("section");
+    section.className = "section section-alt";
+    section.id = "reviews";
+    section.setAttribute("aria-labelledby", "reviews-title");
+    section.innerHTML = '<div class="section-inner section-narrow"><header class="section-head">' +
+      '<p class="kicker">Reviews</p><h2 id="reviews-title">Customer reviews</h2></header>' +
+      '<div class="reviews-grid" id="reviewsGrid"></div></div>';
+    finalCta.parentNode.insertBefore(section, finalCta);
     var grid = document.getElementById("reviewsGrid");
-    var section = document.getElementById("reviews");
-    if (!grid || !section) return;
     grid.innerHTML = items.map(function (r) {
       return '<figure class="review-card"><blockquote>' + escapeHtml(r.text) + "</blockquote>" +
         "<figcaption>" + escapeHtml(r.name) + (r.vehicle ? " · " + escapeHtml(r.vehicle) : "") + "</figcaption></figure>";
     }).join("");
-    section.hidden = false;
+  }
+
+  function applySmsAvailability(cfg) {
+    var select = document.getElementById("preferredContact");
+    if (!select || cfg.smsAvailable !== true || select.querySelector('option[value="text"]')) return;
+    var option = document.createElement("option");
+    option.value = "text";
+    option.textContent = "Text message";
+    select.appendChild(option);
   }
 
   function applyScanLanguage(cfg) {
@@ -1172,7 +1190,7 @@
     document.getElementById("successTitle").textContent = duplicate ? "You already have an open request" : "Your request has been received ✓";
     document.getElementById("successMessage").textContent = duplicate
       ? (result.message || "AutoClarity found an open request for this vehicle and did not create a second one.")
-      : "Your request is saved immediately. AutoClarity will review the vehicle, location, and requested timing, and typically responds within 24 hours with scheduling details.";
+      : "Your request is saved immediately. AutoClarity will review the vehicle, location, access, and requested timing, then follow up by email with next steps.";
     var emailState = updateEmailNotice(result, String((confirmationDetails[0].rows[1] || [])[1] || "your email address"), duplicate);
 
     var refRow = document.getElementById("successRefRow");

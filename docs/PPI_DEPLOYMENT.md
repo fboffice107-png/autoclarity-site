@@ -72,7 +72,15 @@ Record those approvals before release; engineering must not infer them.
 1. Clear the business/legal approval blocker above and record owner approval for
    the release window, public pricing/policy copy, and any intentionally active,
    time-bounded launch price or promotion.
-2. Back up production D1 and record the current successful Pages deployment.
+2. Record the current successful Pages deployment ID, exact creation time,
+   source revision, and build ID. Export production D1 to a non-repository,
+   access-restricted location; record UTC time, database identity, byte size,
+   SHA-256, and the current Time Travel bookmark. Restore the export into a
+   disposable local database and require a clean integrity check, no foreign-key
+   violations, and exact agreement with the read-only production snapshot for
+   table counts, request/payment counts, gross captured, and refund totals.
+   Rehearse the next migration on a copy of that restored database and repeat
+   the checks before any remote migration command.
 3. Reconcile the recovered `0002` migration before code rollout. Using only an
    independently reviewed production configuration, confirm the intended D1
    database name and ID, inspect its migration history, and compare the live
@@ -113,7 +121,8 @@ Record those approvals before release; engineering must not infer them.
    route, branch, and compatibility setting. There is intentionally no tracked
    default `wrangler.toml`; never use `wrangler.local.toml` or the generated
    preview configuration for production.
-10. Confirm Access protection and the complete payment tuple:
+10. Confirm Access protection, remove the `ADMIN_DEV_KEY` secret entirely from
+   production, and confirm the complete payment tuple:
    `PPI_ENV=production`, `PPI_MODE=live`, `PAYMENTS_ENABLED=true`,
    `STRIPE_ENV=live`, `PUBLIC_BASE_URL=https://getautoclarity.com`, and an
    `sk_live_` Stripe secret plus the matching `whsec_` webhook secret. Partial,

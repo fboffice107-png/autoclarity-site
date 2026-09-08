@@ -8,6 +8,7 @@ import home from '../../index.html?raw';
 import ppi from '../../las-vegas-pre-purchase-inspection/index.html?raw';
 import robots from '../../robots.txt?raw';
 import sitemap from '../../sitemap.xml?raw';
+import headers from '../../_headers?raw';
 import indexNowKey from '../../170f59a6dd75523c8f9318a7ae04ae2e.txt?raw';
 import indexNowScript from '../../scripts/submit-indexnow.mjs?raw';
 import { DEFAULT_CONFIG } from '../../functions/lib/config.ts';
@@ -23,13 +24,14 @@ function publicText(): string {
   return [home, ppi, catalogRaw, llms].join('\n');
 }
 
-describe('verified public fact projection', () => {
+describe('reviewed public fact projection', () => {
   const source = JSON.parse(sourceRaw) as Json;
   const catalog = JSON.parse(catalogRaw) as Json;
 
   it('publishes exactly two clearly separated offerings from one dated source', () => {
-    expect(source.verifiedAt).toBe('2026-09-07');
-    expect(catalog.verifiedAt).toBe(source.verifiedAt);
+    expect(source.lastReviewedAt).toBe('2026-09-07');
+    expect(catalog.lastReviewedAt).toBe(source.lastReviewedAt);
+    expect(catalog).not.toHaveProperty('verifiedAt');
     expect(catalog.offerings).toHaveLength(2);
     expect(catalog.offerings.map((item: Json) => item.type)).toEqual(['mobile_application', 'service']);
     expect(catalog.relationship).toContain('separate products');
@@ -59,7 +61,7 @@ describe('verified public fact projection', () => {
     expect(service.pricing.startingPrices.map((tier: Json) => tier.amount)).toEqual([199, 299, 399]);
     expect(service.pricing.startingPrices.every((tier: Json) => tier.qualification.includes('Starting price'))).toBe(true);
     expect(service.serviceArea.places).toEqual([
-      'Las Vegas', 'North Las Vegas', 'Henderson', 'Boulder City', 'surrounding Clark County',
+      'Las Vegas', 'North Las Vegas', 'Henderson', 'Boulder City',
     ]);
     expect(service.serviceArea.travelBands.map((band: Json) => [band.distance, band.fee])).toEqual([
       ['0–15 miles', 0], ['16–25 miles', 25], ['26–40 miles', 50], ['Beyond 40 miles', null],
@@ -147,6 +149,17 @@ describe('crawler and sitemap policy', () => {
     expect(indexNowScript).toContain('IndexNow preflight failed');
     expect(indexNowScript).toContain('https://api.indexnow.org/indexnow');
     expect(indexNowScript).toContain('/autoclarity-services.json');
+    expect(indexNowScript).toContain('catalog?.canonicalUrl !== url');
+    expect(indexNowScript).toContain("offering?.id === 'las-vegas-pre-purchase-inspection'");
+    expect(indexNowScript).toContain("ppiOffering?.officialPage !== 'https://getautoclarity.com/las-vegas-pre-purchase-inspection/'");
+    expect(indexNowScript).not.toContain("catalog?.canonicalUrl !== 'https://getautoclarity.com/las-vegas-pre-purchase-inspection/'");
+    expect(indexNowScript).toContain('const expectedCanonical = `<link rel="canonical" href="${url}"`;');
+    expect(indexNowScript).toContain('!body.includes(expectedCanonical)');
+    expect(indexNowScript).toContain("const expectedBuild = 'ac-ai-20260907-r2'");
+    expect(indexNowScript).toContain("response.headers.get('x-autoclarity-build') !== expectedBuild");
+    expect(indexNowScript).toContain("response.headers.get('x-robots-tag') ?? ''");
+    expect(headers).toContain('X-AutoClarity-Build: ac-ai-20260907-r2');
     expect(indexNowScript).not.toContain('/ppi/portal');
   });
+
 });

@@ -77,18 +77,11 @@ const serviceJsonLd = {
   url: facts.ppi.canonicalUrl,
   description: facts.ppi.summary,
   provider: { '@id': facts.organization.entityId },
-  areaServed: [
-    ...facts.ppi.serviceArea.places.slice(0, 4).map((name) => ({
-      '@type': 'City',
-      name,
-      containedInPlace: { '@type': 'State', name: 'Nevada' },
-    })),
-    {
-      '@type': 'AdministrativeArea',
-      name: 'Clark County',
-      containedInPlace: { '@type': 'State', name: 'Nevada' },
-    },
-  ],
+  areaServed: facts.ppi.serviceArea.places.map((name) => ({
+    '@type': 'City',
+    name,
+    containedInPlace: { '@type': 'State', name: 'Nevada' },
+  })),
   offers: facts.ppi.startingPrices.map(offer),
 };
 
@@ -137,7 +130,7 @@ const ppiFaqJsonLd = {
       name: 'What areas do you serve?',
       acceptedAnswer: {
         '@type': 'Answer',
-        text: 'Las Vegas, North Las Vegas, Henderson, Boulder City, and surrounding Clark County are subject to review. From the central Las Vegas service area, 0–15 miles is included, 16–25 miles adds $25, 26–40 miles adds $50, and locations beyond 40 miles are individually reviewed.',
+        text: 'Las Vegas, North Las Vegas, Henderson, and Boulder City requests are each subject to review. From the central Las Vegas service area, 0–15 miles is included, 16–25 miles adds $25, 26–40 miles adds $50, and locations beyond 40 miles are individually reviewed.',
       },
     },
     {
@@ -163,7 +156,7 @@ const breadcrumbJsonLd = {
 const catalog = {
   documentType: 'AutoClarity public offerings catalog',
   schemaVersion: facts.schemaVersion,
-  verifiedAt: facts.verifiedAt,
+  lastReviewedAt: facts.lastReviewedAt,
   canonicalUrl: 'https://getautoclarity.com/autoclarity-services.json',
   notice: 'This is a static informational document, not a booking, availability, quote, or checkout API.',
   organization: {
@@ -184,7 +177,7 @@ const catalog = {
       pricing: facts.app.pricing,
       limitations: facts.app.limitations,
       nextStep: facts.app.nextStep,
-      sourceReferences: facts.app.publicSources.map((url) => ({ url, verifiedAt: facts.verifiedAt })),
+      sourceReferences: facts.app.publicSources.map((url) => ({ url, reviewedAt: facts.lastReviewedAt })),
     },
     {
       id: facts.ppi.id,
@@ -202,7 +195,7 @@ const catalog = {
       serviceArea: facts.ppi.serviceArea,
       limitations: facts.ppi.limitations,
       nextStep: facts.ppi.nextStep,
-      sourceReferences: facts.ppi.publicSources.map((url) => ({ url, verifiedAt: facts.verifiedAt })),
+      sourceReferences: facts.ppi.publicSources.map((url) => ({ url, reviewedAt: facts.lastReviewedAt })),
     },
   ],
   relationship: 'The iPhone app and Las Vegas inspection are separate products. Buying the app subscription does not include a physical inspection, and the app is not required to request one.',
@@ -212,7 +205,7 @@ const llms = `# AutoClarity
 
 > AutoClarity has two separate offerings: an informational iPhone symptom-guidance app and a founder-performed mobile pre-purchase vehicle inspection service for reviewed Las Vegas-area locations.
 
-Facts on this page were verified ${facts.verifiedAt}. Availability, eligibility, quotes, and prices remain subject to the linked official pages.
+Facts on this page were reviewed for source consistency ${facts.lastReviewedAt}. This does not replace owner verification of operating facts. Availability, eligibility, quotes, and prices remain subject to the linked official pages.
 
 ## Official pages
 
@@ -233,7 +226,7 @@ Facts on this page were verified ${facts.verifiedAt}. Availability, eligibility,
 - Standard Vehicle PPI: starting at $199.
 - European, Luxury or Performance PPI: starting at $299.
 - Exotic, Collector or Heavily Modified PPI: starting at $399.
-- Las Vegas, North Las Vegas, Henderson, Boulder City, and surrounding Clark County are subject to review.
+- Las Vegas, North Las Vegas, Henderson, and Boulder City requests are each subject to review.
 - From the central Las Vegas service area: 0–15 miles is included, 16–25 miles adds $25, 26–40 miles adds $50, and locations beyond 40 miles are individually reviewed.
 - A request is not an appointment. The exact quote and available times follow review; successful payment after agreement acceptance confirms the booking.
 - Scope depends on vehicle and access. Road tests require permission and safe, lawful conditions. An inspection is not a warranty and cannot identify every defect.

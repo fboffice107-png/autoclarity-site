@@ -50,8 +50,8 @@ export async function loadRevenueWindow(db: D1Database, days: number): Promise<R
          FROM status_history GROUP BY request_id
        ), window_refunds AS (
          SELECT * FROM provider_refunds
-         WHERE status = 'succeeded' AND provider_created IS NOT NULL
-           AND provider_created > (SELECT cutoff_epoch FROM params)
+         WHERE status = 'succeeded'
+           AND last_event_created > (SELECT cutoff_epoch FROM params)
        ), window_disputes AS (
          SELECT * FROM payment_disputes
          WHERE provider_created > (SELECT cutoff_epoch FROM params)
@@ -90,16 +90,13 @@ export async function loadRevenueWindow(db: D1Database, days: number): Promise<R
          JOIN analytics_events e
            ON e.id = 'ev_payment_' || p.id AND e.event = 'ppi_payment_confirmed'
          WHERE e.created_at > ? AND p.status IN (${CAPTURED_PAYMENT_STATUSES})
-       ), active_disputes AS (
-         SELECT payment_id, SUM(amount_cents) AS disputed_cents
-         FROM payment_disputes
-         WHERE funds_state = 'withdrawn'
-         GROUP BY payment_id
        ), captured AS (
          SELECT p.*,
-                MIN(p.amount_cents, COALESCE(d.disputed_cents, 0)) AS disputed_cents
+                CASE WHEN p.status = 'disputed'
+                  THEN MAX(p.amount_cents - p.refunded_cents, 0)
+                  ELSE 0
+                END AS disputed_cents
          FROM confirmed_payments p
-         LEFT JOIN active_disputes d ON d.payment_id = p.id
        )
        SELECT COUNT(*) AS paid_payments,
               COALESCE(SUM(amount_cents), 0) AS gross_collected_cents,
@@ -127,11 +124,6 @@ export async function loadRevenueWindow(db: D1Database, days: number): Promise<R
                 MIN(CASE WHEN to_status = 'quote_sent' THEN created_at END) AS quoted_at,
                 MIN(CASE WHEN to_status = 'completed' THEN created_at END) AS completed_at
          FROM status_history GROUP BY request_id
-       ), active_disputes AS (
-         SELECT payment_id, SUM(amount_cents) AS disputed_cents
-         FROM payment_disputes
-         WHERE funds_state = 'withdrawn'
-         GROUP BY payment_id
        ), dispute_cases AS (
          SELECT payment_id, COUNT(*) AS dispute_cases
          FROM payment_disputes GROUP BY payment_id
@@ -143,17 +135,18 @@ export async function loadRevenueWindow(db: D1Database, days: number): Promise<R
                 COUNT(DISTINCT p.stripe_session_id) AS checkouts,
                 COUNT(CASE WHEN p.status IN (${CAPTURED_PAYMENT_STATUSES}) THEN 1 END) AS paid_payments,
                 MAX(CASE WHEN p.status IN (${CAPTURED_PAYMENT_STATUSES}) THEN 1 ELSE 0 END) AS paid_request,
+                MAX(CASE WHEN p.status = 'disputed' THEN 1 ELSE 0 END) AS disputed_request,
                 SUM(CASE WHEN p.status IN (${CAPTURED_PAYMENT_STATUSES}) THEN p.amount_cents ELSE 0 END) AS gross_cents,
                 SUM(CASE WHEN p.status IN (${CAPTURED_PAYMENT_STATUSES}) THEN p.refunded_cents ELSE 0 END) AS refunded_cents,
+                SUM(CASE WHEN p.status = 'disputed'
+                         THEN MAX(p.amount_cents - p.refunded_cents, 0) ELSE 0 END) AS disputed_cents,
                 SUM(CASE WHEN p.status IN (${CAPTURED_PAYMENT_STATUSES})
-                         THEN MIN(p.amount_cents, COALESCE(d.disputed_cents, 0)) ELSE 0 END) AS disputed_cents,
-                SUM(CASE WHEN p.status IN (${CAPTURED_PAYMENT_STATUSES})
-                         THEN MAX(p.amount_cents - p.refunded_cents - MIN(p.amount_cents, COALESCE(d.disputed_cents, 0)), 0)
+                         THEN CASE WHEN p.status = 'disputed' THEN 0
+                           ELSE MAX(p.amount_cents - p.refunded_cents, 0) END
                          ELSE 0 END) AS recognized_net_cents,
                 SUM(COALESCE(rf.refund_count, 0)) AS refund_count,
                 SUM(COALESCE(dc.dispute_cases, 0)) AS dispute_cases
          FROM payments p
-         LEFT JOIN active_disputes d ON d.payment_id = p.id
          LEFT JOIN dispute_cases dc ON dc.payment_id = p.id
          LEFT JOIN refund_cases rf ON rf.payment_id = p.id
          GROUP BY p.request_id
@@ -171,12 +164,13 @@ export async function loadRevenueWindow(db: D1Database, days: number): Promise<R
               COALESCE(SUM(CASE WHEN m.completed_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS completed,
               COALESCE(SUM(p.refund_count), 0) AS refund_count,
               COALESCE(SUM(p.dispute_cases), 0) AS dispute_cases,
+              COALESCE(SUM(p.disputed_request), 0) AS disputed_requests,
               COALESCE(SUM(p.gross_cents), 0) AS gross_cents,
               COALESCE(SUM(p.refunded_cents), 0) AS refunded_cents,
               COALESCE(SUM(p.disputed_cents), 0) AS disputed_excluded_cents,
               COALESCE(SUM(p.recognized_net_cents), 0) AS recognized_net_cents,
               ROUND(SUM(p.gross_cents) * 1.0 / NULLIF(SUM(p.paid_payments), 0)) AS average_paid_ticket_cents,
-              CASE WHEN COUNT(*) >= 20 THEN ROUND(100.0 * SUM(p.paid_request) / COUNT(*), 1) END AS request_to_paid_rate,
+              CASE WHEN COUNT(*) >= 20 THEN ROUND(100.0 * COALESCE(SUM(p.paid_request), 0) / COUNT(*), 1) END AS request_to_paid_rate,
               CASE WHEN COUNT(*) >= 20 THEN ROUND(100.0 * SUM(CASE WHEN m.completed_at IS NOT NULL THEN 1 ELSE 0 END) / COUNT(*), 1) END AS request_to_completed_rate
        FROM cohort c
        LEFT JOIN first_milestones m ON m.request_id = c.id
@@ -333,7 +327,16 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       bookings_confirmed: thirtyDayWindow.operations['confirmed_bookings'] ?? 0,
       completed: thirtyDayWindow.operations['completed_inspections'] ?? 0,
     },
-    attribution30d: thirtyDayWindow.sources,
+    attribution30d: thirtyDayWindow.sources.map((row) => ({
+      source: row['source'],
+      requests: row['requests'],
+      paid_requests: row['paid'],
+      completed: row['completed'],
+      gross_cents: row['gross_cents'],
+      refunded_cents: row['refunded_cents'],
+      net_cents: row['recognized_net_cents'],
+      disputed_requests: row['disputed_requests'],
+    })),
     funnel30d: funnel.results ?? [],
     activity: activity.results ?? [],
     // Count affected requests, not raw audit/message rows, so one failed

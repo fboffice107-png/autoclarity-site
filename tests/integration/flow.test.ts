@@ -66,7 +66,7 @@ function intakePayload(overrides: Json = {}): Json {
     locZip: '89109',
     sellerType: 'dealership',
     permInspection: true,
-    permScan: true,
+    permScan: false,
     permRoadTest: 'yes',
     permPhotos: 'yes',
     permUnderbody: 'unknown',
@@ -245,6 +245,7 @@ describe('public surface', () => {
     expect(r.body.turnstileSiteKey).toBeTruthy();
     // Safe defaults surfaced to the public page.
     expect(r.body.scanIncluded).toBe(false); // scan off until owner confirms scope
+    expect(r.body.smsAvailable).toBe(false); // no queue/provider is bound
     expect(r.body.reviews).toEqual([]); // no fabricated reviews
     expect(r.body.contact.configured).toBe(false); // no invented phone number
     expect(r.body.launchActive).toBe(false); // no fake permanent discount
@@ -482,6 +483,26 @@ describe('intake submission', () => {
     const r = await post('/api/ppi/requests', intakePayload({ vin: 'INVALIDVIN123' }));
     expect(r.status).toBe(422);
     expect(r.body.fields.vin).toContain('17');
+  });
+
+  it('rejects stale or crafted diagnostic-scan permission while the capability is unreleased', async () => {
+    const r = await post(
+      '/api/ppi/requests',
+      intakePayload({ email: 'scan-gate@example.com', vin: '', permScan: true }),
+      { 'cf-connecting-ip': '203.0.113.181' },
+    );
+    expect(r.status).toBe(422);
+    expect(r.body.fields.permScan).toContain('not part');
+  });
+
+  it('rejects a text preference when no transactional SMS consumer is available', async () => {
+    const r = await post(
+      '/api/ppi/requests',
+      intakePayload({ email: 'sms-gate@example.com', vin: '', preferredContact: 'text' }),
+      { 'cf-connecting-ip': '203.0.113.182' },
+    );
+    expect(r.status).toBe(422);
+    expect(r.body.fields.preferredContact).toContain('not currently available');
   });
 
   it('rejects cross-origin submissions', async () => {
@@ -2449,19 +2470,53 @@ describe('lifecycle controls', () => {
     expect(off.body.launchActive).toBe(false);
   });
 
-  it('config: admin can enable diagnostic scan scope', async () => {
-    await fetch(BASE + '/api/admin/config', {
+  it('config: admin cannot enable diagnostic scan before the reviewed capability release', async () => {
+    const rejected = await fetch(BASE + '/api/admin/config', {
       method: 'PUT',
       headers: { ...admin, origin: BASE, 'content-type': 'application/json' },
       body: JSON.stringify({ scan: { included: true } }),
     });
+    expect(rejected.status).toBe(422);
+    expect(((await rejected.json()) as Json).error.code).toBe('configuration_not_released');
     const pub = await get('/api/ppi/runtime-config');
-    expect(pub.body.scanIncluded).toBe(true);
-    await fetch(BASE + '/api/admin/config', {
+    expect(pub.body.scanIncluded).toBe(false);
+  });
+
+  it('config: admin cannot publish unattributed customer reviews', async () => {
+    const rejected = await fetch(`${BASE}/api/admin/config`, {
       method: 'PUT',
       headers: { ...admin, origin: BASE, 'content-type': 'application/json' },
-      body: JSON.stringify({ scan: { included: false } }),
+      body: JSON.stringify({
+        reviews: {
+          enabled: true,
+          items: [{ name: 'Anonymous', text: 'Great inspection.' }],
+        },
+      }),
     });
+    expect(rejected.status).toBe(422);
+    expect(((await rejected.json()) as Json).error.code).toBe('configuration_not_released');
+    const pub = await get('/api/ppi/runtime-config');
+    expect(pub.body.reviews).toEqual([]);
+  });
+
+  it('config: malformed, unsafe, and unknown values fail before persistence', async () => {
+    for (const patch of [
+      { contact: null },
+      { scheduling: { slotTemplates: ['25:90'] } },
+      { uploads: { allowedTypes: ['text/html'] } },
+      { unknownControl: true },
+    ]) {
+      const rejected = await fetch(`${BASE}/api/admin/config`, {
+        method: 'PUT',
+        headers: { ...admin, origin: BASE, 'content-type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      expect(rejected.status).toBe(422);
+      expect(((await rejected.json()) as Json).error.code).toBe('invalid_configuration');
+    }
+    const pub = await get('/api/ppi/runtime-config');
+    expect(pub.status).toBe(200);
+    expect(pub.body.contact.configured).toBe(false);
   });
 
   it('analytics endpoint accepts allowlisted events only (and never PII fields)', async () => {

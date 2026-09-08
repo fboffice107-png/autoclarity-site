@@ -77,7 +77,7 @@ function agreementDatabase(): { sqlite: InstanceType<typeof DatabaseSync>; db: D
 }
 
 describe('agreement source seeding', () => {
-  it('publishes cancellation policy v3 while preserving immutable v2 evidence', async () => {
+  it('publishes explicit current versions while preserving immutable v2 evidence', async () => {
     const policy = AGREEMENT_DOCS.find((doc) => doc.docKey === 'cancellation_policy');
     expect(policy).toBeDefined();
     expect(policy?.version).toBe(3);
@@ -86,32 +86,51 @@ describe('agreement source seeding', () => {
     expect(policy?.bodyMd).toContain('pay the difference before the replacement booking is confirmed');
     expect(policy?.bodyMd).toContain('AutoClarity refunds the difference');
     expect(policy?.bodyMd).toContain('existing payment transfers with no additional charge');
-    expect(AGREEMENT_DOCS.filter((doc) => doc.docKey !== 'cancellation_policy').every((doc) => doc.version === 2)).toBe(true);
+    expect(Object.fromEntries(AGREEMENT_DOCS.map((doc) => [doc.docKey, doc.version]))).toEqual({
+      service_agreement: 2,
+      scope_limitations: 3,
+      cancellation_policy: 3,
+      seller_access: 2,
+      road_test: 2,
+      photos_consent: 2,
+      underbody_limitations: 3,
+      privacy_notice: 2,
+      e_comms: 2,
+    });
 
     const { sqlite, db } = agreementDatabase();
     try {
-      const historicalBody = 'Historical cancellation policy version two';
-      sqlite.prepare(
-        `INSERT INTO agreement_versions (id, doc_key, version, title, body_md, sha256, created_at)
-         VALUES ('ag_cancellation_policy_v2', 'cancellation_policy', 2, 'Cancellation and Refund Policy', ?, 'historical-v2-sha', '2029-01-01T00:00:00.000Z')`,
-      ).run(historicalBody);
+      const historicalDocs = [
+        ['scope_limitations', 'Scope and Limitations'],
+        ['cancellation_policy', 'Cancellation and Refund Policy'],
+        ['underbody_limitations', 'Underbody, Jacking and Lift Limitations'],
+      ] as const;
+      for (const [docKey, title] of historicalDocs) {
+        sqlite.prepare(
+          `INSERT INTO agreement_versions (id, doc_key, version, title, body_md, sha256, created_at)
+           VALUES (?, ?, 2, ?, ?, 'historical-v2-sha', '2029-01-01T00:00:00.000Z')`,
+        ).run(`ag_${docKey}_v2`, docKey, title, `Historical ${docKey} version two`);
+      }
       sqlite.exec(agreementImmutabilityMigration);
 
       await ensureAgreements(db);
 
-      expect(sqlite.prepare(
-        `SELECT body_md FROM agreement_versions WHERE doc_key = 'cancellation_policy' AND version = 2`,
-      ).get()).toEqual({ body_md: historicalBody });
-      expect(sqlite.prepare(
-        `SELECT id, version, body_md FROM agreement_versions WHERE doc_key = 'cancellation_policy' AND version = 3`,
-      ).get()).toEqual({
-        id: 'ag_cancellation_policy_v3',
-        version: 3,
-        body_md: policy?.bodyMd,
-      });
-      expect(() => sqlite.prepare(
-        `UPDATE agreement_versions SET body_md = 'changed' WHERE doc_key = 'cancellation_policy' AND version = 2`,
-      ).run()).toThrow(/agreement versions are immutable/u);
+      for (const [docKey] of historicalDocs) {
+        expect(sqlite.prepare(
+          `SELECT body_md FROM agreement_versions WHERE doc_key = ? AND version = 2`,
+        ).get(docKey)).toEqual({ body_md: `Historical ${docKey} version two` });
+        const current = AGREEMENT_DOCS.find((doc) => doc.docKey === docKey);
+        expect(sqlite.prepare(
+          `SELECT id, version, body_md FROM agreement_versions WHERE doc_key = ? AND version = 3`,
+        ).get(docKey)).toEqual({
+          id: `ag_${docKey}_v3`,
+          version: 3,
+          body_md: current?.bodyMd,
+        });
+        expect(() => sqlite.prepare(
+          `UPDATE agreement_versions SET body_md = 'changed' WHERE doc_key = ? AND version = 2`,
+        ).run(docKey)).toThrow(/agreement versions are immutable/u);
+      }
     } finally {
       sqlite.close();
     }

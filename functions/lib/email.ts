@@ -604,7 +604,7 @@ export const EMAIL_TEMPLATES = {
       optionalDetail('Your notes', ctx.extra?.['concerns']),
       optionalDetail('Access / restrictions', ctx.extra?.['access']),
       '',
-      'AutoClarity typically responds within 24 hours with scheduling details.',
+      'AutoClarity will review the vehicle, location, access, and requested timing, then follow up by email with next steps.',
       'Reply to this email if any of the details above need to be corrected.',
       '',
       ctx.portalUrl

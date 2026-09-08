@@ -51,8 +51,9 @@ export interface PpiConfig {
     callEnabled: boolean;
     urgentCtaEnabled: boolean;
   };
-  // Owner-controlled reviews. Hidden until real, verifiable reviews are added
-  // AND enabled. No star ratings / AggregateRating are generated.
+  // Reviews stay release-gated until each item has documented source,
+  // publication permission, and approved presentation. No star ratings /
+  // AggregateRating are generated.
   reviews: {
     enabled: boolean;
     items: Array<{ name: string; text: string; vehicle?: string }>;
@@ -85,6 +86,33 @@ export interface PpiConfig {
   magicLinks: { ttlHours: number };
   uploads: { maxFiles: number; maxBytes: number; allowedTypes: string[] };
   supportEmail: string;
+}
+
+// This is intentionally a code release gate, not an owner-editable switch.
+// Enabling scan scope requires a separately reviewed implementation change.
+export const SCAN_CAPABILITY_RELEASED = false;
+
+// This is intentionally a code release gate, not an owner-editable switch.
+// The current compact config shape cannot prove source/consent for a quote.
+export const REVIEW_CAPABILITY_RELEASED = false;
+
+export class ConfigValidationError extends Error {
+  constructor(
+    message: string,
+    public readonly code: 'invalid_configuration' | 'configuration_not_released' = 'invalid_configuration',
+  ) {
+    super(message);
+    this.name = 'ConfigValidationError';
+  }
+}
+
+const PUBLIC_FACT_CONFIG_KEYS = new Set(['pricing', 'fees', 'travel', 'supportEmail']);
+
+/** These values are repeated in visible HTML and generated public facts.
+ * Production changes therefore require a coordinated source change/build, not
+ * a runtime-only admin override that would make JSON-LD/catalog copy stale. */
+export function patchTouchesPublicFacts(patch: unknown): boolean {
+  return isPlainObject(patch) && Object.keys(patch).some((key) => PUBLIC_FACT_CONFIG_KEYS.has(key));
 }
 
 export const DEFAULT_CONFIG: PpiConfig = {
@@ -130,7 +158,7 @@ export const DEFAULT_CONFIG: PpiConfig = {
   },
   fees: {
     sameDayPriorityCents: 0, // owner sets when same-day priority is offered
-    liftFacilityCents: 0, // owner sets when a partner-facility lift is arranged
+    liftFacilityCents: 0, // owner sets only when deeper-access arrangements are confirmed
   },
   scan: {
     included: false, // fail-safe default; see docs/PPI_SCAN_SCOPE_REVIEW.md
@@ -182,6 +210,140 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
+function assertConfig(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new ConfigValidationError(message);
+}
+
+function assertOverrideShape(base: unknown, value: unknown, path = 'config'): void {
+  if (Array.isArray(base)) {
+    assertConfig(Array.isArray(value), `${path} must be an array.`);
+    return;
+  }
+  if (isPlainObject(base)) {
+    assertConfig(isPlainObject(value), `${path} must be an object.`);
+    for (const [key, child] of Object.entries(value)) {
+      assertConfig(Object.hasOwn(base, key), `${path}.${key} is not a supported configuration field.`);
+      assertOverrideShape(base[key], child, `${path}.${key}`);
+    }
+    return;
+  }
+  if (base === null) {
+    assertConfig(value === null || typeof value === 'string', `${path} must be a string or null.`);
+    return;
+  }
+  assertConfig(typeof value === typeof base, `${path} must be a ${typeof base}.`);
+}
+
+function validIsoInstantOrDate(value: string | null): boolean {
+  return value === null || (value.trim() !== '' && !Number.isNaN(new Date(value).getTime()));
+}
+
+function validEmail(value: string): boolean {
+  return value.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value);
+}
+
+function assertIntegerRange(value: number, min: number, max: number, path: string): void {
+  assertConfig(Number.isInteger(value) && value >= min && value <= max, `${path} must be an integer from ${min} through ${max}.`);
+}
+
+function validateEffectiveConfig(config: PpiConfig): void {
+  const tierKeys = ['standard', 'euro_luxury_performance', 'exotic_collector'] as const;
+  for (const tierKey of tierKeys) {
+    const tier = config.pricing.tiers[tierKey];
+    assertConfig(tier.key === tierKey, `config.pricing.tiers.${tierKey}.key must remain ${tierKey}.`);
+    assertConfig(tier.label.trim().length >= 1 && tier.label.length <= 100, `config.pricing.tiers.${tierKey}.label is invalid.`);
+    assertIntegerRange(tier.priceCents, 1, 10_000_000, `config.pricing.tiers.${tierKey}.priceCents`);
+    if (tier.launchPriceCents !== undefined) {
+      assertIntegerRange(tier.launchPriceCents, 1, 10_000_000, `config.pricing.tiers.${tierKey}.launchPriceCents`);
+    }
+    assertConfig(typeof tier.startingAt === 'boolean' || tier.startingAt === undefined, `config.pricing.tiers.${tierKey}.startingAt must be a boolean.`);
+    assertConfig(tier.blurb.trim().length >= 1 && tier.blurb.length <= 500, `config.pricing.tiers.${tierKey}.blurb is invalid.`);
+  }
+
+  const launch = config.pricing.launch;
+  assertConfig(validIsoInstantOrDate(launch.startsAt), 'config.pricing.launch.startsAt must be a valid date or null.');
+  assertConfig(validIsoInstantOrDate(launch.endsAt), 'config.pricing.launch.endsAt must be a valid date or null.');
+  assertConfig(!launch.enabled || launch.endsAt !== null, 'An enabled launch price requires a real end date.');
+  if (launch.startsAt && launch.endsAt) {
+    assertConfig(new Date(launch.endsAt).getTime() > new Date(launch.startsAt).getTime(), 'The launch end date must be after its start date.');
+  }
+
+  const promo = config.pricing.promo;
+  assertIntegerRange(promo.priceCents, 1, 10_000_000, 'config.pricing.promo.priceCents');
+  assertConfig(promo.label.trim().length >= 1 && promo.label.length <= 160, 'config.pricing.promo.label is invalid.');
+  assertConfig(validIsoInstantOrDate(promo.endsAt), 'config.pricing.promo.endsAt must be a valid date or null.');
+  assertConfig(!promo.enabled || promo.endsAt !== null, 'An enabled promotion requires a real end date.');
+
+  assertIntegerRange(config.fees.sameDayPriorityCents, 0, 10_000_000, 'config.fees.sameDayPriorityCents');
+  assertIntegerRange(config.fees.liftFacilityCents, 0, 10_000_000, 'config.fees.liftFacilityCents');
+  assertConfig(typeof config.scan.included === 'boolean', 'config.scan.included must be a boolean.');
+
+  const phone = config.contact.businessPhone;
+  assertConfig(phone === null || /^\+[1-9]\d{7,14}$/u.test(phone), 'config.contact.businessPhone must be a valid E.164 number or null.');
+  for (const key of ['smsEnabled', 'callEnabled', 'urgentCtaEnabled'] as const) {
+    assertConfig(typeof config.contact[key] === 'boolean', `config.contact.${key} must be a boolean.`);
+  }
+  assertConfig(phone !== null || (!config.contact.smsEnabled && !config.contact.callEnabled && !config.contact.urgentCtaEnabled), 'Contact actions require a verified business phone number.');
+
+  assertConfig(typeof config.reviews.enabled === 'boolean', 'config.reviews.enabled must be a boolean.');
+  assertConfig(config.reviews.items.length <= 12, 'config.reviews.items cannot contain more than 12 reviews.');
+  for (const [index, review] of config.reviews.items.entries()) {
+    assertConfig(isPlainObject(review), `config.reviews.items[${index}] must be an object.`);
+    assertConfig(typeof review.name === 'string' && review.name.trim().length >= 1 && review.name.length <= 100, `config.reviews.items[${index}].name is invalid.`);
+    assertConfig(typeof review.text === 'string' && review.text.trim().length >= 1 && review.text.length <= 1000, `config.reviews.items[${index}].text is invalid.`);
+    assertConfig(review.vehicle === undefined || (typeof review.vehicle === 'string' && review.vehicle.length <= 160), `config.reviews.items[${index}].vehicle is invalid.`);
+  }
+
+  assertConfig(Number.isFinite(config.travel.originLat) && config.travel.originLat >= -90 && config.travel.originLat <= 90, 'config.travel.originLat is invalid.');
+  assertConfig(Number.isFinite(config.travel.originLng) && config.travel.originLng >= -180 && config.travel.originLng <= 180, 'config.travel.originLng is invalid.');
+  assertConfig(config.travel.bands.length >= 1 && config.travel.bands.length <= 10, 'config.travel.bands must contain 1 to 10 bands.');
+  let priorMiles = 0;
+  for (const [index, band] of config.travel.bands.entries()) {
+    assertConfig(isPlainObject(band), `config.travel.bands[${index}] must be an object.`);
+    assertConfig(Number.isFinite(band.maxMiles) && band.maxMiles > priorMiles && band.maxMiles <= 1000, `config.travel.bands[${index}].maxMiles must increase and remain at most 1000.`);
+    assertIntegerRange(band.feeCents, 0, 10_000_000, `config.travel.bands[${index}].feeCents`);
+    priorMiles = band.maxMiles;
+  }
+  assertConfig(Number.isFinite(config.travel.customBeyondMiles) && config.travel.customBeyondMiles >= priorMiles && config.travel.customBeyondMiles <= 1000, 'config.travel.customBeyondMiles must be at least the final travel band and at most 1000.');
+
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: config.scheduling.timezone }).format();
+  } catch {
+    throw new ConfigValidationError('config.scheduling.timezone must be a valid IANA time zone.');
+  }
+  assertConfig(config.scheduling.slotTemplates.length >= 1 && config.scheduling.slotTemplates.length <= 24, 'config.scheduling.slotTemplates must contain 1 to 24 times.');
+  assertConfig(new Set(config.scheduling.slotTemplates).size === config.scheduling.slotTemplates.length, 'config.scheduling.slotTemplates cannot contain duplicates.');
+  for (const slot of config.scheduling.slotTemplates) {
+    assertConfig(typeof slot === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/u.test(slot), 'Every scheduling slot must use 24-hour HH:MM format.');
+  }
+  assertIntegerRange(config.scheduling.durationMin, 15, 1440, 'config.scheduling.durationMin');
+  assertIntegerRange(config.scheduling.travelBufferMin, 0, 1440, 'config.scheduling.travelBufferMin');
+  assertIntegerRange(config.scheduling.reportBufferMin, 0, 1440, 'config.scheduling.reportBufferMin');
+  assertConfig(config.scheduling.daysOfOperation.length >= 1 && config.scheduling.daysOfOperation.length <= 7, 'config.scheduling.daysOfOperation must contain 1 to 7 days.');
+  assertConfig(new Set(config.scheduling.daysOfOperation).size === config.scheduling.daysOfOperation.length, 'config.scheduling.daysOfOperation cannot contain duplicates.');
+  for (const day of config.scheduling.daysOfOperation) assertIntegerRange(day, 0, 6, 'config.scheduling.daysOfOperation entry');
+  assertConfig(config.scheduling.blackoutDates.length <= 366, 'config.scheduling.blackoutDates is too large.');
+  for (const date of config.scheduling.blackoutDates) {
+    assertConfig(typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/u.test(date) && !Number.isNaN(new Date(`${date}T00:00:00Z`).getTime()), 'Every blackout date must use valid YYYY-MM-DD format.');
+  }
+  assertIntegerRange(config.scheduling.minLeadHours, 0, 8760, 'config.scheduling.minLeadHours');
+  assertIntegerRange(config.scheduling.maxAdvanceDays, 1, 730, 'config.scheduling.maxAdvanceDays');
+  assertIntegerRange(config.scheduling.holdMinutes, 5, 1440, 'config.scheduling.holdMinutes');
+  assertIntegerRange(config.quotes.expiryHours, 1, 8760, 'config.quotes.expiryHours');
+  assertIntegerRange(config.cancellation.fullRefundHours, 0, 8760, 'config.cancellation.fullRefundHours');
+  assertIntegerRange(config.cancellation.rescheduleHours, 0, 8760, 'config.cancellation.rescheduleHours');
+  assertConfig(config.cancellation.rescheduleHours <= config.cancellation.fullRefundHours, 'Reschedule hours cannot exceed full-refund hours.');
+  assertIntegerRange(config.magicLinks.ttlHours, 1, 8760, 'config.magicLinks.ttlHours');
+  assertIntegerRange(config.uploads.maxFiles, 1, 20, 'config.uploads.maxFiles');
+  assertIntegerRange(config.uploads.maxBytes, 1, 25 * 1024 * 1024, 'config.uploads.maxBytes');
+  assertConfig(config.uploads.allowedTypes.length >= 1 && config.uploads.allowedTypes.length <= 10, 'config.uploads.allowedTypes must contain 1 to 10 MIME types.');
+  assertConfig(new Set(config.uploads.allowedTypes).size === config.uploads.allowedTypes.length, 'config.uploads.allowedTypes cannot contain duplicates.');
+  for (const contentType of config.uploads.allowedTypes) {
+    assertConfig(typeof contentType === 'string' && ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'].includes(contentType), `Unsupported upload type: ${String(contentType)}.`);
+  }
+  assertConfig(validEmail(config.supportEmail), 'config.supportEmail must be a valid email address.');
+}
+
 function deepMerge<T>(base: T, override: unknown): T {
   if (!isPlainObject(base) || !isPlainObject(override)) {
     return (override === undefined ? base : (override as T)) as T;
@@ -200,13 +362,46 @@ export async function getConfig(db: D1Database): Promise<PpiConfig> {
   const row = await db.prepare(`SELECT value_json FROM configuration WHERE key = 'ppi'`).first<{ value_json: string }>();
   if (!row) return DEFAULT_CONFIG;
   try {
-    return deepMerge(DEFAULT_CONFIG, JSON.parse(row.value_json));
+    const merged = deepMerge(DEFAULT_CONFIG, JSON.parse(row.value_json));
+    assertOverrideShape(DEFAULT_CONFIG, merged);
+    validateEffectiveConfig(merged);
+    return {
+      ...merged,
+      scan: { included: SCAN_CAPABILITY_RELEASED && merged.scan.included === true },
+      reviews: REVIEW_CAPABILITY_RELEASED && merged.reviews.enabled === true
+        ? merged.reviews
+        : { enabled: false, items: [] },
+    };
   } catch {
     return DEFAULT_CONFIG;
   }
 }
 
 export async function setConfig(db: D1Database, patch: unknown, actor: string): Promise<PpiConfig> {
+  assertConfig(isPlainObject(patch), 'Configuration updates must be a JSON object.');
+  assertOverrideShape(DEFAULT_CONFIG, patch);
+  if (
+    isPlainObject(patch)
+    && isPlainObject(patch['scan'])
+    && patch['scan']['included'] === true
+    && !SCAN_CAPABILITY_RELEASED
+  ) {
+    throw new ConfigValidationError(
+      'Diagnostic scan cannot be enabled until the separately reviewed capability release is deployed.',
+      'configuration_not_released',
+    );
+  }
+  if (
+    isPlainObject(patch)
+    && isPlainObject(patch['reviews'])
+    && patch['reviews']['enabled'] === true
+    && !REVIEW_CAPABILITY_RELEASED
+  ) {
+    throw new ConfigValidationError(
+      'Customer reviews cannot be enabled until source, publication permission, and presentation are represented in a separately reviewed capability release.',
+      'configuration_not_released',
+    );
+  }
   const current = await db.prepare(`SELECT value_json FROM configuration WHERE key = 'ppi'`).first<{ value_json: string }>();
   let stored: Record<string, unknown> = {};
   if (current) {
@@ -219,6 +414,9 @@ export async function setConfig(db: D1Database, patch: unknown, actor: string): 
   // Persist the raw override patch (merged with prior overrides), so defaults
   // can evolve in code without stale copies pinning them.
   const merged = deepMergeOverrides(stored, patch);
+  const effective = deepMerge(DEFAULT_CONFIG, merged);
+  assertOverrideShape(DEFAULT_CONFIG, effective);
+  validateEffectiveConfig(effective);
   const now = new Date().toISOString();
   await db
     .prepare(
@@ -227,7 +425,13 @@ export async function setConfig(db: D1Database, patch: unknown, actor: string): 
     )
     .bind(JSON.stringify(merged), now, actor)
     .run();
-  return deepMerge(DEFAULT_CONFIG, merged);
+  return {
+    ...effective,
+    scan: { included: SCAN_CAPABILITY_RELEASED && effective.scan.included === true },
+    reviews: REVIEW_CAPABILITY_RELEASED && effective.reviews.enabled === true
+      ? effective.reviews
+      : { enabled: false, items: [] },
+  };
 }
 
 function deepMergeOverrides(base: Record<string, unknown>, patch: unknown): Record<string, unknown> {

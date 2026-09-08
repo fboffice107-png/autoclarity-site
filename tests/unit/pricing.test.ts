@@ -10,9 +10,19 @@ import {
   cancellationOutcome,
   type VehicleFacts,
 } from '../../functions/lib/pricing.ts';
-import { DEFAULT_CONFIG, promoActive, launchActive, tierDisplayPrice, type PpiConfig } from '../../functions/lib/config.ts';
+import { DEFAULT_CONFIG, promoActive, launchActive, patchTouchesPublicFacts, tierDisplayPrice, type PpiConfig } from '../../functions/lib/config.ts';
 
 const NOW = new Date('2026-07-21T12:00:00Z');
+
+describe('production public-fact config gate', () => {
+  it('identifies runtime patches that would drift visible and machine-readable facts', () => {
+    expect(patchTouchesPublicFacts({ pricing: { launch: { enabled: true } } })).toBe(true);
+    expect(patchTouchesPublicFacts({ travel: { customBeyondMiles: 50 } })).toBe(true);
+    expect(patchTouchesPublicFacts({ supportEmail: 'other@example.com' })).toBe(true);
+    expect(patchTouchesPublicFacts({ scheduling: { holdMinutes: 45 } })).toBe(false);
+    expect(patchTouchesPublicFacts(null)).toBe(false);
+  });
+});
 
 function vehicle(overrides: Partial<VehicleFacts>): VehicleFacts {
   return {

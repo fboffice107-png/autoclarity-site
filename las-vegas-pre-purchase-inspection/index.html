@@ -88,14 +88,6 @@
               "@type": "State",
               "name": "Nevada"
             }
-          },
-          {
-            "@type": "AdministrativeArea",
-            "name": "Clark County",
-            "containedInPlace": {
-              "@type": "State",
-              "name": "Nevada"
-            }
           }
         ],
         "offers": [
@@ -168,7 +160,7 @@
         "name": "What areas do you serve?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Las Vegas, North Las Vegas, Henderson, Boulder City, and surrounding Clark County are subject to review. From the central Las Vegas service area, 0–15 miles is included, 16–25 miles adds $25, 26–40 miles adds $50, and locations beyond 40 miles are individually reviewed."
+          "text": "Las Vegas, North Las Vegas, Henderson, and Boulder City requests are each subject to review. From the central Las Vegas service area, 0–15 miles is included, 16–25 miles adds $25, 26–40 miles adds $50, and locations beyond 40 miles are individually reviewed."
         }
       },
       {
@@ -346,7 +338,7 @@
         </header>
         <ol class="ppi-steps">
           <li class="reveal"><strong>Submit the vehicle and location.</strong> Tell us what you’re looking at and where it is — it takes a few minutes.</li>
-          <li class="reveal"><strong>AutoClarity reviews the request.</strong> Vehicle, location and seller access are checked personally. AutoClarity typically responds within 24 hours with scheduling details.</li>
+          <li class="reveal"><strong>AutoClarity reviews the request.</strong> Vehicle, location and seller access are checked personally before scheduling details are sent.</li>
           <li class="reveal"><strong>Receive your exact price and available times.</strong> AutoClarity reviews and approves the quote before it is sent, and the full price is shown before you commit to anything.</li>
           <li class="reveal">
             <div data-payment="off"><strong>Confirm the quote and scheduling details.</strong> Submitting is free. If online payment is unavailable, contact AutoClarity to finish scheduling; the request itself does not confirm an appointment.</div>
@@ -465,9 +457,9 @@
 
         <p class="ppi-note reveal">
           Underbody access depends on the location, seller permission, ground conditions, vehicle
-          clearance and available equipment. A full lift inspection may require a partner facility
-          and an additional charge. Not every vehicle can be lifted, and no inspection can promise
-          to find every defect.
+          clearance and available equipment. If deeper access is appropriate, a suitable facility
+          may need to be arranged in advance and separately confirmed in the quote. Not every vehicle
+          can be lifted, and no inspection can promise to find every defect.
         </p>
       </div>
     </section>
@@ -575,7 +567,7 @@
         <header class="section-head reveal">
           <p class="kicker">Request</p>
           <h2 id="request-title">Request your Las Vegas inspection</h2>
-          <p class="section-sub">A few minutes now can save you thousands later. AutoClarity typically responds within 24 hours with scheduling details.</p>
+          <p class="section-sub">Submitting takes a few minutes. AutoClarity reviews the request before sending scheduling details.</p>
         </header>
 
         <!-- Inert until runtime configuration explicitly reports waitlist mode. -->
@@ -639,9 +631,10 @@
                   <label for="preferredContact">Preferred contact</label>
                   <select id="preferredContact" name="preferredContact">
                     <option value="email">Email</option>
-                    <option value="text">Text message</option>
                     <option value="phone">Phone call</option>
                   </select>
+                  <p class="field-hint">Email is required for receipts and secure links even if you prefer a phone call.</p>
+                  <p class="field-error" data-error-for="preferredContact" role="alert"></p>
                 </div>
               </div>
 
@@ -921,7 +914,7 @@
             <h3 id="successTitle">Your request has been received ✓</h3>
             <p id="successMessage">
               Your request is saved immediately. AutoClarity will review the vehicle, location,
-              and requested timing, and typically responds within 24 hours with scheduling details.
+              and requested timing, then responds with scheduling details.
             </p>
             <div class="success-email notice info" id="successEmailNotice" role="status"></div>
             <p class="success-ref" id="successRefRow">Reference: <strong id="successRef"></strong></p>
@@ -976,7 +969,7 @@
           </details>
           <details class="faq-item reveal">
             <summary>How long does an inspection take?</summary>
-            <p>Typically 60–120 minutes on site depending on the vehicle and access, plus time afterward to prepare your written results. Same-day digital findings are provided when applicable.</p>
+            <p>On-site time varies with the vehicle, confirmed scope, condition, location, and access. Your approved quote and scheduling details set expectations before the appointment, and written results require preparation afterward.</p>
           </details>
           <details class="faq-item reveal">
             <summary>Does the vehicle have to be at a dealership?</summary>
@@ -984,7 +977,7 @@
           </details>
           <details class="faq-item reveal">
             <summary>Do I need the seller’s permission?</summary>
-            <p>Yes. The seller controls access to the vehicle. Confirming that they allow an independent inspection (most dealerships do) before booking avoids wasted trips.</p>
+            <p>Yes. The seller controls access to the vehicle. Confirm that they allow an independent inspection before booking to avoid a wasted trip.</p>
           </details>
           <details class="faq-item reveal">
             <summary>Is a road test guaranteed?</summary>
@@ -992,7 +985,7 @@
           </details>
           <details class="faq-item reveal">
             <summary>Will the vehicle be lifted?</summary>
-            <p>Not always. Underbody access depends on the location, permission, ground conditions, clearance and equipment. A full lift inspection may require a partner facility and an additional charge.</p>
+            <p>Not always. Underbody access depends on the location, permission, ground conditions, clearance and equipment. If deeper access is appropriate, a suitable facility may need to be arranged in advance and separately confirmed in the quote.</p>
           </details>
           <details class="faq-item reveal">
             <summary>Will AutoClarity negotiate with the seller for me?</summary>
@@ -1017,7 +1010,7 @@
           </details>
           <details class="faq-item reveal">
             <summary>What areas do you serve?</summary>
-            <p>Las Vegas, North Las Vegas, Henderson, Boulder City, and surrounding Clark County are subject to review. From the central Las Vegas service area, 0–15 miles is included, 16–25 miles adds $25, 26–40 miles adds $50, and locations beyond 40 miles are individually reviewed.</p>
+            <p>Las Vegas, North Las Vegas, Henderson, and Boulder City requests are each subject to review. From the central Las Vegas service area, 0–15 miles is included, 16–25 miles adds $25, 26–40 miles adds $50, and locations beyond 40 miles are individually reviewed.</p>
           </details>
           <details class="faq-item reveal">
             <summary>What exactly do I receive?</summary>
@@ -1035,23 +1028,12 @@
       </div>
     </section>
 
-    <!-- ============ REVIEWS (hidden until real reviews are configured) ============ -->
-    <section class="section section-alt" id="reviews" aria-labelledby="reviews-title" hidden>
-      <div class="section-inner section-narrow">
-        <header class="section-head reveal">
-          <p class="kicker">Reviews</p>
-          <h2 id="reviews-title">What Las Vegas buyers say</h2>
-        </header>
-        <div class="reviews-grid" id="reviewsGrid"></div>
-      </div>
-    </section>
-
     <!-- ============ FINAL CTA ============ -->
     <section class="section final-cta" aria-labelledby="cta-title">
       <div class="final-cta-bg" aria-hidden="true"></div>
       <div class="section-inner section-narrow reveal">
         <img class="final-icon" src="/assets/img/icon-180.png" alt="" width="88" height="88" />
-        <h2 id="cta-title">Don’t gamble thousands on a vehicle you haven’t had independently inspected.</h2>
+        <h2 id="cta-title">Get independent evidence before you commit to a used vehicle.</h2>
         <a class="btn btn-service btn-xl" href="#request" data-request-cta data-analytics="ppi_cta_click" data-step="request_intent_final">Request an Inspection</a>
         <p class="hero-fineprint">Reviewed personally · Exact price before you pay · No repair upsell</p>
       </div>
@@ -1070,7 +1052,7 @@
           <h3>Support</h3>
           <p>Questions about inspections, billing, or privacy:</p>
           <p><a href="mailto:support@getautoclarity.com">support@getautoclarity.com</a></p>
-          <p class="footer-muted">AutoClarity typically responds within 24 hours with scheduling details.</p>
+          <p class="footer-muted">AutoClarity reviews each request before sending scheduling details.</p>
         </div>
         <div class="footer-col">
           <h3>AutoClarity</h3>

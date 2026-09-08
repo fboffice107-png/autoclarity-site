@@ -192,7 +192,10 @@ export function parseIntake(raw: Record<string, unknown>): { payload: IntakePayl
     liftAvailable: oneOf(raw['liftAvailable'], ['yes', 'no', 'unknown'] as const, 'unknown'),
     levelSurface: oneOf(raw['levelSurface'], ['yes', 'no', 'unknown'] as const, 'unknown'),
     permInspection: b('permInspection'),
-    permScan: b('permScan'),
+    // Diagnostic-scan intake is deliberately unavailable until a separately
+    // reviewed capability release changes both the public form and this
+    // server-side enforcement. A stale or crafted client cannot opt itself in.
+    permScan: false,
     permRoadTest: oneOf(raw['permRoadTest'], ['yes', 'no', 'unknown'] as const, 'unknown'),
     permPhotos: oneOf(raw['permPhotos'], ['yes', 'no', 'unknown'] as const, 'unknown'),
     permUnderbody: oneOf(raw['permUnderbody'], ['yes', 'no', 'unknown'] as const, 'unknown'),
@@ -219,6 +222,9 @@ export function parseIntake(raw: Record<string, unknown>): { payload: IntakePayl
   if (payload.locState && payload.locState.length !== 2) errors['locState'] = 'Use the 2-letter state code.';
   if (!payload.ackAccessDependent) {
     errors['ackAccessDependent'] = 'Please acknowledge that inspection access depends on the seller and location.';
+  }
+  if (b('permScan')) {
+    errors['permScan'] = 'Diagnostic-scan permission is not part of the currently available inspection request.';
   }
 
   return { payload, errors };

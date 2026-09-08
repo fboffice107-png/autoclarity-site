@@ -128,7 +128,8 @@
 
   function attributionLabel(source) {
     var value = String(source || "ppi_unknown");
-    if (value === "ppi_unknown" || value === "ppi_direct") return "Direct / unknown";
+    if (value === "ppi_unknown") return "Unknown / unattributed";
+    if (value === "ppi_direct") return "Direct";
     return value.replace(/^ppi_/, "").replace(/_/g, " ");
   }
 
@@ -157,7 +158,7 @@
 
       var revenueWindows = data.revenueWindows || [];
       html += '<section class="portal-card"><h2>Verified service and revenue scoreboard</h2>' +
-        '<p style="color:var(--text-2);">Workflow columns count events inside each window. Money columns are current outcomes for payments first created in that window. “Recognized net” subtracts recorded refunds and currently withdrawn disputes; it is collected revenue, not profit. App Store clicks are directional browser events and stay separate from paid inspection outcomes.</p>';
+        '<p style="color:var(--text-2);">Workflow columns count events inside each window. Money columns are current outcomes for payments first confirmed in that window. “Recognized net” subtracts recorded refunds and conservatively excludes the remaining balance of every payment still latched as disputed; it is collected revenue, not profit. App Store clicks are directional browser events and stay separate from paid inspection outcomes.</p>';
       if (!revenueWindows.length) {
         html += '<p style="color:var(--text-3);">No scoreboard data is available.</p>';
       } else {
@@ -187,7 +188,7 @@
       html += "</section>";
 
       html += '<section class="portal-card"><h2>Request cohorts by source</h2>' +
-        '<p style="color:var(--text-2);">Each table follows requests first saved in its window through their current outcomes. First touch is client-derived and reduced to an exact allowlist; it is directional, not independently verified. Missing/direct sources appear as “Direct / unknown.”</p>';
+        '<p style="color:var(--text-2);">Each table follows requests first saved in its window through their current outcomes. First touch is client-derived and reduced to an exact allowlist; it is directional, not independently verified. Missing sources appear as “Unknown / unattributed,” while an observed direct visit appears as “Direct.”</p>';
       revenueWindows.forEach(function (window) {
         var rows = window.sources || [];
         html += '<details' + (window.days === 30 ? " open" : "") + '><summary><strong>' + esc(window.days) + '-day source cohorts</strong></summary>';
@@ -412,7 +413,7 @@
       "<dt>Known issues</dt><dd>" + esc(req.known_issues || "—") + "</dd>" +
       "<dt>Location</dt><dd>" + esc([req.loc_street, req.loc_unit, req.loc_city, req.loc_state, req.loc_zip].filter(Boolean).join(", ")) + "</dd>" +
       "<dt>Seller</dt><dd>" + esc([req.seller_type, req.seller_name, req.seller_phone].filter(Boolean).join(" · ") || "—") + "</dd>" +
-      "<dt>Access</dt><dd>Inspection OK: " + yn(req.perm_inspection) + " · Scan OK: " + yn(req.perm_scan) + " · Road test: " + esc(req.perm_road_test) + " · Photos: " + esc(req.perm_photos) + " · Underbody: " + esc(req.perm_underbody) + " · Lift: " + esc(req.lift_available) + " · Level surface: " + esc(req.level_surface) + "</dd>" +
+      "<dt>Access</dt><dd>Inspection OK: " + yn(req.perm_inspection) + " · Road test: " + esc(req.perm_road_test) + " · Photos: " + esc(req.perm_photos) + " · Underbody: " + esc(req.perm_underbody) + " · Lift: " + esc(req.lift_available) + " · Level surface: " + esc(req.level_surface) + "</dd>" +
       "<dt>Timing</dt><dd>" + esc([req.decision_timeline, req.preferred_dates, req.time_window].filter(Boolean).join(" · ")) + (req.same_day_priority ? " · SAME-DAY PRIORITY" : "") + "</dd>" +
       "<dt>Travel est.</dt><dd>" + (req.travel_miles != null ? esc(req.travel_miles) + " mi (" + esc(req.travel_estimate_basis) + ")" : "unknown — custom review") + "</dd>" +
       "<dt>Acquisition source</dt><dd>" + esc(attributionLabel(req.attribution_source)) + "</dd>" +

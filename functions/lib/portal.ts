@@ -9,6 +9,7 @@ import { clientIp, errorJson, nowIso } from './util.ts';
 import { latestAgreements } from './agreements.ts';
 import { STATUS_LABELS, type Status } from './status.ts';
 import { quoteExpired } from './pricing.ts';
+import { loadPublishedReportVersion } from './published-report.ts';
 
 export type PortalAuth = { ok: true; requestId: string; token: string } | { ok: false; response: Response };
 
@@ -110,6 +111,17 @@ export interface PortalView {
   };
   payment: null | { status: string; amountCents: number };
   booking: null | { status: string; startsAt: string | null; endsAt: string | null };
+  /** Exact immutable version selected by this request's published report. */
+  report: null | {
+    reportId: string;
+    versionId: string;
+    version: number;
+    kind: string;
+    publishedAt: string;
+    payloadSha256: string;
+    payload: Record<string, unknown>;
+    amended: boolean;
+  };
   uploads: Array<{ id: string; name: string; kind: string }>;
   messages: Array<{ direction: string; body: string; createdAt: string }>;
   supportEmail: string;
@@ -204,6 +216,10 @@ export async function loadPortalView(env: Env, config: PpiConfig, requestId: str
     .bind(requestId)
     .all<{ direction: string; body_text: string; created_at: string }>();
 
+  // No draft or merely-latest version is eligible for this authenticated
+  // customer response. The report's explicit published pointer is authoritative.
+  const publishedReport = await loadPublishedReportVersion(db, requestId);
+
   const status = String(req['status']) as Status;
   return {
     ref: String(req['ref']),
@@ -237,6 +253,12 @@ export async function loadPortalView(env: Env, config: PpiConfig, requestId: str
     },
     payment: paymentRow ? { status: paymentRow.status, amountCents: paymentRow.amount_cents } : null,
     booking: bookingRow ? { status: bookingRow.status, startsAt: bookingRow.starts_at, endsAt: bookingRow.ends_at } : null,
+    report: publishedReport
+      ? {
+          ...publishedReport,
+          amended: publishedReport.kind === 'amendment' || publishedReport.version > 1,
+        }
+      : null,
     uploads: (uploads.results ?? []).map((u) => ({ id: u.id, name: u.original_name, kind: u.kind })),
     messages: (messages.results ?? []).map((m) => ({ direction: m.direction, body: m.body_text, createdAt: m.created_at })),
     supportEmail: config.supportEmail,

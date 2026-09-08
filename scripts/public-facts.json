@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "verifiedAt": "2026-09-07",
+  "lastReviewedAt": "2026-09-07",
   "organization": {
     "name": "AutoClarity",
     "canonicalUrl": "https://getautoclarity.com/",
@@ -37,8 +37,8 @@
     "nextStep": "Open the verified App Store listing and review the price and eligibility Apple displays before purchasing.",
     "internalSources": [
       "index.html",
-      "privacy.html#app-purchases-and-subscriptions",
-      "terms.html#app-purchases-and-subscriptions"
+      "privacy.html",
+      "terms.html"
     ],
     "publicSources": [
       "https://apps.apple.com/us/app/autoclarity/id6761438602",
@@ -80,8 +80,7 @@
         "Las Vegas",
         "North Las Vegas",
         "Henderson",
-        "Boulder City",
-        "surrounding Clark County"
+        "Boulder City"
       ],
       "qualification": "Every location is subject to review.",
       "distanceBasis": "Distance from the central Las Vegas service area; the exact total is shown before payment.",
@@ -118,10 +117,10 @@
     ],
     "nextStep": "Submit the inspection request form for review. Submitting is free and does not confirm an appointment or charge the customer.",
     "internalSources": [
-      "functions/lib/config.ts#DEFAULT_CONFIG",
+      "functions/lib/config.ts",
       "las-vegas-pre-purchase-inspection/index.html",
       "functions/api/ppi/runtime-config.ts",
-      "terms.html#las-vegas-pre-purchase-inspection-service"
+      "terms.html"
     ],
     "publicSources": [
       "https://getautoclarity.com/las-vegas-pre-purchase-inspection/",

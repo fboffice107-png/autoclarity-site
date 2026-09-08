@@ -3,7 +3,7 @@
 
 import type { Env } from '../../lib/types.ts';
 import { requireAdmin, auditLog } from '../../lib/auth.ts';
-import { getConfig, setConfig } from '../../lib/config.ts';
+import { ConfigValidationError, getConfig, patchTouchesPublicFacts, setConfig } from '../../lib/config.ts';
 import { errorJson, json, originAllowed } from '../../lib/util.ts';
 import { readJsonBody, requestBodyErrorResponse } from '../../lib/request-body.ts';
 
@@ -25,7 +25,22 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
   } catch (error) {
     return requestBodyErrorResponse(error);
   }
-  const updated = await setConfig(context.env.DB, patch, auth.actor);
+  if (context.env.PPI_ENV === 'production' && patchTouchesPublicFacts(patch)) {
+    return errorJson(
+      'coordinated_public_facts_release_required',
+      'Production pricing, fees, travel rules, and public support identity must be changed in source and regenerated public facts in one reviewed deployment.',
+      409,
+    );
+  }
+  let updated;
+  try {
+    updated = await setConfig(context.env.DB, patch, auth.actor);
+  } catch (error) {
+    if (error instanceof ConfigValidationError) {
+      return errorJson(error.code, error.message, 422);
+    }
+    throw error;
+  }
   await auditLog(context.env.DB, auth.actor, 'update_config', 'configuration', 'ppi', patch);
   return json({ ok: true, config: updated });
 };

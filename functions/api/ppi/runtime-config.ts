@@ -15,6 +15,9 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   // Only surface a phone number if it is actually configured — never invent one.
   const phone = config.contact.businessPhone;
   const contactConfigured = typeof phone === 'string' && phone.trim().length >= 10;
+  const smsAvailable = context.env.SMS_ENABLED === 'true'
+    && Boolean(context.env.SMS_QUEUE)
+    && config.contact.smsEnabled === true;
 
   return json(
     {
@@ -24,6 +27,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       paymentsEnabled: flags.paymentsEnabled,
       turnstileSiteKey: context.env.TURNSTILE_SITE_KEY ?? '1x00000000000000000000AA',
       supportEmail: config.supportEmail,
+      smsAvailable,
       scanIncluded: config.scan.included,
       reviews: config.reviews.enabled && config.reviews.items.length > 0
         ? config.reviews.items.slice(0, 12)

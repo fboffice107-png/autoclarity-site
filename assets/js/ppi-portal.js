@@ -395,7 +395,8 @@
       html += '<section class="portal-card"><h2>Your appointment</h2><dl class="kv">' +
         "<dt>When</dt><dd>" + esc(fmtWhen(confirmedSlot.startsAt)) + "</dd>" +
         "<dt>Where</dt><dd>" + esc([v.location.street, v.location.city].filter(Boolean).join(", ")) + "</dd></dl>" +
-        '<p style="margin-top:14px;"><a class="btn btn-ghost" href="/api/portal/calendar?t=' + encodeURIComponent(token) + '">Add to calendar (.ics)</a></p></section>';
+        '<p style="margin-top:14px;"><button class="btn btn-ghost" id="calendarBtn" type="button">Add to calendar (.ics)</button></p>' +
+        '<p class="form-status" id="calendarStatus" role="status" aria-live="polite"></p></section>';
     }
 
     // ---------- uploads ----------
@@ -498,6 +499,40 @@
         action({ action: "message", message: text }, function (r) {
           if (r.ok) { status.textContent = ""; load(); }
           else status.textContent = (r.body.error && r.body.error.message) || "Couldn’t send — try again.";
+        });
+      });
+    }
+
+    var calendarBtn = document.getElementById("calendarBtn");
+    if (calendarBtn) {
+      calendarBtn.addEventListener("click", function () {
+        var status = document.getElementById("calendarStatus");
+        calendarBtn.disabled = true;
+        status.textContent = "Preparing calendar file…";
+        fetch("/api/portal/calendar", {
+          headers: { authorization: "Bearer " + token },
+          cache: "no-store"
+        }).then(function (response) {
+          if (!response.ok) {
+            return response.json().catch(function () { return {}; }).then(function (body) {
+              throw new Error((body.error && body.error.message) || "Calendar file is unavailable.");
+            });
+          }
+          return response.blob();
+        }).then(function (blob) {
+          var href = URL.createObjectURL(blob);
+          var download = document.createElement("a");
+          download.href = href;
+          download.download = "autoclarity-ppi-appointment.ics";
+          document.body.appendChild(download);
+          download.click();
+          download.remove();
+          setTimeout(function () { URL.revokeObjectURL(href); }, 0);
+          status.textContent = "Calendar file downloaded.";
+        }).catch(function (error) {
+          status.textContent = error.message || "Calendar file is unavailable.";
+        }).finally(function () {
+          calendarBtn.disabled = false;
         });
       });
     }

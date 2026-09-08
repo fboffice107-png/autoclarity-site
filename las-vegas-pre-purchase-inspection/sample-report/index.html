@@ -9,10 +9,11 @@
   <meta name="robots" content="index, follow" />
   <meta name="theme-color" content="#060b18" />
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/img/favicon-32.png" />
-  <link rel="stylesheet" href="/assets/css/site.css?v=ac-ai-20260907-r2" />
-  <link rel="stylesheet" href="/assets/css/ppi.css?v=ac-ai-20260907-r2" />
+  <link rel="stylesheet" href="/assets/css/site.css?v=ac-ai-20260908-r1" />
+  <link rel="stylesheet" href="/assets/css/ppi.css?v=ac-ai-20260908-r1" />
   <style>
     .report-wrap { max-width: 860px; margin: 0 auto; padding: calc(84px + env(safe-area-inset-top)) 18px 60px; }
+    .report-title { margin: 0 0 14px; font-size: clamp(28px, 5vw, 44px); line-height: 1.08; letter-spacing: -0.035em; }
     .report-banner { background: rgba(255,180,84,0.12); border: 1px solid rgba(255,180,84,0.4); color: var(--amber); font-weight: 750; text-align: center; padding: 12px 16px; border-radius: var(--r-md); margin-bottom: 22px; letter-spacing: 0.02em; }
     .report-doc { background: var(--bg-elev-1); border: 1px solid var(--line); border-radius: var(--r-lg); padding: clamp(20px, 4vw, 40px); box-shadow: var(--shadow-card); }
     .report-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 18px; margin-bottom: 22px; }
@@ -55,11 +56,12 @@
   </header>
 
   <main class="report-wrap">
+    <h1 class="report-title">Sample pre-purchase inspection report</h1>
     <div class="report-banner">SAMPLE REPORT — DEMONSTRATION ONLY · Not a real customer vehicle</div>
 
     <div class="report-actions no-print">
       <a class="btn btn-primary" href="autoclarity-sample-ppi-report.pdf" data-analytics="ppi_sample_report_view" data-step="pdf">Download Sample PDF</a>
-      <button class="btn btn-ghost" type="button" onclick="window.print()">Print this page</button>
+      <button class="btn btn-ghost" type="button" data-print-page>Print this page</button>
       <a class="btn btn-ghost" href="/las-vegas-pre-purchase-inspection/#request">Request your inspection</a>
     </div>
 
@@ -185,6 +187,6 @@
     </div>
   </main>
 
-  <script src="/assets/js/main.js?v=ac-ai-20260907-r2" defer></script>
+  <script src="/assets/js/main.js?v=ac-ai-20260908-r1" defer></script>
 </body>
 </html>

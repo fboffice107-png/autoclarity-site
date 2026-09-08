@@ -134,6 +134,9 @@ or insurance readiness — those are real-world facts only the owner can confirm
 - [ ] Completion is rejected unless an immutable, same-request published report
       exists; the authenticated portal exposes only that report, and the
       deduplicated report-ready notice is recorded exactly once
+- [ ] Operator report authoring, review, publication, and private photo delivery
+      exist and pass a real preview rehearsal; only then does a separately
+      reviewed code release set `PPI_FULFILLMENT_RELEASED=true`
 - [ ] Production smoke flow proves: reviewed quote and times → customer-selected
       appointment → all current quote-bound agreements accepted → Stripe receives
       the exact server-approved total → webhook confirms payment and appointment
@@ -155,8 +158,11 @@ or insurance readiness — those are real-world facts only the owner can confirm
 ## Payment activation and rollback
 
 1. Keep `PAYMENTS_ENABLED=false` while migrations, secrets, webhook events,
-   agreements, and the production configuration are verified.
-2. Activate only the complete production tuple listed above. Any partial or
-   mixed test/live tuple must continue to expose payments as unavailable.
-3. If verification fails, set `PAYMENTS_ENABLED=false`; continue reconciling
+   agreements, fulfillment, and the production configuration are verified.
+2. Keep `PPI_FULFILLMENT_RELEASED=false` until authenticated report authoring,
+   review/publication, private photo delivery, and a real preview rehearsal pass.
+3. Activate only the complete production tuple in the same separately reviewed
+   release that changes that hard gate. Any partial or mixed test/live tuple
+   must continue to expose payments as unavailable.
+4. If verification fails, set `PAYMENTS_ENABLED=false`; continue reconciling
    authentic late Stripe events and do not alter completed payment evidence.

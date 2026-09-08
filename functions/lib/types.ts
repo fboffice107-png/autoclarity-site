@@ -45,6 +45,14 @@ export interface ModeFlags {
   uploadsEnabled: boolean;
 }
 
+// Hard production release gate. The repository can validate and display an
+// immutable published report, but it does not yet ship the operator authoring,
+// review, publish, and photo-delivery workflow required to fulfill a paid PPI.
+// Preview keeps test Checkout available; production Checkout stays unavailable
+// until that workflow is implemented and this constant changes in a separately
+// reviewed release.
+export const PPI_FULFILLMENT_RELEASED = false;
+
 function canonicalProductionBase(value: string | undefined): boolean {
   if (!value) return false;
   try {
@@ -82,7 +90,11 @@ export function modeFlags(env: Env): ModeFlags {
   // but a live key is never effective outside the explicit production tuple.
   const paymentsEnabled = requestedPayments && keyMatchesEnvironment && (
     ppiEnv === 'production'
-      ? mode === 'live' && stripeEnv === 'live' && productionWebhookReady && productionBaseReady
+      ? PPI_FULFILLMENT_RELEASED
+        && mode === 'live'
+        && stripeEnv === 'live'
+        && productionWebhookReady
+        && productionBaseReady
       : stripeEnv === 'test'
   );
   return {

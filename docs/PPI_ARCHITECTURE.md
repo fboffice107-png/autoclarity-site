@@ -59,8 +59,10 @@ admin. No frontend framework was introduced.
 - `agreements.ts` — versioned customer agreement source documents seeded idempotently and verified byte-for-byte;
   acceptances record doc hash, typed name, IP, UA, timestamps.
 - `published-report.ts` — resolves only the exact immutable report version
-  selected by the same request, verifies its SHA-256 payload digest, and guards
-  completion on that published snapshot.
+  selected by the same request, verifies its SHA-256 payload digest and strict
+  schema, projects only customer-approved fields, and guards completion on that
+  published snapshot. Internal/unknown fields and private object keys are never
+  returned by the portal API.
 
 ## The money path (the part that must never lie)
 
@@ -94,9 +96,11 @@ render only the exact same-request published snapshot. Completion now fails
 closed unless that snapshot exists. The repository does **not** yet contain an
 operator report-authoring/review/publish workflow, photo delivery path, or a
 recorded rehearsal using a real inspection. Those are production gates, not
-optional scale work. Until they exist and pass preview fulfillment testing,
-paid booking must remain unavailable and the funnel must not be described as
-production-complete.
+optional scale work. `PPI_FULFILLMENT_RELEASED` therefore keeps production
+Checkout closed even if all environment variables request live payment.
+Preview retains mock/test Checkout coverage. Until the missing workflow exists,
+passes preview fulfillment testing, and that hard gate changes in a separately
+reviewed release, the funnel must not be described as production-complete.
 
 ## Future permissioned agent commerce
 

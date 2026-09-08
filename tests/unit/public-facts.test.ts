@@ -92,6 +92,12 @@ describe('reviewed public fact projection', () => {
 
     const homeGraph = jsonLd(home)[0]!['@graph'] as Json[];
     expect(homeGraph.map((node) => node['@type'])).toEqual(['Organization', 'MobileApplication']);
+    const organization = homeGraph.find((node) => node['@type'] === 'Organization')!;
+    expect(organization.sameAs).toEqual([
+      'https://apps.apple.com/us/app/autoclarity/id6761438602',
+      'https://www.instagram.com/getautoclarity/',
+    ]);
+    expect(organization.sameAs).not.toContain('https://www.instagram.com/faheb_777/');
     const app = homeGraph.find((node) => node['@type'] === 'MobileApplication')!;
     expect(app.offers.map((item: Json) => Number(item.price))).toEqual([0, 9.99, 29.99]);
     expect(app.offers.every((item: Json) => !('priceValidUntil' in item))).toBe(true);
@@ -149,16 +155,17 @@ describe('crawler and sitemap policy', () => {
     expect(indexNowScript).toContain('IndexNow preflight failed');
     expect(indexNowScript).toContain('https://api.indexnow.org/indexnow');
     expect(indexNowScript).toContain('/autoclarity-services.json');
+    expect(indexNowScript).toContain('/las-vegas-pre-purchase-inspection/sample-report/');
     expect(indexNowScript).toContain('catalog?.canonicalUrl !== url');
     expect(indexNowScript).toContain("offering?.id === 'las-vegas-pre-purchase-inspection'");
     expect(indexNowScript).toContain("ppiOffering?.officialPage !== 'https://getautoclarity.com/las-vegas-pre-purchase-inspection/'");
     expect(indexNowScript).not.toContain("catalog?.canonicalUrl !== 'https://getautoclarity.com/las-vegas-pre-purchase-inspection/'");
     expect(indexNowScript).toContain('const expectedCanonical = `<link rel="canonical" href="${url}"`;');
     expect(indexNowScript).toContain('!body.includes(expectedCanonical)');
-    expect(indexNowScript).toContain("const expectedBuild = 'ac-ai-20260907-r2'");
+    expect(indexNowScript).toContain("const expectedBuild = 'ac-ai-20260908-r1'");
     expect(indexNowScript).toContain("response.headers.get('x-autoclarity-build') !== expectedBuild");
     expect(indexNowScript).toContain("response.headers.get('x-robots-tag') ?? ''");
-    expect(headers).toContain('X-AutoClarity-Build: ac-ai-20260907-r2');
+    expect(headers).toContain('X-AutoClarity-Build: ac-ai-20260908-r1');
     expect(indexNowScript).not.toContain('/ppi/portal');
   });
 

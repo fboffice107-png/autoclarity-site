@@ -1,4 +1,4 @@
-// GET /api/portal/calendar?t=... — .ics file for a confirmed appointment.
+// Authenticated GET /api/portal/calendar — .ics file for a confirmed appointment.
 
 import type { Env } from '../../lib/types.ts';
 import { requirePortal } from '../../lib/portal.ts';
@@ -16,7 +16,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
        JOIN ppi_requests r ON r.id = b.request_id
        JOIN appointment_slots s ON s.id = b.slot_id
        WHERE b.request_id = ? AND b.status = 'confirmed' AND s.status = 'confirmed'
-         AND r.status IN ('confirmed','inspection_in_progress','report_in_progress')`,
+         AND r.status IN ('confirmed','inspection_in_progress','report_in_progress','completed')`,
     )
     .bind(auth.requestId)
     .first<{ ref: string; loc_street: string | null; loc_city: string | null; loc_state: string | null; loc_zip: string | null; starts_at: string; ends_at: string }>();

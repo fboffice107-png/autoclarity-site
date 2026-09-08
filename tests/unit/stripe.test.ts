@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { claimStripeEvent, classifyStripeRefundStatus, createCheckoutSession, createRefund, decideCheckoutAttempt, expireCheckoutSession, verifyStripeSignature, stripeKey, StripeApiError, StripeConfigError } from '../../functions/lib/stripe.ts';
-import { modeFlags, type Env } from '../../functions/lib/types.ts';
+import { modeFlags, PPI_FULFILLMENT_RELEASED, type Env } from '../../functions/lib/types.ts';
 import { onRequestPost as stripeWebhook, reconcileRefundLifecycle, stripeWebhookBase } from '../../functions/api/stripe/webhook.ts';
 
 const SECRET = 'whsec_test_secret_for_unit_tests';
@@ -78,7 +78,7 @@ describe('stripeKey safety rails', () => {
     expect(stripeKey({ ...baseEnv, STRIPE_SECRET_KEY: 'sk_test_ok' } as Env)).toBe('sk_test_ok');
   });
 
-  it('enables production payments only for the complete live tuple', () => {
+  it('keeps production payments closed until fulfillment is released even with a complete live tuple', () => {
     const complete = {
       PPI_ENV: 'production',
       PPI_MODE: 'live',
@@ -88,8 +88,9 @@ describe('stripeKey safety rails', () => {
       STRIPE_WEBHOOK_SECRET: 'whsec_owner_approved',
       PUBLIC_BASE_URL: 'https://getautoclarity.com',
     } as Env;
-    expect(modeFlags(complete).paymentsEnabled).toBe(true);
-    expect(stripeKey(complete)).toBe('sk_live_owner_approved');
+    expect(PPI_FULFILLMENT_RELEASED).toBe(false);
+    expect(modeFlags(complete).paymentsEnabled).toBe(false);
+    expect(() => stripeKey(complete)).toThrow(StripeConfigError);
 
     expect(modeFlags({ ...complete, PPI_MODE: 'request' }).paymentsEnabled).toBe(false);
     expect(modeFlags({ ...complete, PAYMENTS_ENABLED: 'false' }).paymentsEnabled).toBe(false);

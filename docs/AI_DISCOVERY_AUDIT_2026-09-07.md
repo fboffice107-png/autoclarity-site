@@ -223,14 +223,19 @@ future design and technician-network migration path are recorded in
 
 - **Implemented:** source and generated facts, visible copy, JSON-LD, public
   catalog, `llms.txt`, IndexNow preflight, server attribution, authoritative
-  milestones, revenue/source reporting, strict runtime-configuration gates, and
-  a completion guard that requires one exact, integrity-checked published report.
-- **Tested locally:** fact drift check and typecheck passed; 245 unit tests and
+  milestones, revenue/source reporting, strict runtime-configuration gates, a
+  hard production fulfillment-release gate, and a completion guard that
+  requires one exact, integrity-checked, schema-valid published report while
+  exposing only a customer-safe projection.
+- **Tested locally:** fact drift check and typecheck passed; 248 unit tests and
   68 full HTTP workflow tests passed with fresh local D1/R2 and mocked Stripe;
   all internal links and header checks passed; rendered checks at 375px, 768px,
-  and 1440px found no horizontal overflow, fallback form, duplicate IDs,
-  unnamed controls, or console warnings/errors. The public JSON, text summary,
-  and IndexNow key returned 200 with expected content types.
+  and 1440px found no horizontal overflow, fallback form, duplicate IDs, or
+  console warnings/errors. A final phone-width smoke also confirmed the intake
+  form and CSP-safe sample-report Print action; the optional upload input's
+  missing `name` remains assigned to the downstream form-control integration.
+  The public JSON, text summary, and IndexNow key returned 200 with expected
+  content types.
 - **Deployed:** no.
 - **Submitted to search/indexing services:** no.
 - **Indexed:** existing site pages observed; new outputs cannot be indexed before deployment.
@@ -240,6 +245,8 @@ future design and technician-network migration path are recorded in
 Release is blocked. Before migration `0009` or deployment, remove the production
 development-key secret, resolve production fixture contamination without
 touching genuine customer evidence, implement and rehearse report authoring and
-publication, and record the owner/legal/insurance/App Store privacy approvals.
+private photo delivery, and record the owner/legal/insurance/App Store privacy
+approvals. The candidate hard fulfillment gate keeps production Checkout closed
+until that missing flow is implemented and separately released.
 Only a later clean deployment may be followed by live smoke tests, one
 preflighted IndexNow submission, and authenticated Search Console/Bing work.

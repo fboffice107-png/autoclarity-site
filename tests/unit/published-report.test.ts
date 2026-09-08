@@ -108,6 +108,40 @@ interface ReportFixtureOptions {
   kind?: 'original' | 'amendment';
 }
 
+function validReportPayload(summary = 'Selected customer-safe snapshot'): Record<string, unknown> {
+  return {
+    schema: 'autoclarity.ppi.report',
+    schemaVersion: 1,
+    inspector: 'Test Inspector',
+    overall: {
+      score: 8.4,
+      verdict: 'proceed',
+      verdictLabel: 'Publisher-provided label is not authoritative',
+      executiveSummary: summary,
+      positiveFindings: 'No immediate safety concern observed.',
+    },
+    sections: [{
+      title: 'Road test and controls',
+      performed: 'performed',
+      summary: 'Road test completed where permitted.',
+      internalInspectorNotes: 'never expose section-only notes',
+      items: [{
+        label: 'Brake operation',
+        result: 'pass',
+        note: 'Pedal feel was consistent during the test.',
+        priority: 'informational',
+        photos: [{ caption: 'Brake-fluid reservoir', objectKey: 'private/reports/secret.jpg' }],
+        inspectorNotes: 'never expose item-only notes',
+      }],
+    }],
+    limitations: {
+      standard: ['Visual and operational inspection only; components were not disassembled.'],
+    },
+    internalInspectorNotes: 'never expose top-level notes',
+    pdfObjectKey: 'private/reports/report.pdf',
+  };
+}
+
 async function insertReportFixture(
   db: D1Database,
   options: ReportFixtureOptions = {},
@@ -116,13 +150,7 @@ async function insertReportFixture(
   const suffix = requestId.endsWith('_b') ? 'b' : 'a';
   const reportId = options.reportId ?? `rpt_report_${suffix}`;
   const versionId = options.versionId ?? `rv_report_${suffix}_1`;
-  const payload = options.payload ?? {
-    schema: 'autoclarity.ppi.report',
-    schemaVersion: 1,
-    inspector: 'Test Inspector',
-    overall: { score: 8.4, verdict: 'proceed', verdictLabel: 'Proceed', executiveSummary: `Snapshot ${versionId}` },
-    sections: [],
-  };
+  const payload = options.payload ?? validReportPayload(`Snapshot ${versionId}`);
   const payloadJson = JSON.stringify(payload);
   const digest = options.digest ?? await sha256Hex(payloadJson);
   const state = options.state ?? 'published';
@@ -172,8 +200,20 @@ describe('published report authority', () => {
         reportId: selected.reportId,
         versionId: selected.versionId,
         version: 1,
-        payload: selected.payload,
+        payload: {
+          schema: 'autoclarity.ppi.report',
+          schemaVersion: 1,
+          inspector: 'Test Inspector',
+          overall: {
+            score: 8.4,
+            verdict: 'proceed',
+            verdictLabel: 'Proceed',
+            executiveSummary: `Snapshot ${selected.versionId}`,
+          },
+        },
       });
+      expect(loaded?.payload.sections[0]?.items[0]?.photos).toEqual([{ caption: 'Brake-fluid reservoir' }]);
+      expect(JSON.stringify(loaded?.payload)).not.toMatch(/internalInspectorNotes|inspectorNotes|objectKey|pdfObjectKey|secret\.jpg/iu);
 
       const portal = await loadPortalView(
         { DB: db, PPI_ENV: 'preview', PPI_MODE: 'request' } as Env,
@@ -185,8 +225,8 @@ describe('published report authority', () => {
         versionId: selected.versionId,
         version: 1,
         amended: false,
-        payload: selected.payload,
       });
+      expect(JSON.stringify(portal?.report?.payload)).not.toMatch(/internalInspectorNotes|inspectorNotes|objectKey|pdfObjectKey|secret\.jpg/iu);
       expect(JSON.stringify(portal?.report)).not.toContain('Loose newer decoy');
 
       const otherPortal = await loadPortalView(
@@ -242,6 +282,40 @@ describe('published report authority', () => {
     }
   });
 
+  it('fails closed for unsupported, incomplete, mistyped, over-count, and oversized report payloads', async () => {
+    const valid = validReportPayload();
+    const invalidPayloads: Array<[string, Record<string, unknown>]> = [
+      ['unsupported schema version', { ...valid, schemaVersion: 2 }],
+      ['missing required sections', { ...valid, sections: [] }],
+      ['mistyped score', {
+        ...valid,
+        overall: { ...(valid.overall as Record<string, unknown>), score: '8.4' },
+      }],
+      ['too many sections', {
+        ...valid,
+        sections: Array.from({ length: 51 }, (_, index) => ({
+          title: `Section ${index}`,
+          performed: 'performed',
+          items: [],
+        })),
+      }],
+      ['missing limitations', { ...valid, limitations: { standard: [] } }],
+      ['oversized raw snapshot', { ...valid, internalBlob: 'x'.repeat(1_048_577) }],
+    ];
+
+    for (const [name, payload] of invalidPayloads) {
+      const { sqlite, db } = seedDatabase();
+      try {
+        await insertReportFixture(db, { payload });
+        expect(await loadPublishedReportVersion(db, 'req_report_a'), name).toBeNull();
+        expect(await completeWithPublishedReport(db, 'req_report_a', 'admin:test'), name)
+          .toEqual({ ok: false, code: 'report_required' });
+      } finally {
+        sqlite.close();
+      }
+    }
+  });
+
   it('completes once and records the exact version as transition authority', async () => {
     const { sqlite, db } = seedDatabase();
     try {
@@ -282,5 +356,8 @@ describe('published report portal rendering', () => {
     expect(portalScript).toContain('AutoClarity will review the vehicle, location, access, and requested timing, then follow up by email with next steps.');
     expect(portalScript).not.toContain('typically responds within 24 hours');
     expect(portalScript).not.toContain('Your inspection is complete. Your results are in the messages below.');
+    expect(portalScript).not.toContain('/api/portal/calendar?t=');
+    expect(portalScript).toContain('fetch("/api/portal/calendar"');
+    expect(portalScript).toContain('authorization: "Bearer " + token');
   });
 });

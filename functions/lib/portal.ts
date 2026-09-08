@@ -9,7 +9,7 @@ import { clientIp, errorJson, nowIso } from './util.ts';
 import { latestAgreements } from './agreements.ts';
 import { STATUS_LABELS, type Status } from './status.ts';
 import { quoteExpired } from './pricing.ts';
-import { loadPublishedReportVersion } from './published-report.ts';
+import { loadPublishedReportVersion, type CustomerReportPayload } from './published-report.ts';
 
 export type PortalAuth = { ok: true; requestId: string; token: string } | { ok: false; response: Response };
 
@@ -119,7 +119,7 @@ export interface PortalView {
     kind: string;
     publishedAt: string;
     payloadSha256: string;
-    payload: Record<string, unknown>;
+    payload: CustomerReportPayload;
     amended: boolean;
   };
   uploads: Array<{ id: string; name: string; kind: string }>;

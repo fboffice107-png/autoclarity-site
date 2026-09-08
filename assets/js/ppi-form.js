@@ -255,13 +255,13 @@
       } else if (rawSource || rawMedium) {
         var source = sourceMap[rawSource] || (rawSource ? "campaign" : "");
         var medium = mediumMap[rawMedium] || "";
-        if (!medium && /^(google|bing|yahoo|duckduckgo)$/.test(source)) medium = "organic";
-        if (!medium && /^(facebook|instagram|tiktok|youtube|reddit)$/.test(source)) medium = "social";
-        if (!medium && /^(nextdoor|yelp|apple)$/.test(source)) medium = "referral";
-        if (!medium && source === "email") medium = "email";
-        if (!source && medium) source = "campaign";
-        result = "ppi_" + source + (medium ? "_" + medium : "");
-        if (!isAllowedAttribution(result)) result = medium ? "ppi_campaign_" + medium : "ppi_direct";
+        if (!medium) {
+          result = "ppi_unknown";
+        } else {
+          if (!source) source = "campaign";
+          result = "ppi_" + source + "_" + medium;
+          if (!isAllowedAttribution(result)) result = "ppi_campaign_" + medium;
+        }
       }
       if (!result && document.referrer) {
         var ref = new URL(document.referrer);
@@ -271,7 +271,7 @@
       }
     } catch (e) {}
     if (!result) result = "ppi_direct";
-    if (!isAllowedAttribution(result)) result = "ppi_direct";
+    if (!isAllowedAttribution(result)) result = "ppi_unknown";
     try { sessionStorage.setItem(ATTRIBUTION_KEY, result); } catch (e) {}
     return result;
   }

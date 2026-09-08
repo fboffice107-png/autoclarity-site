@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import page from '../../las-vegas-pre-purchase-inspection/index.html?raw';
+import sampleReport from '../../las-vegas-pre-purchase-inspection/sample-report/index.html?raw';
 import script from '../../assets/js/ppi-form.js?raw';
 import portalScript from '../../assets/js/ppi-portal.js?raw';
 import portalAction from '../../functions/api/portal/action.ts?raw';
@@ -37,47 +38,65 @@ function templateContents(id: string): string {
   return page.match(new RegExp(`<template id="${id}">([\\s\\S]*?)<\\/template>`, 'u'))?.[1] ?? '';
 }
 
+function bootstrapAttribution(search: string): { source: string | undefined; configRequests: number } {
+  const form = {};
+  const stored = new Map<string, string>();
+  let configRequests = 0;
+  const pendingConfig = new Promise<never>(() => {});
+  const location = { search, origin: 'https://getautoclarity.com' };
+
+  nodeVm.runInNewContext(script, {
+    window: {
+      location,
+      matchMedia: () => ({ matches: false }),
+      setTimeout: () => 0,
+      clearTimeout: () => {},
+    },
+    document: {
+      referrer: '',
+      getElementById: (id: string) => (id === 'intakeForm' ? form : null),
+      querySelectorAll: () => [],
+    },
+    sessionStorage: {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => stored.set(key, value),
+      removeItem: (key: string) => stored.delete(key),
+    },
+    fetch: () => {
+      configRequests += 1;
+      return pendingConfig;
+    },
+    AbortController: undefined,
+    URL,
+    URLSearchParams,
+  }, { filename: 'assets/js/ppi-form.js' });
+
+  return { source: stored.get('ppi-attribution-v1'), configRequests };
+}
+
 describe('PPI frontend conversion safeguards', () => {
   it('executes the shipped form bootstrap with first-touch attribution initialized', () => {
-    const form = {};
-    const stored = new Map<string, string>();
-    let configRequests = 0;
-    const pendingConfig = new Promise<never>(() => {});
-    const location = { search: '', origin: 'https://getautoclarity.com' };
+    expect(bootstrapAttribution('')).toEqual({ source: 'ppi_direct', configRequests: 1 });
+  });
 
-    nodeVm.runInNewContext(script, {
-      window: {
-        location,
-        matchMedia: () => ({ matches: false }),
-        setTimeout: () => 0,
-        clearTimeout: () => {},
-      },
-      document: {
-        referrer: '',
-        getElementById: (id: string) => (id === 'intakeForm' ? form : null),
-        querySelectorAll: () => [],
-      },
-      sessionStorage: {
-        getItem: (key: string) => stored.get(key) ?? null,
-        setItem: (key: string, value: string) => stored.set(key, value),
-        removeItem: (key: string) => stored.delete(key),
-      },
-      fetch: () => {
-        configRequests += 1;
-        return pendingConfig;
-      },
-      AbortController: undefined,
-      URL,
-      URLSearchParams,
-    }, { filename: 'assets/js/ppi-form.js' });
-
-    expect(configRequests).toBe(1);
-    expect(stored.get('ppi-attribution-v1')).toBe('ppi_direct');
+  it('keeps ambiguous campaign parameters unknown instead of inventing Direct or Organic', () => {
+    expect(bootstrapAttribution('?utm_source=unrecognized').source).toBe('ppi_unknown');
+    expect(bootstrapAttribution('?utm_source=google').source).toBe('ppi_unknown');
+    expect(bootstrapAttribution('?utm_source=google&utm_medium=organic').source).toBe('ppi_google_organic');
   });
 
   it('does not ship disabled diagnostic-scan or emissions claims in indexable HTML', () => {
     expect(page).not.toMatch(/data-scan|diagnostic scan|emissions readiness/iu);
     expect(page).toContain('Road test &amp; warning-light review');
+  });
+
+  it('binds sample-report printing from first-party JavaScript under the strict CSP', () => {
+    expect(sampleReport).toContain('<h1 class="report-title">Sample pre-purchase inspection report</h1>');
+    expect(sampleReport).toContain('data-print-page');
+    expect(sampleReport).not.toMatch(/\sonclick=/iu);
+    expect(mainScript).toContain('document.querySelectorAll("[data-print-page]")');
+    expect(mainScript).toContain('window.print()');
+    expect(headers).toContain("script-src 'self'");
   });
 
   it('uses one canonical trailing-slash URL and valid local-service schema', () => {
@@ -268,6 +287,8 @@ describe('PPI frontend conversion safeguards', () => {
       expect(source).toContain('"ppi_google_business_profile"');
       expect(source).toContain('"ppi_chatgpt_search"');
       expect(source).toContain('"ppi_referral_referral"');
+      expect(source).not.toMatch(/if \(!medium &&/u);
+      expect(source).not.toContain('medium ? "ppi_campaign_" + medium : "ppi_direct"');
     }
     expect(mainScript).toContain('sessionStorage.setItem(attributionKey, result)');
     expect(mainScript).toContain('source: ppiAttribution');

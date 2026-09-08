@@ -30,7 +30,7 @@ const organization = {
   name: facts.organization.name,
   url: facts.organization.canonicalUrl,
   email: facts.organization.supportEmail,
-  sameAs: [facts.app.purchaseUrl],
+  sameAs: facts.organization.sameAs,
 };
 
 const appJsonLd = {

@@ -13,7 +13,9 @@ release policy requires that development bypass to be absent—not merely unused
 from production. The database also contains 10 explicitly fixture-labeled
 requests and one integration-pattern request. Owner/legal/insurance, App Store
 privacy-label, Google Business Profile, and fulfillment evidence gates also
-remain open. IndexNow was not submitted because the candidate was not deployed.
+remain open. The candidate's hard fulfillment gate keeps production Checkout
+closed even under the observed live environment tuple. IndexNow was not
+submitted because the candidate was not deployed.
 
 ## Current live application
 

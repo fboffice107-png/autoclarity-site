@@ -5,7 +5,11 @@
     "name": "AutoClarity",
     "canonicalUrl": "https://getautoclarity.com/",
     "supportEmail": "support@getautoclarity.com",
-    "entityId": "https://getautoclarity.com/#organization"
+    "entityId": "https://getautoclarity.com/#organization",
+    "sameAs": [
+      "https://apps.apple.com/us/app/autoclarity/id6761438602",
+      "https://www.instagram.com/getautoclarity/"
+    ]
   },
   "app": {
     "id": "autoclarity-app",

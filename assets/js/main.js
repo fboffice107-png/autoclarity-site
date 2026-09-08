@@ -328,15 +328,15 @@
       if (dedicatedSourceMap[rawSource]) return dedicatedSourceMap[rawSource];
       var source = sourceMap[rawSource] || (rawSource ? "campaign" : "");
       var medium = mediumMap[rawMedium] || "";
-      if (!medium && /^(google|bing|yahoo|duckduckgo)$/.test(source)) medium = "organic";
-      if (!medium && /^(facebook|instagram|tiktok|youtube|reddit)$/.test(source)) medium = "social";
-      if (!medium && /^(nextdoor|yelp|apple)$/.test(source)) medium = "referral";
-      if (!medium && source === "email") medium = "email";
+      // A campaign source without an explicit recognized medium is ambiguous:
+      // "google" may be paid or organic, for example. Preserve it as unknown
+      // rather than silently converting campaign traffic into Direct/Organic.
+      if (!medium) return "ppi_unknown";
       if (!source && medium) source = "campaign";
       var candidate = "ppi_" + source + (medium ? "_" + medium : "");
       if (allowedAttribution(candidate)) return candidate;
-      candidate = medium ? "ppi_campaign_" + medium : "ppi_direct";
-      return allowedAttribution(candidate) ? candidate : "ppi_direct";
+      candidate = "ppi_campaign_" + medium;
+      return allowedAttribution(candidate) ? candidate : "ppi_unknown";
     }
 
     function homepageAttribution() {
@@ -360,7 +360,7 @@
         }
       } catch (e) {}
       if (!result) result = "ppi_direct";
-      if (!allowedAttribution(result)) result = "ppi_direct";
+      if (!allowedAttribution(result)) result = "ppi_unknown";
       try { sessionStorage.setItem(attributionKey, result); } catch (e) {}
       return result;
     }
@@ -482,6 +482,11 @@
         tabs[next].focus();
       }
     });
+  });
+
+  /* ---------- CSP-safe print action (sample report) ---------- */
+  Array.prototype.slice.call(document.querySelectorAll("[data-print-page]")).forEach(function (button) {
+    button.addEventListener("click", function () { window.print(); });
   });
 
 })();

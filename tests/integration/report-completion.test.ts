@@ -94,24 +94,49 @@ describe('report-backed completion', () => {
     expect(tokenA.length).toBeGreaterThan(30);
     expect(tokenB.length).toBeGreaterThan(30);
 
-    const payloadA = {
+    const expectedPayloadA = {
       schema: 'autoclarity.ppi.report',
       schemaVersion: 1,
       inspector: 'HTTP Test Inspector',
       overall: { score: 8.7, verdict: 'proceed', verdictLabel: 'Proceed', executiveSummary: 'Selected report A' },
-      sections: [],
+      sections: [{
+        title: 'Road test and controls',
+        performed: 'performed',
+        items: [{
+          label: 'Brake operation',
+          result: 'pass',
+          photos: [{ caption: 'Brake-fluid reservoir' }],
+        }],
+      }],
+      limitations: { standard: ['Visual and operational inspection only.'] },
+    };
+    const payloadA = {
+      ...expectedPayloadA,
+      internalInspectorNotes: 'Private operator note A',
+      pdfObjectKey: 'private/report-a.pdf',
+      sections: [{
+        ...expectedPayloadA.sections[0],
+        internalInspectorNotes: 'Private section note A',
+        items: [{
+          ...expectedPayloadA.sections[0]!.items[0]!,
+          inspectorNotes: 'Private item note A',
+          photos: [{ caption: 'Brake-fluid reservoir', objectKey: 'private/photo-a.jpg' }],
+        }],
+      }],
     };
     const loosePayloadA = {
       schema: 'autoclarity.ppi.report',
       schemaVersion: 1,
-      overall: { executiveSummary: 'Loose newer report A must stay hidden' },
-      sections: [],
+      overall: { score: 4, verdict: 'do_not_proceed', executiveSummary: 'Loose newer report A must stay hidden' },
+      sections: [{ title: 'Loose section', performed: 'performed', items: [] }],
+      limitations: { standard: ['Loose limitation'] },
     };
     const payloadB = {
       schema: 'autoclarity.ppi.report',
       schemaVersion: 1,
-      overall: { executiveSummary: 'Private report B' },
-      sections: [],
+      overall: { score: 7, verdict: 'negotiate_repair_first', executiveSummary: 'Private report B' },
+      sections: [{ title: 'Report B section', performed: 'performed', items: [] }],
+      limitations: { standard: ['Report B limitation'] },
     };
     const jsonA = JSON.stringify(payloadA);
     const looseJsonA = JSON.stringify(loosePayloadA);
@@ -146,10 +171,11 @@ describe('report-backed completion', () => {
       reportId: reportA,
       versionId: selectedVersionA,
       version: 1,
-      payload: payloadA,
+      payload: expectedPayloadA,
     });
     expect(JSON.stringify(portalA.body.report)).not.toContain('Loose newer report A must stay hidden');
     expect(JSON.stringify(portalA.body.report)).not.toContain('Private report B');
+    expect(JSON.stringify(portalA.body.report)).not.toMatch(/internalInspectorNotes|inspectorNotes|objectKey|pdfObjectKey|private\//iu);
 
     const portalB = await portalGet(tokenB);
     expect(portalB.status).toBe(200);

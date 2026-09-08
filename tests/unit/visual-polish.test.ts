@@ -66,7 +66,7 @@ describe('premium visual and interaction safeguards', () => {
     for (const source of sources) {
       const fingerprints = source.match(/ac-(?:prod|ai)-\d{8}-r\d+/gu) ?? [];
       expect(fingerprints.length).toBeGreaterThan(0);
-      expect(new Set(fingerprints)).toEqual(new Set(['ac-ai-20260907-r2']));
+      expect(new Set(fingerprints)).toEqual(new Set(['ac-ai-20260908-r1']));
     }
   });
 

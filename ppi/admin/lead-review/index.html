@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Lead Review — AutoClarity PPI Admin</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="theme-color" content="#060b18" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/img/favicon-32.png" />
+  <link rel="stylesheet" href="/assets/css/site.css?v=ac-ai-20260907-r2" />
+  <link rel="stylesheet" href="/assets/css/ppi.css?v=ac-ai-20260907-r2" />
+  <style>
+    [hidden] { display: none !important; }
+    .lead-review-table tr { cursor: default; }
+    .lead-review-table select { min-width: 170px; }
+    .lead-review-actions { display: flex; align-items: center; gap: 8px; }
+    .lead-review-badges { display: flex; flex-wrap: wrap; gap: 5px; }
+    .lead-review-badge { border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; font-size: 12px; }
+    .lead-review-warning { color: var(--amber); font-weight: 700; }
+    @media (max-width: 560px) {
+      .lead-review-actions { align-items: stretch; flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#leadReviewContent">Skip to lead review</a>
+  <main class="admin-wrap">
+    <div class="portal-topbar">
+      <h1 style="display:flex;align-items:center;gap:10px;">
+        <img src="/assets/img/icon-64.png" alt="" width="30" height="30" /> Lead review
+      </h1>
+      <nav class="tab-row" aria-label="PPI administration">
+        <a class="tab-btn" href="/ppi/admin/">PPI Admin</a>
+        <button class="tab-btn" id="refreshButton" type="button" hidden>Refresh</button>
+      </nav>
+    </div>
+
+    <div class="notice info">
+      Internal label only—this does not contact the customer or change booking, payment, or service status.
+    </div>
+
+    <!-- Preview-only dev-key login. Production is protected by Cloudflare Access. -->
+    <section class="portal-card" id="loginPanel" hidden>
+      <h2>Admin key required</h2>
+      <p style="color:var(--text-2);font-size:14.5px;margin:10px 0 14px;">
+        Enter the preview ADMIN_DEV_KEY. Production uses Cloudflare Access; keep that policy limited to the owner’s email.
+      </p>
+      <form id="loginForm">
+        <div class="field">
+          <label for="adminKey">Admin key</label>
+          <input id="adminKey" type="password" autocomplete="off" />
+        </div>
+        <button class="btn btn-primary" type="submit">Unlock</button>
+        <p class="form-status" id="loginStatus" role="status"></p>
+      </form>
+    </section>
+
+    <div id="leadReviewContent" tabindex="-1">
+      <p class="form-status" id="pageStatus" role="status" aria-live="polite">Loading lead review…</p>
+    </div>
+  </main>
+
+  <script src="/assets/js/ppi-lead-review.js?v=ac-ai-20260907-r2" defer></script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 {
   "documentType": "AutoClarity public offerings catalog",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "lastReviewedAt": "2026-09-07",
   "canonicalUrl": "https://getautoclarity.com/autoclarity-services.json",
   "notice": "This is a static informational document, not a booking, availability, quote, or checkout API.",

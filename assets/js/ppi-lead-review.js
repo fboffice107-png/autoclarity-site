@@ -53,7 +53,9 @@
 
   function sourceLabel(value) {
     value = String(value || "ppi_unknown");
-    if (value === "ppi_unknown" || value === "ppi_direct") return "Direct / unknown";
+    if (value === "ppi_unknown") return "Unknown / unattributed";
+    if (value === "ppi_direct") return "Direct";
+    if (value === "ppi_ios_app") return "AutoClarity iOS app";
     return value.replace(/^ppi_/, "").replace(/_/g, " ");
   }
 
@@ -86,9 +88,9 @@
     select.appendChild(item);
   }
 
-  function classificationSelect(selected) {
+  function classificationSelect(selected, requestRef) {
     var select = document.createElement("select");
-    select.setAttribute("aria-label", "Lead classification");
+    select.setAttribute("aria-label", "Lead classification for " + String(requestRef));
     CLASSIFICATIONS.forEach(function (item) { option(select, item[0], item[1], selected); });
     return select;
   }
@@ -97,7 +99,7 @@
     var wrap = element("div", null, "lead-review-badges");
     if (row.hasPayment) wrap.appendChild(element("span", "Payment record", "lead-review-badge"));
     if (row.hasBooking) wrap.appendChild(element("span", "Booking record", "lead-review-badge"));
-    if (row.hasCompletion) wrap.appendChild(element("span", "Completion record", "lead-review-badge"));
+    if (row.hasRecordedCompletion) wrap.appendChild(element("span", "Recorded completion", "lead-review-badge"));
     if (!wrap.childNodes.length) wrap.appendChild(element("span", "None", "mono"));
     return wrap;
   }
@@ -162,6 +164,13 @@
     stats.appendChild(stat(counts.closed || 0, "Closed"));
     content.appendChild(stats);
 
+    var evidenceNote = element(
+      "p",
+      "Zero genuine means zero owner-classified genuine requests. It does not mean zero real customers, paid inspections, or completed inspections.",
+    );
+    evidenceNote.style.color = "var(--text-2)";
+    content.appendChild(evidenceNote);
+
     if (Number(data.reconciliationWarningCount || 0) > 0) {
       content.appendChild(element(
         "div",
@@ -174,7 +183,7 @@
     panel.appendChild(element("h2", "Classification queue"));
     var guide = element(
       "p",
-      "Genuine means a verified PPI inquiry. Closed closes lead review only; it does not mean cancelled, completed, paid, or refunded.",
+      "Genuine means the owner verified a real PPI inquiry. Review rows with payment, booking, or completion evidence carefully; if the evidence is inconclusive, leave the label unresolved. A label never changes lifecycle, payment, booking, or completion history. Closed closes lead review only; it does not mean cancelled, completed, paid, or refunded.",
     );
     guide.style.color = "var(--text-2)";
     guide.style.margin = "10px 0 16px";
@@ -256,7 +265,7 @@
 
       var actionCell = document.createElement("td");
       var actions = element("div", null, "lead-review-actions");
-      var select = classificationSelect(row.classification);
+      var select = classificationSelect(row.classification, row.ref || row.id);
       var save = element("button", "Save", "btn btn-primary btn-sm");
       save.type = "button";
       var rowStatus = element("span", "", "mono");

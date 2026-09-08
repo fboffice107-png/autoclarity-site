@@ -3,13 +3,16 @@
 //  2. applies migrations
 //  3. starts a mock Stripe API on :8798
 //  4. starts `wrangler pages dev` on :8799 with test bindings
-import { spawn, execFileSync, execSync, type ChildProcess } from 'node:child_process';
+import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
 import http from 'node:http';
 
 export const BASE = 'http://127.0.0.1:8799';
 export const ADMIN_KEY = 'test-admin-key-0123456789abcdef';
 export const WEBHOOK_SECRET = 'whsec_integration_test_secret';
+const WRANGLER_BIN = process.platform === 'win32'
+  ? 'node_modules\\.bin\\wrangler.cmd'
+  : './node_modules/.bin/wrangler';
 
 let wranglerProc: ChildProcess | null = null;
 let mockStripe: http.Server | null = null;
@@ -30,7 +33,11 @@ export default async function setup() {
   ]) copyFileSync(source, `${publicFixture}/${target}`);
 
   // 2. migrations
-  execSync('npx wrangler d1 migrations apply autoclarity_ppi --config wrangler.local.toml --local', { stdio: 'pipe' });
+  execFileSync(
+    WRANGLER_BIN,
+    ['d1', 'migrations', 'apply', 'autoclarity_ppi', '--config', 'wrangler.local.toml', '--local'],
+    { stdio: 'pipe' },
+  );
 
   // 3. mock Stripe
   let sessionCounter = 0;
@@ -216,8 +223,8 @@ export default async function setup() {
       } else if (req.method === 'POST' && req.url === '/test/d1') {
         try {
           execFileSync(
-            'npx',
-            ['wrangler', 'd1', 'execute', 'autoclarity_ppi', '--config', 'wrangler.local.toml', '--local', '--command', body],
+            WRANGLER_BIN,
+            ['d1', 'execute', 'autoclarity_ppi', '--config', 'wrangler.local.toml', '--local', '--command', body],
             { stdio: 'pipe', timeout: 10_000 },
           );
           res.end(JSON.stringify({ ok: true }));
@@ -258,14 +265,14 @@ export default async function setup() {
   // fixture directory so the dev server does not watch source, tests,
   // node_modules, and local D1 files as if they were deployable static assets.
   const args = [
-    'wrangler', 'pages', 'dev', publicFixture, '--port', '8799',
+    'pages', 'dev', publicFixture, '--port', '8799',
     '--compatibility-date', '2026-07-01',
     '--d1', 'DB=00000000-0000-0000-0000-000000000000',
     '--r2', 'UPLOADS=autoclarity-ppi-uploads',
   ];
   for (const [k, v] of Object.entries(bindings)) args.push('--binding', `${k}=${v}`);
 
-  wranglerProc = spawn('npx', args, { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+  wranglerProc = spawn(WRANGLER_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
   let bootLog = '';
   wranglerProc.stdout?.on('data', (d) => (bootLog += d));
   wranglerProc.stderr?.on('data', (d) => (bootLog += d));

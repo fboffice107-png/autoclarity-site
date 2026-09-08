@@ -118,20 +118,27 @@ or insurance readiness — those are real-world facts only the owner can confirm
       absent—not merely unused—from production)
 - [ ] Email domain authenticated (SPF/DKIM for the sending domain) and
       `RESEND_API_KEY`/`EMAIL_FROM`/`ADMIN_NOTIFY_EMAIL` set
-- [ ] Production pre-release env vars keep Checkout unavailable:
-      `PPI_ENV=production`, `PPI_MODE=live`, `PAYMENTS_ENABLED=false`,
+- [ ] Production retains the verified, intentionally active gated-payment tuple:
+      `PPI_ENV=production`, `PPI_MODE=live`, `PAYMENTS_ENABLED=true`,
       `STRIPE_ENV=live`, `PUBLIC_BASE_URL=https://getautoclarity.com`; the Stripe
       secret begins with `sk_live_` and the endpoint signing secret begins with
-      `whsec_`. Missing/invalid mode values keep commerce fail-closed. Set
-      `PAYMENTS_ENABLED=true` only in the separately approved payment release
-      that also sets `PPI_FULFILLMENT_RELEASED=true` after every readiness gate.
+      `whsec_`. Runtime reports `mode=live`, `bookingEnabled=true`, and
+      `paymentsEnabled=true`. Missing/invalid mode values keep commerce
+      fail-closed. This growth release does not change any payment variable or
+      credential.
 - [ ] Admin mutations reject missing, null, malformed, and cross-origin Origin
       headers before auth/body parsing; JSON/webhook/upload body limits pass
       preview adversarial tests
 - [ ] A named operator owns the linked-email body redaction pass at least every
       24 hours with a day-13 cutoff and missed-run alert; the first run is
       scheduled and recorded
-- [ ] NO fixture/test data in production DB
+- [ ] Every non-deleted suspected historical fixture/test record has an
+      owner-reviewed lead label. Payment, webhook, refund, booking, completion,
+      and audit evidence is retained even when a row is labeled test; no
+      heuristic deletion or status rewrite is performed. Existing soft-deleted
+      rows remain preserved and require a separate owner-approved reconciliation
+      if their commerce evidence is material. Fixture seeding remains disabled
+      in production.
 
 ## Verification
 
@@ -141,14 +148,16 @@ or insurance readiness — those are real-world facts only the owner can confirm
       exists; the authenticated portal exposes only that report, and the
       deduplicated report-ready notice is recorded exactly once
 - [ ] Operator report authoring, review, publication, and private photo delivery
-      exist and pass a real preview rehearsal; only then does a separately
-      reviewed code release set `PPI_FULFILLMENT_RELEASED=true`
-- [ ] Production smoke flow proves: reviewed quote and times → customer-selected
-      appointment → all current quote-bound agreements accepted → Stripe receives
-      the exact server-approved total → webhook confirms payment and appointment
-- [ ] Production smoke testing creates no fixture/customer record and completes
-      no payment. The first genuine paid booking is monitored end-to-end; the
-      full paid/refund lifecycle has already passed in isolated Stripe test mode.
+      exist and pass a real preview rehearsal before relying on the new
+      published-report completion guard. This is not a Checkout-release switch.
+- [ ] Existing production evidence and isolated Stripe test-mode coverage prove:
+      reviewed quote and times → customer-selected appointment → all current
+      quote-bound agreements accepted → Stripe receives the exact server-approved
+      total → signed webhook confirms payment and appointment
+- [ ] Production smoke testing creates no fixture/customer record, Checkout
+      Session, PaymentIntent, or payment. The next genuine paid booking is
+      monitored end-to-end; the full paid/refund lifecycle has already passed
+      in isolated Stripe test mode.
 - [ ] Existing site verified after cutover: homepage, App Store links,
       privacy, terms, `/llms.txt`, and `/autoclarity-services.json`
 - [ ] `/las-vegas-pre-purchase-inspection` + `/ppi` + `/pre-purchase-inspection`
@@ -161,14 +170,16 @@ or insurance readiness — those are real-world facts only the owner can confirm
 - [ ] Backup/rollback documented and understood (previous successful Cloudflare
       Pages deployment recorded; D1 export snapshot taken before schema work)
 
-## Payment activation and rollback
+## Payment preservation and rollback
 
-1. Keep `PAYMENTS_ENABLED=false` while migrations, secrets, webhook events,
-   agreements, fulfillment, and the production configuration are verified.
-2. Keep `PPI_FULFILLMENT_RELEASED=false` until authenticated report authoring,
-   review/publication, private photo delivery, and a real preview rehearsal pass.
-3. Activate only the complete production tuple in the same separately reviewed
-   release that changes that hard gate. Any partial or mixed test/live tuple
-   must continue to expose payments as unavailable.
-4. If verification fails, set `PAYMENTS_ENABLED=false`; continue reconciling
-   authentic late Stripe events and do not alter completed payment evidence.
+1. Before and after rollout, verify the existing complete production tuple and
+   no-store runtime response remain unchanged and effective. Do not use this
+   growth release to change `PPI_MODE`, `PAYMENTS_ENABLED`, `STRIPE_ENV`, or
+   Stripe credentials.
+2. Confirm the request handler remains free and Checkout remains reachable only
+   after the exact quote, customer-held window, current quote-bound agreements,
+   and `awaiting_payment` state. Do not invoke Checkout during release smoke.
+3. If application verification fails, first promote/redeploy the recorded prior
+   successful artifact. Only an explicit owner-authorized commerce incident
+   response may disable payments. Authentic late Stripe events must continue to
+   reconcile, and no completed payment or customer history may be altered.

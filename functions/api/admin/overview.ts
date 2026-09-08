@@ -44,7 +44,7 @@ export async function loadRevenueWindow(db: D1Database, days: number): Promise<R
          SELECT ? AS cutoff_iso, ? AS cutoff_epoch
        ), first_milestones AS (
          SELECT request_id,
-                MIN(CASE WHEN to_status = 'ready_for_review' THEN created_at END) AS qualified_at,
+                MIN(CASE WHEN to_status = 'ready_for_review' THEN created_at END) AS ready_for_review_at,
                 MIN(CASE WHEN to_status = 'quote_sent' THEN created_at END) AS quoted_at,
                 MIN(CASE WHEN to_status = 'completed' THEN created_at END) AS completed_at
          FROM status_history GROUP BY request_id
@@ -60,7 +60,7 @@ export async function loadRevenueWindow(db: D1Database, days: number): Promise<R
          (SELECT COUNT(*) FROM ppi_requests WHERE deleted_at IS NULL
            AND created_at > (SELECT cutoff_iso FROM params)) AS saved_requests,
          (SELECT COUNT(*) FROM first_milestones
-           WHERE qualified_at > (SELECT cutoff_iso FROM params)) AS qualified_requests,
+           WHERE ready_for_review_at > (SELECT cutoff_iso FROM params)) AS ready_for_review_requests,
          (SELECT COUNT(*) FROM first_milestones
            WHERE quoted_at > (SELECT cutoff_iso FROM params)) AS quoted_requests,
          (SELECT COUNT(DISTINCT stripe_session_id) FROM payments
@@ -120,7 +120,7 @@ export async function loadRevenueWindow(db: D1Database, days: number): Promise<R
          WHERE deleted_at IS NULL AND created_at > ?
        ), first_milestones AS (
          SELECT request_id,
-                MIN(CASE WHEN to_status = 'ready_for_review' THEN created_at END) AS qualified_at,
+                MIN(CASE WHEN to_status = 'ready_for_review' THEN created_at END) AS ready_for_review_at,
                 MIN(CASE WHEN to_status = 'quote_sent' THEN created_at END) AS quoted_at,
                 MIN(CASE WHEN to_status = 'completed' THEN created_at END) AS completed_at
          FROM status_history GROUP BY request_id
@@ -156,7 +156,7 @@ export async function loadRevenueWindow(db: D1Database, days: number): Promise<R
        )
        SELECT c.source,
               COUNT(*) AS requests,
-              COALESCE(SUM(CASE WHEN m.qualified_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS qualified,
+              COALESCE(SUM(CASE WHEN m.ready_for_review_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS ready_for_review,
               COALESCE(SUM(CASE WHEN m.quoted_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS quoted,
               COALESCE(SUM(p.checkouts), 0) AS checkouts,
               COALESCE(SUM(p.paid_request), 0) AS paid,
@@ -320,7 +320,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     },
     authoritativeFunnel30d: {
       requests_saved: thirtyDayWindow.operations['saved_requests'] ?? 0,
-      qualified_requests: thirtyDayWindow.operations['qualified_requests'] ?? 0,
+      ready_for_review_requests: thirtyDayWindow.operations['ready_for_review_requests'] ?? 0,
       quotes_sent: thirtyDayWindow.operations['quoted_requests'] ?? 0,
       checkouts_created: thirtyDayWindow.operations['checkout_starts'] ?? 0,
       payments_succeeded: thirtyDayWindow.operations['successful_payments'] ?? 0,

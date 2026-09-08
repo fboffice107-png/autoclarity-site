@@ -130,6 +130,7 @@
     var value = String(source || "ppi_unknown");
     if (value === "ppi_unknown") return "Unknown / unattributed";
     if (value === "ppi_direct") return "Direct";
+    if (value === "ppi_ios_app") return "AutoClarity iOS app";
     return value.replace(/^ppi_/, "").replace(/_/g, " ");
   }
 
@@ -157,17 +158,17 @@
         "</div>";
 
       var revenueWindows = data.revenueWindows || [];
-      html += '<section class="portal-card"><h2>Verified service and revenue scoreboard</h2>' +
-        '<p style="color:var(--text-2);">Workflow columns count events inside each window. Money columns are current outcomes for payments first confirmed in that window. “Recognized net” subtracts recorded refunds and conservatively excludes the remaining balance of every payment still latched as disputed; it is collected revenue, not profit. App Store clicks are directional browser events and stay separate from paid inspection outcomes.</p>';
+      html += '<section class="portal-card"><h2>Verified service and payment scoreboard</h2>' +
+        '<p style="color:var(--text-2);">These windows report exact events present in this system, not AutoClarity’s all-time operating history. A zero does not prove that no real paid or completed PPI occurred. “Ready for review” is a workflow state, not an owner-verified genuine lead. Money columns are current outcomes for payments first confirmed in each window; “Post-refund/dispute collected” subtracts recorded refunds and conservatively excludes balances still latched as disputed. It is not profit. Lead labels never remove payment, booking, or completion evidence from these totals.</p>';
       if (!revenueWindows.length) {
         html += '<p style="color:var(--text-3);">No scoreboard data is available.</p>';
       } else {
-        html += '<div style="overflow-x:auto;"><table class="admin-table"><thead><tr><th>Window</th><th>Saved</th><th>Qualified</th><th>Quoted</th><th>Checkouts</th><th>Paid</th><th>Booked</th><th>Completed</th><th>Refunds</th><th>Dispute cases</th><th>Gross</th><th>Refunded</th><th>Disputed</th><th>Recognized net</th><th>Avg ticket</th><th>App Store clicks</th></tr></thead><tbody>';
+        html += '<div style="overflow-x:auto;"><table class="admin-table"><thead><tr><th>Window</th><th>Saved</th><th>Ready for review</th><th>Quoted</th><th>Checkouts</th><th>Paid</th><th>Booked</th><th>Completed</th><th>Refunds</th><th>Dispute cases</th><th>Gross</th><th>Refunded</th><th>Disputed</th><th>Post-refund/dispute collected</th><th>Avg ticket</th><th>App Store clicks</th></tr></thead><tbody>';
         revenueWindows.forEach(function (window) {
           var s = window.operations || {};
           var p = window.paymentCohort || {};
           html += "<tr><td><strong>" + esc(window.days) + " days</strong></td><td>" + esc(s.saved_requests) +
-            "</td><td>" + esc(s.qualified_requests) + "</td><td>" + esc(s.quoted_requests) +
+            "</td><td>" + esc(s.ready_for_review_requests) + "</td><td>" + esc(s.quoted_requests) +
             "</td><td>" + esc(s.checkout_starts) + "</td><td>" + esc(s.successful_payments) +
             "</td><td>" + esc(s.confirmed_bookings) + "</td><td>" + esc(s.completed_inspections) +
             "</td><td>" + esc(s.successful_refunds) + "</td><td>" + esc(s.dispute_cases_opened) +
@@ -195,10 +196,10 @@
         if (!rows.length) {
           html += '<p style="color:var(--text-3);">No requests in this period.</p>';
         } else {
-          html += '<div style="overflow-x:auto;"><table class="admin-table"><thead><tr><th>Source</th><th>Requests</th><th>Qualified</th><th>Quoted</th><th>Checkouts</th><th>Paid</th><th>Paid rate</th><th>Booked</th><th>Completed</th><th>Complete rate</th><th>Refunds</th><th>Disputes</th><th>Gross</th><th>Refunded</th><th>Disputed</th><th>Recognized net</th><th>Avg ticket</th></tr></thead><tbody>';
+          html += '<div style="overflow-x:auto;"><table class="admin-table"><thead><tr><th>Source</th><th>Requests</th><th>Ready for review</th><th>Quoted</th><th>Checkouts</th><th>Paid</th><th>Paid rate</th><th>Booked</th><th>Completed</th><th>Complete rate</th><th>Refunds</th><th>Disputes</th><th>Gross</th><th>Refunded</th><th>Disputed</th><th>Post-refund/dispute collected</th><th>Avg ticket</th></tr></thead><tbody>';
           rows.forEach(function (row) {
             html += "<tr><td>" + esc(attributionLabel(row.source)) + "</td><td>" + esc(row.requests) +
-              "</td><td>" + esc(row.qualified) + "</td><td>" + esc(row.quoted) +
+              "</td><td>" + esc(row.ready_for_review) + "</td><td>" + esc(row.quoted) +
               "</td><td>" + esc(row.checkouts) + "</td><td>" + esc(row.paid) +
               "</td><td>" + esc(reportedRate(row.request_to_paid_rate, row.requests)) + "</td><td>" + esc(row.bookings) +
               "</td><td>" + esc(row.completed) + "</td><td>" + esc(reportedRate(row.request_to_completed_rate, row.requests)) +

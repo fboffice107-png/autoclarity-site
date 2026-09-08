@@ -188,7 +188,7 @@
     "ppi_reddit_paid_social", "ppi_nextdoor_referral", "ppi_yelp_referral", "ppi_apple_referral",
     "ppi_email_email", "ppi_campaign_cpc", "ppi_campaign_organic", "ppi_campaign_social",
     "ppi_campaign_paid_social", "ppi_campaign_email", "ppi_campaign_referral", "ppi_campaign_display",
-    "ppi_google_business_profile", "ppi_bing_places", "ppi_apple_maps", "ppi_chatgpt_search",
+    "ppi_google_business_profile", "ppi_bing_places", "ppi_apple_maps", "ppi_ios_app", "ppi_chatgpt_search",
     "ppi_perplexity_search", "ppi_claude_search"
   ];
   var attributionSource = getAttributionSource();
@@ -250,7 +250,9 @@
       var params = new URLSearchParams(window.location.search);
       var rawSource = String(params.get("utm_source") || "").toLowerCase().replace(/[^a-z_]/g, "");
       var rawMedium = String(params.get("utm_medium") || "").toLowerCase().replace(/[^a-z_]/g, "");
-      if (dedicatedSourceMap[rawSource]) {
+      if (rawSource === "ios_app") {
+        result = rawMedium === "owned" ? "ppi_ios_app" : "ppi_unknown";
+      } else if (dedicatedSourceMap[rawSource]) {
         result = dedicatedSourceMap[rawSource];
       } else if (rawSource || rawMedium) {
         var source = sourceMap[rawSource] || (rawSource ? "campaign" : "");

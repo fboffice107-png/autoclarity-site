@@ -89,18 +89,22 @@ There is no cron in v1 by design. Holds and quote expiries are enforced
 job or admin reminder action is shipped. A dedicated Cron Worker would be a
 separately reviewed future enhancement and is not required for correctness.
 
-## Report-fulfillment release boundary
+## Report-fulfillment and completion boundary
 
 The schema can hold an immutable, versioned report and the customer portal can
-render only the exact same-request published snapshot. Completion now fails
-closed unless that snapshot exists. The repository does **not** yet contain an
-operator report-authoring/review/publish workflow, photo delivery path, or a
-recorded rehearsal using a real inspection. Those are production gates, not
-optional scale work. `PPI_FULFILLMENT_RELEASED` therefore keeps production
-Checkout closed even if all environment variables request live payment.
-Preview retains mock/test Checkout coverage. Until the missing workflow exists,
-passes preview fulfillment testing, and that hard gate changes in a separately
-reviewed release, the funnel must not be described as production-complete.
+render only the exact same-request published snapshot. The candidate's future
+completion action fails closed unless that snapshot exists. The repository does
+**not** yet contain an operator report-authoring/review/publish UI, photo
+delivery path, or a recorded rehearsal using a real inspection, so the owner
+must verify the actual operating path before relying on that completion action.
+
+That fulfillment-readiness question is separate from payment reachability. The
+verified production architecture intentionally keeps Checkout available only
+after an admin sends the exact quote and appointment windows, the customer
+holds a window and accepts every current quote-bound agreement, and the request
+reaches `awaiting_payment`. A signed, mode-matched Stripe webhook remains the
+only authority that confirms payment and booking. The growth candidate must not
+add a separate fulfillment constant that disables this existing gated flow.
 
 ## Future permissioned agent commerce
 
@@ -138,4 +142,5 @@ after that operating model exists in reality.
 D1 rate-limit table → Durable Objects or the Rate Limiting API; validated JSON
 configuration → a constrained form UI; reminder cron Worker; optional PDF
 rendering from the authoritative published snapshot. These are scale or
-usability improvements; they do not replace the report-fulfillment gate above.
+usability improvements; they do not replace the report-completion evidence
+boundary above.

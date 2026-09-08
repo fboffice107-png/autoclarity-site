@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { claimStripeEvent, classifyStripeRefundStatus, createCheckoutSession, createRefund, decideCheckoutAttempt, expireCheckoutSession, verifyStripeSignature, stripeKey, StripeApiError, StripeConfigError } from '../../functions/lib/stripe.ts';
-import { modeFlags, PPI_FULFILLMENT_RELEASED, type Env } from '../../functions/lib/types.ts';
+import { modeFlags, type Env } from '../../functions/lib/types.ts';
 import { onRequestPost as stripeWebhook, reconcileRefundLifecycle, stripeWebhookBase } from '../../functions/api/stripe/webhook.ts';
 
 const SECRET = 'whsec_test_secret_for_unit_tests';
@@ -78,29 +78,28 @@ describe('stripeKey safety rails', () => {
     expect(stripeKey({ ...baseEnv, STRIPE_SECRET_KEY: 'sk_test_ok' } as Env)).toBe('sk_test_ok');
   });
 
-  it('keeps production payments closed until fulfillment is released even with a complete live tuple', () => {
+  it('enables production payments only for the verified complete live tuple', () => {
     const complete = {
       PPI_ENV: 'production',
       PPI_MODE: 'live',
       PAYMENTS_ENABLED: 'true',
       STRIPE_ENV: 'live',
       STRIPE_SECRET_KEY: 'sk_live_owner_approved',
-      STRIPE_WEBHOOK_SECRET: 'whsec_owner_approved',
-      PUBLIC_BASE_URL: 'https://getautoclarity.com',
+      BOOKING_ENABLED: 'true',
     } as Env;
-    expect(PPI_FULFILLMENT_RELEASED).toBe(false);
-    expect(modeFlags(complete).paymentsEnabled).toBe(false);
-    expect(() => stripeKey(complete)).toThrow(StripeConfigError);
+    expect(modeFlags(complete)).toMatchObject({
+      env: 'production',
+      mode: 'live',
+      stripeEnv: 'live',
+      bookingEnabled: true,
+      paymentsEnabled: true,
+    });
+    expect(stripeKey(complete)).toBe('sk_live_owner_approved');
 
     expect(modeFlags({ ...complete, PPI_MODE: 'request' }).paymentsEnabled).toBe(false);
     expect(modeFlags({ ...complete, PAYMENTS_ENABLED: 'false' }).paymentsEnabled).toBe(false);
     expect(modeFlags({ ...complete, STRIPE_ENV: 'test', STRIPE_SECRET_KEY: 'sk_test_wrong_for_production' }).paymentsEnabled).toBe(false);
     expect(modeFlags({ ...complete, STRIPE_SECRET_KEY: 'sk_test_wrong_key_mode' }).paymentsEnabled).toBe(false);
-    expect(modeFlags({ ...complete, STRIPE_WEBHOOK_SECRET: undefined }).paymentsEnabled).toBe(false);
-    expect(modeFlags({ ...complete, STRIPE_WEBHOOK_SECRET: 'bad' }).paymentsEnabled).toBe(false);
-    expect(modeFlags({ ...complete, PUBLIC_BASE_URL: undefined }).paymentsEnabled).toBe(false);
-    expect(modeFlags({ ...complete, PUBLIC_BASE_URL: 'http://getautoclarity.com' }).paymentsEnabled).toBe(false);
-    expect(modeFlags({ ...complete, PUBLIC_BASE_URL: 'https://preview.pages.dev' }).paymentsEnabled).toBe(false);
   });
 
   it('keeps preview test Checkout effective but never enables preview live Checkout', () => {

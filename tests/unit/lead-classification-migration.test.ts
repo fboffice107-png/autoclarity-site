@@ -71,6 +71,43 @@ function seedFinancialRequest(db: DatabaseSync): void {
       ('pay_lead', 'req_lead', 'qot_lead', 'bkg_lead', 'cs_lead', 'pi_lead',
        19900, 'usd', 'succeeded', 0,
        '2030-01-01T00:00:00.000Z', '2030-01-02T00:00:00.000Z');
+
+    INSERT INTO ppi_requests
+      (id, ref, customer_id, vehicle_id, status, attribution_source, created_at, updated_at)
+    VALUES
+      ('req_legacy_refunded', 'PPI-LEGACY-REFUNDED', 'cus_lead', 'veh_lead', 'refunded',
+       'ppi_unknown', '2029-12-01T00:00:00.000Z', '2029-12-03T00:00:00.000Z');
+    INSERT INTO status_history
+      (id, request_id, from_status, to_status, actor, created_at)
+    VALUES
+      ('sh_legacy_confirmed', 'req_legacy_refunded', 'awaiting_payment', 'confirmed',
+       'system:stripe-webhook', '2029-12-02T00:00:00.000Z'),
+      ('sh_legacy_refunded', 'req_legacy_refunded', 'confirmed', 'refunded',
+       'system:stripe-webhook', '2029-12-03T00:00:00.000Z');
+    INSERT INTO quotes
+      (id, request_id, version, status, tier, currency, subtotal_cents, total_cents,
+       expires_at, approved_by, created_at, updated_at)
+    VALUES
+      ('qot_legacy_refunded', 'req_legacy_refunded', 1, 'draft', 'standard', 'usd',
+       19900, 19900, '2030-02-01T00:00:00.000Z', 'admin:test',
+       '2029-12-01T00:00:00.000Z', '2029-12-01T00:00:00.000Z');
+    INSERT INTO quote_line_items (id, quote_id, kind, label, amount_cents, sort)
+    VALUES ('qli_legacy_refunded', 'qot_legacy_refunded', 'base', 'Inspection', 19900, 0);
+    UPDATE quotes SET status = 'accepted' WHERE id = 'qot_legacy_refunded';
+    INSERT INTO bookings
+      (id, request_id, quote_id, status, confirmed_at, created_at, updated_at)
+    VALUES
+      ('bkg_legacy_refunded', 'req_legacy_refunded', 'qot_legacy_refunded', 'refunded',
+       '2029-12-02T00:00:00.000Z', '2029-12-01T00:00:00.000Z',
+       '2029-12-03T00:00:00.000Z');
+    INSERT INTO payments
+      (id, request_id, quote_id, booking_id, stripe_session_id, stripe_payment_intent,
+       amount_cents, currency, status, refunded_cents, created_at, updated_at)
+    VALUES
+      ('pay_legacy_refunded', 'req_legacy_refunded', 'qot_legacy_refunded',
+       'bkg_legacy_refunded', 'cs_legacy_refunded', 'pi_legacy_refunded',
+       19900, 'usd', 'refunded', 19900,
+       '2029-12-01T00:00:00.000Z', '2029-12-03T00:00:00.000Z');
   `);
 }
 
@@ -102,6 +139,16 @@ describe('lead classification migration', () => {
       expect(db.prepare(
         'SELECT lead_classification FROM ppi_requests WHERE id = ?',
       ).get('req_lead')).toEqual({ lead_classification: 'needs_owner_review' });
+      expect(db.prepare(
+        'SELECT lead_classification FROM ppi_requests WHERE id = ?',
+      ).get('req_legacy_refunded')).toEqual({ lead_classification: 'needs_owner_review' });
+      expect(db.prepare(
+        `SELECT amount_cents, refunded_cents, status FROM payments WHERE id = 'pay_legacy_refunded'`,
+      ).get()).toEqual({ amount_cents: 19900, refunded_cents: 19900, status: 'refunded' });
+      expect(db.prepare(
+        `SELECT COUNT(*) AS n FROM status_history
+         WHERE request_id = 'req_legacy_refunded' AND to_status = 'completed'`,
+      ).get()).toEqual({ n: 0 });
 
       for (const [index, classification] of LEAD_CLASSIFICATIONS.entries()) {
         expect(() => db.prepare(`

@@ -29,8 +29,10 @@ you'll sign in through Cloudflare Access with your email instead.
    `completed` is rejected until this same request points to an immutable
    published report version. On successful completion, the secure portal shows
    that exact version and the system records one deduplicated “report ready”
-   email. The current repository has no authoring/publish UI, so completion is
-   not an operational production path yet.
+   email. This repository has no authoring/publish UI; before deploying this
+   guard, verify that the existing private inspector/report workflow produces a
+   compatible immutable published version for the same request. Do not infer
+   from the repository boundary that no real inspection has been completed.
 8. Refunds: Payments section → Refund… (full or partial). The final state
    lands when Stripe's webhook confirms. Paid cancellations arrive as
    messages + email alerts and are never auto-forfeited — you decide within
@@ -112,7 +114,10 @@ verified and must not be treated as payment-grade proof or the sole basis for
 advertising spend. Raw URLs, campaign names, search terms, referrer paths, and
 customer data are not attribution fields; invalid or missing sources become
 `ppi_unknown` (“Unknown / unattributed”), while an observed direct visit is
-stored and displayed separately as `ppi_direct` (“Direct”).
+stored and displayed separately as `ppi_direct` (“Direct”). The documented iOS
+app handoff is reduced from the exact `utm_source=ios_app&utm_medium=owned` pair
+to `ppi_ios_app` (“AutoClarity iOS app”); raw UTM values and the campaign name
+are not retained.
 
 The Overview exposes fixed 7-, 30-, and 90-day windows. Operational milestones
 use their first server-recorded event time. Checkout starts require an actual
@@ -120,11 +125,21 @@ Stripe Session id; successful payment time comes from the deterministic webhook
 event. A successful Refund enters a window by its latest succeeded provider
 event, while a Dispute case enters by provider-created time. Payment-cohort
 gross is the original captured amount, current refunds are shown separately,
-and recognized net subtracts refunds and conservatively excludes the remaining
-balance of every payment still latched as disputed. It is collected revenue,
-not profit: processor fees, tax, labor, travel, and overhead are not deducted.
+and the post-refund/dispute collected amount subtracts refunds and
+conservatively excludes the remaining balance of every payment still latched as
+disputed. It is not profit: processor fees, tax, labor, travel, and overhead are
+not deducted.
 Missing webhook confirmation timestamps are surfaced as data-quality exceptions
 rather than assigned a guessed time.
+
+These windows describe exact events present in this system, not AutoClarity's
+all-time operating history. A zero does not prove that no real paid or completed
+PPI occurred, and `ready_for_review` is a lifecycle state rather than an
+owner-verified genuine lead. Historical requests initially remain
+`needs_owner_review`; use the protected Lead review page to verify identity and
+set `genuine` without changing payment, refund, booking, completion, or status
+history. If the lifecycle evidence lacks an exact completion event, leave that
+measurement as not recorded instead of backfilling history in this release.
 
 Source tables are request-created cohorts whose outcomes can mature after the
 window closes. They show raw numerators; conversion percentages remain hidden

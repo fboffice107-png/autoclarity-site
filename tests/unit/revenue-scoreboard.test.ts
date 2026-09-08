@@ -135,7 +135,7 @@ describe('7/30/90 revenue scoreboard', () => {
       const seven = await loadRevenueWindow(asD1(db), 7);
       expect(seven.operations).toMatchObject({
         saved_requests: 1,
-        qualified_requests: 1,
+        ready_for_review_requests: 1,
         quoted_requests: 1,
         checkout_starts: 1,
         successful_payments: 1,
@@ -160,6 +160,7 @@ describe('7/30/90 revenue scoreboard', () => {
       expect(seven.sources[0]).toMatchObject({
         source: 'ppi_google_business_profile',
         requests: 1,
+        ready_for_review: 1,
         paid: 1,
         completed: 1,
         refund_count: 1,
@@ -169,6 +170,8 @@ describe('7/30/90 revenue scoreboard', () => {
         recognized_net_cents: 0,
         request_to_paid_rate: null,
       });
+      expect(seven.operations).not.toHaveProperty('qualified_requests');
+      expect(seven.sources[0]).not.toHaveProperty('qualified');
 
       const thirty = await loadRevenueWindow(asD1(db), 30);
       expect(thirty.operations.saved_requests).toBe(2);
@@ -214,6 +217,35 @@ describe('7/30/90 revenue scoreboard', () => {
         paid: 0,
         request_to_paid_rate: 0,
         request_to_completed_rate: 0,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('surfaces a captured legacy payment without inventing its confirmation time', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2030-04-01T12:00:00.000Z'));
+    const db = new DatabaseSync(':memory:');
+    try {
+      db.exec('PRAGMA foreign_keys = ON;');
+      for (const migration of migrations) db.exec(migration);
+      seedPaidRequest(db, 'legacy', 5, 19_900, 'ppi_unknown', 'succeeded');
+      db.prepare(`DELETE FROM analytics_events WHERE id = 'ev_payment_pay_legacy'`).run();
+
+      const thirty = await loadRevenueWindow(asD1(db), 30);
+      expect(thirty.operations.successful_payments).toBe(0);
+      expect(thirty.paymentCohort).toMatchObject({
+        paid_payments: 0,
+        gross_collected_cents: 0,
+        refunded_cents: 0,
+        recognized_net_cents: 0,
+      });
+      expect(thirty.dataQuality.capturedPaymentsMissingConfirmationEvent).toBe(1);
+      expect(thirty.sources[0]).toMatchObject({
+        source: 'ppi_unknown',
+        paid: 1,
+        gross_cents: 19_900,
       });
     } finally {
       db.close();

@@ -278,7 +278,7 @@
       "ppi_reddit_paid_social", "ppi_nextdoor_referral", "ppi_yelp_referral", "ppi_apple_referral",
       "ppi_email_email", "ppi_campaign_cpc", "ppi_campaign_organic", "ppi_campaign_social",
       "ppi_campaign_paid_social", "ppi_campaign_email", "ppi_campaign_referral", "ppi_campaign_display",
-      "ppi_google_business_profile", "ppi_bing_places", "ppi_apple_maps", "ppi_chatgpt_search",
+      "ppi_google_business_profile", "ppi_bing_places", "ppi_apple_maps", "ppi_ios_app", "ppi_chatgpt_search",
       "ppi_perplexity_search", "ppi_claude_search"
     ];
     var sourceMap = {
@@ -325,6 +325,7 @@
     }
 
     function campaignAttribution(rawSource, rawMedium) {
+      if (rawSource === "ios_app") return rawMedium === "owned" ? "ppi_ios_app" : "ppi_unknown";
       if (dedicatedSourceMap[rawSource]) return dedicatedSourceMap[rawSource];
       var source = sourceMap[rawSource] || (rawSource ? "campaign" : "");
       var medium = mediumMap[rawMedium] || "";

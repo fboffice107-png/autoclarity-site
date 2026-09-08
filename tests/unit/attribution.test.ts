@@ -6,12 +6,13 @@ describe('privacy-minimized request attribution', () => {
     expect(normalizeAttributionSource('ppi_google_cpc')).toBe('ppi_google_cpc');
     expect(normalizeAttributionSource('PPI_SEARCH_ORGANIC')).toBe('ppi_search_organic');
     expect(normalizeAttributionSource('ppi_google_business_profile')).toBe('ppi_google_business_profile');
+    expect(normalizeAttributionSource('ppi_ios_app')).toBe('ppi_ios_app');
     expect(normalizeAttributionSource('ppi_chatgpt_search')).toBe('ppi_chatgpt_search');
     expect(normalizeAttributionSource('ppi_direct')).toBe('ppi_direct');
   });
 
   it('leaves missing, raw, and fabricated attribution unknown', () => {
-    for (const value of [undefined, '', 'chatgpt', 'ppi_chatgpt', 'ppi_google_social', 'ppi_fabricated_agent_paid<script>', 'https://example.com/path?q=vin', 'utm_source=google']) {
+    for (const value of [undefined, '', 'chatgpt', 'ppi_chatgpt', 'ios_app', 'utm_source=ios_app&utm_medium=owned', 'ppi_google_social', 'ppi_fabricated_agent_paid<script>', 'https://example.com/path?q=vin', 'utm_source=google']) {
       expect(normalizeAttributionSource(value)).toBe('ppi_unknown');
     }
   });

@@ -72,7 +72,7 @@ describe('protected lead classification HTTP workflow', () => {
     expect(queue.body.queue).toHaveLength(1);
     expect(Object.keys(queue.body.queue[0]).sort()).toEqual([
       'ageDays', 'attributionSource', 'classification', 'createdDate', 'hasBooking',
-      'hasCompletion', 'hasPayment', 'hasReconciliationEvidence', 'id', 'location',
+      'hasPayment', 'hasReconciliationEvidence', 'hasRecordedCompletion', 'id', 'location',
       'ref', 'status', 'vehicle',
     ]);
     const serialized = JSON.stringify(queue.body);
@@ -148,9 +148,36 @@ describe('protected lead classification HTTP workflow', () => {
   it('keeps financially evidenced excluded labels visible as reconciliation warnings', async () => {
     const paid = await get(`/api/admin/requests/${encodeURIComponent(paidId)}`, admin);
     const expected = paid.body.request.lead_classification;
+    const preservedEvidence = {
+      status: paid.body.request.status,
+      updatedAt: paid.body.request.updated_at,
+      history: paid.body.history,
+      quotes: paid.body.quotes,
+      slots: paid.body.slots,
+      payments: paid.body.payments,
+      providerRefunds: paid.body.providerRefunds,
+      paymentDisputes: paid.body.paymentDisputes,
+    };
     expect((await post({
       requestId: paidId,
       expectedClassification: expected,
+      classification: 'genuine',
+    })).status).toBe(200);
+    const genuine = await get(`/api/admin/requests/${encodeURIComponent(paidId)}`, admin);
+    expect({
+      status: genuine.body.request.status,
+      updatedAt: genuine.body.request.updated_at,
+      history: genuine.body.history,
+      quotes: genuine.body.quotes,
+      slots: genuine.body.slots,
+      payments: genuine.body.payments,
+      providerRefunds: genuine.body.providerRefunds,
+      paymentDisputes: genuine.body.paymentDisputes,
+    }).toEqual(preservedEvidence);
+
+    expect((await post({
+      requestId: paidId,
+      expectedClassification: 'genuine',
       classification: 'test',
     })).status).toBe(200);
 

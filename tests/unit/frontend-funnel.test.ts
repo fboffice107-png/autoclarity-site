@@ -85,6 +85,14 @@ describe('PPI frontend conversion safeguards', () => {
     expect(bootstrapAttribution('?utm_source=google&utm_medium=organic').source).toBe('ppi_google_organic');
   });
 
+  it('reduces only the documented iOS handoff to its privacy-safe category', () => {
+    expect(bootstrapAttribution('?utm_source=ios_app&utm_medium=owned&utm_campaign=ppi_launch').source)
+      .toBe('ppi_ios_app');
+    expect(bootstrapAttribution('?utm_source=ios_app').source).toBe('ppi_unknown');
+    expect(bootstrapAttribution('?utm_source=ios_app&utm_medium=social').source).toBe('ppi_unknown');
+    expect(bootstrapAttribution('?utm_medium=owned').source).toBe('ppi_unknown');
+  });
+
   it('does not ship disabled diagnostic-scan or emissions claims in indexable HTML', () => {
     expect(page).not.toMatch(/data-scan|diagnostic scan|emissions readiness/iu);
     expect(page).toContain('Road test &amp; warning-light review');
@@ -285,6 +293,7 @@ describe('PPI frontend conversion safeguards', () => {
       expect(source).toContain('utm_medium');
       expect(source).not.toContain('params.get("utm_campaign")');
       expect(source).toContain('"ppi_google_business_profile"');
+      expect(source).toContain('"ppi_ios_app"');
       expect(source).toContain('"ppi_chatgpt_search"');
       expect(source).toContain('"ppi_referral_referral"');
       expect(source).not.toMatch(/if \(!medium &&/u);
@@ -295,6 +304,7 @@ describe('PPI frontend conversion safeguards', () => {
     expect(mainScript).not.toContain('source: "homepage"');
     expect(script).toContain('if (isAllowedAttribution(saved)) return saved');
     expect(script).toContain('attributionSource: attributionSource');
+    expect(adminScript).toContain('AutoClarity iOS app');
   });
 
   it('shows the exact conversion events and makes notification issues actionable in admin', () => {
@@ -310,9 +320,9 @@ describe('PPI frontend conversion safeguards', () => {
     expect(adminScript).toContain('requiresFreshConfirmation');
     expect(adminScript).toContain('confirmFresh: confirmFresh === true');
     expect(adminScript).toContain('provider’s duplicate protection has expired');
-    expect(adminScript).toContain('Verified service and revenue scoreboard');
+    expect(adminScript).toContain('Verified service and payment scoreboard');
     expect(adminScript).toContain('revenueWindows');
-    expect(adminScript).toContain('Recognized net');
+    expect(adminScript).toContain('Post-refund/dispute collected');
     expect(adminScript).toContain('not profit');
     expect(adminScript).toContain('Request cohorts by source');
     expect(adminScript).toContain('App Store clicks');

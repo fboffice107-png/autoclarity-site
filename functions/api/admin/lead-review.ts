@@ -145,7 +145,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const queue = (queueRows.results ?? []).map((row) => {
     const hasPayment = boolFlag(row['has_payment']);
     const hasBooking = boolFlag(row['has_booking']);
-    const hasCompletion = boolFlag(row['has_completion']);
+    const hasRecordedCompletion = boolFlag(row['has_completion']);
     const classification = String(row['lead_classification']);
     return {
       id: row['id'],
@@ -166,10 +166,10 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       attributionSource: row['attribution_source'] ?? 'ppi_unknown',
       hasPayment,
       hasBooking,
-      hasCompletion,
+      hasRecordedCompletion,
       hasReconciliationEvidence:
         ['duplicate', 'spam', 'test', 'closed'].includes(classification)
-        && (hasPayment || hasBooking || hasCompletion),
+        && (hasPayment || hasBooking || hasRecordedCompletion),
     };
   });
 

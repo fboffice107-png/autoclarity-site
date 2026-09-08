@@ -47,8 +47,12 @@ and never embed the payment pages in an insecure custom web view.
 - `ppi_card_tap` — button tapped
 - `ppi_website_open_success` — external browser opened successfully
 
-The website tracks its own funnel from `ppi_page_view` onward; `utm_source=ios_app`
-connects the two without sharing any personal data.
+The website tracks its own funnel from `ppi_page_view` onward. The exact
+`utm_source=ios_app&utm_medium=owned` pair is reduced in the browser to the
+bounded category `ppi_ios_app`, connecting the two without storing raw UTM
+values or sharing personal data. `utm_campaign=ppi_launch` is deliberately not
+stored. Missing or altered parts of the documented pair remain
+`ppi_unknown` rather than being guessed.
 
 ## Placement
 

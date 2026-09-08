@@ -115,7 +115,9 @@ Record those approvals before release; engineering must not infer them.
    immutable sent-quote/payment identity before application rollout.
 8. Apply `0009_request_attribution.sql` only after `0008`. Verify the
    `ppi_requests.attribution_source` column has the `ppi_unknown` default and
-   the source index exists before deploying code that writes the field.
+   the source index exists before deploying code that writes the field. Confirm
+   the exact enum accepts `ppi_ios_app` but rejects raw values such as `ios_app`
+   or `utm_source=ios_app&utm_medium=owned`.
 9. Apply `0010_lead_classification.sql` only after `0009`. Verify the
    `ppi_requests.lead_classification` column has the `needs_owner_review`
    default, its exact six-value constraint rejects other values, and the lead
@@ -126,29 +128,33 @@ Record those approvals before release; engineering must not infer them.
    default `wrangler.toml`; never use `wrangler.local.toml` or the generated
    preview configuration for production.
 11. Confirm Access protection, remove the `ADMIN_DEV_KEY` secret entirely from
-   production, and verify the future payment tuple without activating it:
-   `PPI_ENV=production`, `PPI_MODE=live`, `PAYMENTS_ENABLED=false`,
+   production, and verify without changing the intentionally active payment
+   tuple: `PPI_ENV=production`, `PPI_MODE=live`, `PAYMENTS_ENABLED=true`,
    `STRIPE_ENV=live`, `PUBLIC_BASE_URL=https://getautoclarity.com`, and an
    `sk_live_` Stripe secret plus the matching `whsec_` webhook secret. Partial,
    missing, or mixed test/live combinations must remain fail-closed. Confirm the
-   live endpoint and signing secret without creating a charge.
+   no-store runtime response remains `mode=live`, `bookingEnabled=true`, and
+   `paymentsEnabled=true` without invoking Checkout or creating a charge.
 12. Deploy the reviewed build to the production branch using only that audited
-   production configuration. `PPI_FULFILLMENT_RELEASED=false` keeps production
-   Checkout closed even if an environment value is accidentally changed.
+   production configuration. Do not change `PPI_MODE`, `PAYMENTS_ENABLED`,
+   `STRIPE_ENV`, Stripe credentials, or the existing quote/time/agreement/
+   payment gates as part of this growth release.
 13. Smoke-test homepage, PPI page, redirects, runtime config, admin lock, public
    fact documents, webhook
    signature rejection, and failure handling without creating a production
-   fixture/customer or completing a charge. Runtime config must report payments
-   unavailable. The full paid confirmation/refund workflow must pass in isolated
-   Stripe test mode.
-14. Only after the authenticated report author/review/publish and private photo
-   delivery workflow passes a real preview rehearsal may a separately reviewed
-   code release set `PPI_FULFILLMENT_RELEASED=true` and activate
-   `PAYMENTS_ENABLED=true`. Monitor the first genuine paid booking end-to-end.
-15. If commerce verification fails, set `PAYMENTS_ENABLED=false` while authentic
-   late Stripe events continue to reconcile. Roll back application code by
-   promoting/redeploying the previously recorded Pages deployment; do not change
-   DNS or delete production data.
+   fixture/customer, Checkout Session, PaymentIntent, or charge. Runtime config
+   must still report payments available through the existing gated workflow.
+   The full paid confirmation/refund workflow must pass in isolated Stripe test
+   mode.
+14. Verify and rehearse the authenticated report author/review/publish and
+   private photo-delivery operating path before relying on the candidate's
+   published-report completion guard. This is a fulfillment-readiness item, not
+   a reason to turn off the already verified gated Checkout flow.
+15. If application verification fails, first roll back by promoting/redeploying
+   the previously recorded Pages deployment. Only an explicit owner-authorized
+   commerce incident response may set `PAYMENTS_ENABLED=false`; authentic late
+   Stripe events must continue to reconcile. Do not change DNS, delete
+   production data, or alter completed payment evidence.
 
 ## Optional enhancement (documented, not built)
 

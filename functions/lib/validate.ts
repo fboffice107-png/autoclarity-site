@@ -47,6 +47,7 @@ export const ATTRIBUTION_SOURCES = [
   'ppi_google_business_profile',
   'ppi_bing_places',
   'ppi_apple_maps',
+  'ppi_ios_app',
   'ppi_chatgpt_search',
   'ppi_perplexity_search',
   'ppi_claude_search',

@@ -1349,6 +1349,8 @@ describe('stripe webhook — the source of truth', () => {
     expect(overview.body.revenue30d.grossCents).toBeGreaterThanOrEqual(detail.body.payments[0].amount_cents);
     expect(overview.body.revenue30d.refundedCents).toBeGreaterThanOrEqual(0);
     expect(overview.body.revenue30d.netCents).toBeGreaterThanOrEqual(0);
+    expect(overview.body.authoritativeFunnel30d).toHaveProperty('ready_for_review_requests');
+    expect(overview.body.authoritativeFunnel30d).not.toHaveProperty('qualified_requests');
     expect(overview.body.authoritativeFunnel30d.payments_succeeded).toBeGreaterThanOrEqual(1);
     expect(overview.body.authoritativeFunnel30d.bookings_confirmed).toBeGreaterThanOrEqual(1);
     expect(overview.body.funnel30d.find((row: Json) => row.event === 'ppi_payment_confirmed')?.n).toBeGreaterThanOrEqual(1);

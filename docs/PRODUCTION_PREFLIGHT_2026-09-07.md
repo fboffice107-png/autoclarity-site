@@ -6,26 +6,28 @@ access-restricted evidence bundle is stored outside the repository.
 
 ## Release decision
 
-**BLOCKED — no deployment and no remote migration performed.**
+**AWAITING EXPLICIT OWNER APPROVAL — no deployment and no remote migration performed.**
 
 The production Pages project still contains an `ADMIN_DEV_KEY` secret. The
 release policy requires that development bypass to be absent—not merely unused—
-from production. The database also contains 10 explicitly fixture-labeled
-requests and one integration-pattern request. Owner/legal/insurance, App Store
-privacy-label, Google Business Profile, and fulfillment evidence gates also
-remain open. The candidate's hard fulfillment gate keeps production Checkout
-closed even under the observed live environment tuple. IndexNow was not
-submitted because the candidate was not deployed.
+from production. The database also contains records that look like fixtures or
+integration runs but have not received an owner identity review. Owner/legal/
+insurance, App Store privacy-label, Google Business Profile, and fulfillment
+evidence gates also remain open. The earlier recommendation to close production
+Checkout was based on an incorrect interpretation of the live workflow and has
+been superseded: the reconciled candidate preserves the verified, intentionally
+active gated Checkout configuration. IndexNow was not submitted because the
+candidate was not deployed.
 
 ## Current live application
 
 - Pages project: `autoclarity-site`
 - Environment/branch: production / `main`
-- Deployment ID: `e7a9c599-8136-4a1a-9fd1-99d8ce7b5ee6`
-- Created: `2026-09-03T22:06:57.058389Z`
+- Active restored deployment ID: `a7b0fcb6-37aa-49fb-b1d0-7013a1a8ccde`
+- Runtime verified: `2026-09-08T08:38:34Z`
 - Status: successful
 - Source revision: `ce931b0724b05f7483566c7e95602934ca32a5db`
-- Public build header observed `2026-09-08T06:16:16Z`:
+- Public build header re-observed `2026-09-08T08:38:34Z`:
   `ac-prod-20260903-r3`
 - `/ppi/admin/` remained protected by Cloudflare Access.
 
@@ -34,8 +36,9 @@ submitted because the candidate was not deployed.
 - The exact live tuple passed: production environment, live PPI mode, payments
   enabled, live Stripe mode, and canonical apex public base URL.
 - Required encrypted Stripe, webhook, Turnstile, email, and Access secret names
-  were present. Encrypted values and Stripe-key prefixes cannot be retrieved by
-  this audit and therefore were not represented as verified.
+  were present. Their values were not retrieved. Under the exact deployed
+  source, runtime `paymentsEnabled=true` indirectly proves a live-compatible
+  Stripe key shape; it does not directly expose or validate the secret value.
 - D1 binding `DB` resolves to production database `autoclarity_ppi` with the
   independently observed production database ID.
 - R2 binding `UPLOADS` resolves to `autoclarity-ppi-uploads`.
@@ -43,13 +46,15 @@ submitted because the candidate was not deployed.
 - There is no stored PPI configuration override row, so current runtime public
   pricing/travel/scan behavior derives from the deployed code defaults.
 
-## D1 journal and non-personal baseline
+## D1 journal and historical non-personal baseline
 
 The production migration journal contains `0001_init.sql` through
-`0008_quote_payment_integrity.sql`. `0009_request_attribution.sql` has not been
-applied.
+`0008_quote_payment_integrity.sql`. `0009_request_attribution.sql` and
+`0010_lead_classification.sql` have not been applied.
 
-Read-only aggregate snapshot:
+This read-only aggregate snapshot was captured during the earlier audit, before
+the later clearly labeled synthetic payment-correction request. It is retained
+as timestamped evidence rather than presented as the current row count:
 
 | Measure | Value |
 |---|---:|
@@ -61,19 +66,41 @@ Read-only aggregate snapshot:
 | legacy confirmed refunds | $398.00 |
 | provider-ledger confirmed refunds | $0.00 |
 
-The resulting overall post-refund amount is $299.00, but it is entirely within
-the explicit fixture/integration-pattern cohort and is not defensible customer
-revenue. That cohort has 11 requests, three bookings, three payments, $498.00
-captured, and $199.00 refunded. It was left untouched for owner review.
+The resulting overall post-refund amount is $299.00, but it falls within the
+11-row identifier-pattern subset and cannot be attributed to owner-verified
+customer revenue without owner review. That subset has three bookings, three
+payments, $498.00 captured, and $199.00 refunded. It was left untouched for
+owner review.
 
-After excluding only those obvious identifiers, the unlabeled 90-day cohort has
-12 requests, four qualified requests, four sent-quote milestones, one checkout,
-one captured payment/confirmed booking, no completed inspection, $199.00 gross,
-and $199.00 refunded: $0.00 post-refund. The 30-day cohort has one request and no
-later milestone; the 7-day cohort is zero throughout. App Store outbound events
-are zero in all three windows. This exclusion is conservative but not an
-identity audit: unlabeled rows were not opened, so they are not asserted to be
-real customers. Production also has no source column until `0009` is applied.
+After excluding only those identifiers, the conservatively filtered,
+identity-unverified 90-day subset had 12 requests, four first recorded
+`ready_for_review` lifecycle milestones, four sent-quote milestones, one
+checkout, one captured payment/confirmed booking, no exact
+`status_history.to_status='completed'` event, $199.00 gross, and $199.00 in
+recorded refunds: a $0.00 current post-refund balance for that subset. The
+30-day subset had one request and no later recorded milestone; the 7-day subset
+was zero throughout. App Store outbound events were zero in all three windows.
+
+Those figures do **not** prove that AutoClarity has never completed or collected
+payment for a real PPI. The exclusion was an identifier-pattern filter, not an
+identity audit. The candidate's time-window scoreboard recognizes completion
+only from an exact completion status-history event and recognizes payment timing
+only from its deterministic server confirmation event. A real legacy,
+off-platform, or incompletely instrumented job can therefore be absent from
+those measurements. Production also has no source column until `0009` is
+applied.
+
+Migration `0010` intentionally defaults every historical request to
+`needs_owner_review`; an initial zero `genuine` count means zero owner-classified
+rows, not zero real customers. The protected owner queue preserves and displays
+payment, booking, and recorded-completion evidence for non-deleted requests.
+The owner can review the exact private record and mark the inquiry `genuine`
+without changing its lifecycle, payment, refund, booking, or history. Existing
+soft-deleted rows remain excluded from the queue and untouched; any material
+commerce evidence on those rows requires a separate owner-approved
+reconciliation rather than undeleting or reclassifying them in this release. If
+no exact completion event is present, this release leaves completion as “not
+recorded” rather than inventing or rewriting history.
 
 ## Backup and migration rehearsal
 
@@ -89,12 +116,12 @@ The export restored successfully into a disposable local SQLite database:
 - foreign-key violations: none
 - all recorded row counts and money totals: exact match to the remote snapshot
 
-`0009_request_attribution.sql` was then rehearsed on a copy of that restored
-database. The rehearsal completed cleanly; integrity and foreign keys remained
-clean; all counts and money totals were unchanged; all 23 existing requests
-received the conservative `ppi_unknown` default; no source was null; and
-`idx_requests_attribution_source` was present. This rehearsal did not change
-production.
+`0009_request_attribution.sql` and `0010_lead_classification.sql` were then
+rehearsed in order on a copy of that restored database. The rehearsal completed
+cleanly; integrity and foreign keys remained clean; all counts and money totals
+were unchanged; all 23 existing requests received the conservative
+`ppi_unknown` and `needs_owner_review` defaults; neither new field was null; and
+both new indexes were present. This rehearsal did not change production.
 
 ## Rollback record
 
@@ -104,13 +131,14 @@ production.
 - Database rollback evidence: the private pre-`0009` export plus its verified
   checksum and captured Time Travel bookmark. A restore is an emergency owner-
   approved operation; it was not exercised against production.
-- Commerce containment: if a future verification fails, disable payments while
-  allowing authentic late Stripe events to reconcile. Never delete or rewrite
-  completed payment evidence.
+- Commerce containment: if application verification fails, first promote the
+  recorded prior artifact. Only an explicit owner-authorized commerce incident
+  response may disable payments. Authentic late Stripe events must continue to
+  reconcile; never delete or rewrite completed payment evidence.
 
 ## Candidate
 
-Branch: `agent/ai-discovery-indexing-2026-09-07`. The exact final candidate
+Branch: `agent/growth-remediation-2026-09-08`. The exact final candidate
 revision is recorded in the release handoff after review; this in-revision
 record intentionally does not attempt to identify its own commit. Final test
 counts are recorded in `docs/AI_DISCOVERY_AUDIT_2026-09-07.md`.

@@ -31,6 +31,7 @@ describe('request attribution migration', () => {
     try {
       db.exec('PRAGMA foreign_keys = ON;');
       for (const migration of [...migrationsBeforeAttribution, attributionMigration]) db.exec(migration);
+      expect(ATTRIBUTION_SOURCES).toContain('ppi_ios_app');
 
       db.exec(`
         INSERT INTO customers (id, full_name, email, phone, created_at, updated_at)
@@ -46,7 +47,7 @@ describe('request attribution migration', () => {
         `).run(`req_attr_${index}`, `PPI-ATTR-${index}`, source)).not.toThrow();
       });
 
-      for (const fabricated of ['ppi_fabricated_agent_paid<script>', 'ppi_google_social', 'ppi_chatgpt']) {
+      for (const fabricated of ['ppi_fabricated_agent_paid<script>', 'ppi_google_social', 'ppi_chatgpt', 'ios_app', 'utm_source=ios_app&utm_medium=owned']) {
         expect(() => db.prepare(`
           INSERT INTO ppi_requests (id, ref, customer_id, vehicle_id, status, attribution_source, created_at, updated_at)
           VALUES (?, ?, 'cus_attr', 'veh_attr', 'submitted', ?, '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z')

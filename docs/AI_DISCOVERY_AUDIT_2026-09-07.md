@@ -8,6 +8,14 @@ listing, and current first-party crawler documentation. The isolated branch is
 not modified. The exact final candidate revision is recorded in the release
 handoff because a commit cannot truthfully embed its own hash.
 
+> **Payment reconciliation — 2026-09-08:** A later authoritative production
+> verification established that the live-payment configuration and gated
+> Checkout workflow are intentional. Earlier statements in this audit that
+> treated `paymentsEnabled=true` as a readiness defect are superseded. The
+> reconciled growth candidate preserves `PPI_ENV=production`, `PPI_MODE=live`,
+> `PAYMENTS_ENABLED=true`, `STRIPE_ENV=live`, `bookingEnabled=true`, and runtime
+> `paymentsEnabled=true`; it does not create a charge during verification.
+
 ## Executive result
 
 The site already had sound canonical URLs, crawlable server-rendered HTML,
@@ -33,9 +41,11 @@ or automated agent transaction surface.
 Follow-up review also repaired a form-bootstrap failure, made scan/SMS/review
 features fail closed, rejected malformed runtime configuration, removed
 unsupported response-time copy, corrected conservative revenue calculations,
-and required an exact immutable same-request published report before completion.
-The repository still lacks an operator report-authoring/publish flow; that and
-the external business gates below block production launch.
+and required an exact immutable same-request published report before future
+completion. The repository still lacks an operator report-authoring/publish UI,
+which requires owner validation before relying on that new completion action.
+It is not a reason to disable the separately gated production Checkout flow.
+The external business gates below still require owner approval for this release.
 
 ## Reviewed public facts
 
@@ -83,10 +93,12 @@ insurance approval, so the production checklist keeps those approvals open.
 
 ## Live technical baseline
 
-Observed 2026-09-08 before any deployment from this branch. Production remains
-the successful Pages deployment `e7a9c599-8136-4a1a-9fd1-99d8ce7b5ee6`, source
+Observed 2026-09-08 before any deployment from this branch. The original
+baseline was deployment `e7a9c599-8136-4a1a-9fd1-99d8ce7b5ee6`; after the
+separate payment-verification correction, production was restored from the same
+immutable source as deployment `a7b0fcb6-37aa-49fb-b1d0-7013a1a8ccde`, source
 `ce931b0724b05f7483566c7e95602934ca32a5db`, build header
-`ac-prod-20260903-r3`:
+`ac-prod-20260903-r3`. Both returned the same live runtime flags:
 
 | Surface | Result | Notes |
 |---|---:|---|
@@ -109,18 +121,23 @@ have explicit one-hour caches. The repository intentionally has no tracked
 production `wrangler.toml`; production bindings remain outside source control.
 
 The production D1 journal contains `0001` through `0008`; candidate migration
-`0009_request_attribution.sql` is not applied. A private pre-migration export
-was restored successfully and `0009` was rehearsed on its copy with clean
+`0009_request_attribution.sql` and `0010_lead_classification.sql` are not
+applied. A private pre-migration export was restored successfully and both were
+rehearsed in order on its copy with clean
 integrity/foreign-key checks, unchanged counts and money, a conservative
-`ppi_unknown` default on all 23 existing requests, and the expected index. No
-remote schema or record was changed. Full sanitized evidence is in
+`ppi_unknown` and `needs_owner_review` default on all 23 existing requests, and
+the expected indexes. No remote schema or record was changed. Full sanitized
+evidence is in
 `docs/PRODUCTION_PREFLIGHT_2026-09-07.md`.
 
-Production contains obvious fixture/integration-pattern records, including all
-of the apparent $299 post-refund amount. Unlabeled rows were not opened or
-asserted to be real customers. Production also still has an `ADMIN_DEV_KEY`
-secret name. Those are release blockers even though the deployed code refuses
-the preview key when `PPI_ENV=production`.
+Production contains records whose identifiers look like fixtures or integration
+runs, including records associated with the apparent $299 raw post-refund
+amount. That pattern match was not an identity audit, and neither those rows nor
+unlabeled rows were opened or asserted to be real customers. They require
+owner-reviewed classification, not deletion or historical rewriting.
+Production also still has an `ADMIN_DEV_KEY` secret name. Removing that secret
+remains a release gate even though the deployed code refuses the preview key
+when `PPI_ENV=production`.
 
 ## Search and answer-engine evaluation
 
@@ -180,18 +197,21 @@ install, subscription, renewal, or app revenue. Apple-side conversion needs
 App Store Connect or another explicitly authorized source.
 
 For the service funnel, each request now stores one first-touch category such
-as `ppi_google_cpc` or `ppi_search_organic`. Inputs are allowlisted; raw campaign
-names, URLs, hosts, search text, referrer paths, and customer fields are not
-stored in analytics. Missing or invalid values become `ppi_unknown`; the UI
-reports “Direct” and “Unknown / unattributed” separately rather than fabricating
-an AI source.
+as `ppi_google_cpc`, `ppi_search_organic`, or `ppi_ios_app`. The last category is
+created only from the documented `utm_source=ios_app&utm_medium=owned` handoff;
+the campaign value is discarded. Inputs are allowlisted; raw campaign names,
+URLs, hosts, search text, referrer paths, and customer fields are not stored in
+analytics. Missing or invalid values become `ppi_unknown`; the UI reports
+“Direct” and “Unknown / unattributed” separately rather than fabricating an AI
+source.
 
 The admin now separates:
 
 - **gross collected:** qualifying payment amounts in the 30-day payment cohort;
 - **refunded:** refunds recorded against those payments;
-- **net collected:** gross minus refunds;
-- **disputed:** separately surfaced and excluded from recognized net; and
+- **post-refund/dispute collected:** gross minus refunds and remaining balances
+  still latched as disputed;
+- **disputed:** separately surfaced; and
 - **verified funnel:** saved requests, sent quotes, created checkouts,
   successful payments, confirmed bookings, and completed inspections from D1
   workflow/payment records.
@@ -223,12 +243,12 @@ future design and technician-network migration path are recorded in
 
 - **Implemented:** source and generated facts, visible copy, JSON-LD, public
   catalog, `llms.txt`, IndexNow preflight, server attribution, authoritative
-  milestones, revenue/source reporting, strict runtime-configuration gates, a
-  hard production fulfillment-release gate, and a completion guard that
+  milestones, payment/source reporting, strict runtime-configuration checks,
+  an owner-reviewed lead classification queue, and a completion guard that
   requires one exact, integrity-checked, schema-valid published report while
   exposing only a customer-safe projection.
-- **Tested locally:** fact drift check and typecheck passed; 248 unit tests and
-  68 full HTTP workflow tests passed with fresh local D1/R2 and mocked Stripe;
+- **Tested locally:** fact drift check and typecheck passed; 263 unit tests and
+  72 full HTTP workflow tests passed with fresh local D1/R2 and mocked Stripe;
   all internal links and header checks passed; rendered checks at 375px, 768px,
   and 1440px found no horizontal overflow, fallback form, duplicate IDs, or
   console warnings/errors. A final phone-width smoke also confirmed the intake
@@ -242,11 +262,13 @@ future design and technician-network migration path are recorded in
 - **Observed in AI answers/citations/referrals:** no.
 - **Observed payments/revenue from this release:** no; tests use mocked payments only.
 
-Release is blocked. Before migration `0009` or deployment, remove the production
-development-key secret, resolve production fixture contamination without
-touching genuine customer evidence, implement and rehearse report authoring and
-private photo delivery, and record the owner/legal/insurance/App Store privacy
-approvals. The candidate hard fulfillment gate keeps production Checkout closed
-until that missing flow is implemented and separately released.
+Release awaits explicit owner approval. Before migrations `0009` and `0010` or
+deployment, remove the production development-key secret; owner-review suspected
+fixture/test identities without deleting or changing genuine commerce/history
+evidence; validate the report-authoring and private photo-delivery operating
+path; and record the owner/legal/insurance/App Store privacy approvals. The
+reconciled candidate preserves the verified current Checkout behavior: intake
+is free, and Checkout becomes available only after the exact quote, selected
+window, current quote-bound agreements, and `awaiting_payment` gates.
 Only a later clean deployment may be followed by live smoke tests, one
 preflighted IndexNow submission, and authenticated Search Console/Bing work.

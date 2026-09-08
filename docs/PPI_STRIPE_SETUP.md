@@ -1,8 +1,10 @@
 # Stripe Setup
 
 **Preview uses TEST MODE ONLY. Live keys are refused by code unless
-`PPI_ENV=production` AND `PPI_MODE=live` AND `STRIPE_ENV=live` — and switching
-those on is an owner decision gated by the production checklist.**
+`PPI_ENV=production` AND `PPI_MODE=live` AND `STRIPE_ENV=live`. Production is
+already intentionally configured with that live tuple; unrelated releases must
+preserve it rather than treating the effective Checkout capability as an intake
+charge trigger.**
 
 ## Test mode (preview) — ~10 minutes
 
@@ -34,7 +36,8 @@ those on is an owner decision gated by the production checklist.**
   a recoverable interruption reuse the same provider idempotency key;
   `client_reference_id` remains the internal booking id.
 - Metadata carries internal ids only — never VIN, address, notes.
-- Success/cancel URLs come from `PUBLIC_BASE_URL` (allowlisted), not request headers.
+- Success/cancel URLs come from the production-configured `PUBLIC_BASE_URL`, not
+  request headers.
 - The **webhook** is the only thing that confirms bookings. Signatures are
   HMAC-verified with a 5-minute tolerance; event ids are recorded in
   `stripe_events` so replays are acknowledged but never reprocessed.
@@ -53,18 +56,23 @@ those on is an owner decision gated by the production checklist.**
   require deliberate manual follow-up.
 - No card data ever touches the AutoClarity database.
 
-## Production activation
+## Production preservation and verification
 
-Complete these steps only as part of an approved production deployment after
-the production checklist passes:
+The live account, key, webhook, and variables were already configured and used
+before this growth release. Verify them through owner-authorized account access;
+do not rotate or replace them as part of this release:
 
-1. Activate the Stripe account (business details, bank account).
-2. Live mode → API keys → `sk_live_...` → set as the **Production** secret.
-3. Live webhook endpoint at `https://getautoclarity.com/api/stripe/webhook`
-   with the same thirteen events and a compatible webhook API version → live
-   `whsec_...` secret.
-4. Production env vars: `STRIPE_ENV=live`, `PAYMENTS_ENABLED=true`,
-   `PPI_MODE=live`, `PPI_ENV=production`.
-5. Verify a live Checkout Session can be initialized from a genuine approved
-   quote without completing a charge. Do not use Stripe test cards in live mode.
-   A live charge/refund test requires separate explicit authorization.
+1. Confirm the Stripe account remains active and payout details remain
+   owner-approved without exposing them in release evidence.
+2. Confirm the encrypted production key binding remains present; do not reveal
+   or change its value.
+3. Confirm the live webhook remains configured at
+   `https://getautoclarity.com/api/stripe/webhook` for the same thirteen events
+   and a compatible API version; do not reveal or change its signing secret.
+4. Preserve production variables: `STRIPE_ENV=live`,
+   `PAYMENTS_ENABLED=true`, `PPI_MODE=live`, `PPI_ENV=production`.
+5. Verify the no-store runtime response still reports payments available and
+   rely on the existing signed-event and prior gated-Checkout evidence for this
+   no-charge release check. Do not create a new Checkout Session, use a live
+   card, complete a charge, or issue a refund without separate explicit owner
+   authorization.

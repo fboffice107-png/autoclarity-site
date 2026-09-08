@@ -14,6 +14,7 @@ import quotePaymentIntegrityMigration from '../../migrations/0008_quote_payment_
 import attributionMigration from '../../migrations/0009_request_attribution.sql?raw';
 import leadClassificationMigration from '../../migrations/0010_lead_classification.sql?raw';
 import intakeSource from '../../functions/api/ppi/requests.ts?raw';
+import adminPage from '../../ppi/admin/index.html?raw';
 import leadReviewPage from '../../ppi/admin/lead-review/index.html?raw';
 import leadReviewScript from '../../assets/js/ppi-lead-review.js?raw';
 import { parseIntake } from '../../functions/lib/validate.ts';
@@ -218,7 +219,7 @@ describe('lead classification validation and protected workflow', () => {
         attributionSource: 'ppi_google_organic',
         hasPayment: false,
         hasBooking: false,
-        hasCompletion: false,
+        hasRecordedCompletion: false,
       });
       const serialized = JSON.stringify(unresolved.body);
       for (const privateValue of [
@@ -234,7 +235,7 @@ describe('lead classification validation and protected workflow', () => {
       expect(statusFiltered.status).toBe(200);
       expect(statusFiltered.body.filters).toMatchObject({ classification: 'all', status: 'completed', limit: 100 });
       expect(statusFiltered.body.queue.map((row: Record<string, unknown>) => row.id)).toEqual(['req_completed']);
-      expect(statusFiltered.body.queue[0].hasCompletion).toBe(true);
+      expect(statusFiltered.body.queue[0].hasRecordedCompletion).toBe(true);
 
       expect((await callGet(db, '/api/admin/lead-review?classification=invalid')).status).toBe(422);
       expect((await callGet(db, '/api/admin/lead-review?status=invalid')).status).toBe(422);
@@ -330,7 +331,7 @@ describe('lead classification validation and protected workflow', () => {
       const all = await callGet(db, '/api/admin/lead-review?classification=all');
       expect(all.body.reconciliationWarningCount).toBe(1);
       expect(all.body.queue.find((row: Record<string, unknown>) => row.id === 'req_completed'))
-        .toMatchObject({ classification: 'test', hasCompletion: true, hasReconciliationEvidence: true });
+        .toMatchObject({ classification: 'test', hasRecordedCompletion: true, hasReconciliationEvidence: true });
     } finally {
       db.close();
     }
@@ -375,11 +376,21 @@ describe('lead classification validation and protected workflow', () => {
   });
 
   it('ships a separate noindex owner page without customer data fields or bulk actions', () => {
+    expect(adminPage).toContain('<a class="tab-btn" href="/ppi/admin/lead-review/">Lead review</a>');
     expect(leadReviewPage).toContain('<meta name="robots" content="noindex, nofollow"');
-    expect(leadReviewPage).toContain('/assets/js/ppi-lead-review.js');
+    expect(leadReviewPage).toContain('/assets/css/site.css?v=ac-ai-20260908-r1');
+    expect(leadReviewPage).toContain('/assets/css/ppi.css?v=ac-ai-20260908-r1');
+    expect(leadReviewPage).toContain('/assets/js/ppi-lead-review.js?v=ac-ai-20260908-r1');
+    expect(leadReviewPage).not.toContain('ac-ai-20260907-r2');
     expect(leadReviewPage).toContain('Internal label only—this does not contact the customer');
     expect(leadReviewScript).toContain('/api/admin/lead-review');
     expect(leadReviewScript).toContain('expectedClassification');
+    expect(leadReviewScript).toContain('"Lead classification for " + String(requestRef)');
+    expect(leadReviewScript).toContain('classificationSelect(row.classification, row.ref || row.id)');
+    expect(leadReviewScript).toContain('Zero genuine means zero owner-classified genuine requests');
+    expect(leadReviewScript).toContain('Unknown / unattributed');
+    expect(leadReviewScript).toContain('AutoClarity iOS app');
+    expect(leadReviewScript).not.toContain('Direct / unknown');
     expect(leadReviewScript).not.toMatch(/\bbulk\b|customer[_ -]?(name|email|phone)|seller[_ -]?(name|phone)|listing[_ -]?url|\bvin\b/iu);
   });
 });

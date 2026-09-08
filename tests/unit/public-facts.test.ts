@@ -6,6 +6,7 @@ import catalogRaw from '../../autoclarity-services.json?raw';
 import llms from '../../llms.txt?raw';
 import home from '../../index.html?raw';
 import ppi from '../../las-vegas-pre-purchase-inspection/index.html?raw';
+import sampleReport from '../../las-vegas-pre-purchase-inspection/sample-report/index.html?raw';
 import robots from '../../robots.txt?raw';
 import sitemap from '../../sitemap.xml?raw';
 import headers from '../../_headers?raw';
@@ -29,13 +30,33 @@ describe('reviewed public fact projection', () => {
   const catalog = JSON.parse(catalogRaw) as Json;
 
   it('publishes exactly two clearly separated offerings from one dated source', () => {
+    expect(source.schemaVersion).toBe(2);
+    expect(catalog.schemaVersion).toBe(2);
     expect(source.lastReviewedAt).toBe('2026-09-07');
     expect(catalog.lastReviewedAt).toBe(source.lastReviewedAt);
+    expect(source).not.toHaveProperty('verifiedAt');
     expect(catalog).not.toHaveProperty('verifiedAt');
     expect(catalog.offerings).toHaveLength(2);
     expect(catalog.offerings.map((item: Json) => item.type)).toEqual(['mobile_application', 'service']);
     expect(catalog.relationship).toContain('separate products');
     expect(catalog.relationship).toContain('does not include a physical inspection');
+    for (const offering of catalog.offerings) {
+      expect(offering.sourceReferences.length).toBeGreaterThan(0);
+      for (const reference of offering.sourceReferences) {
+        expect(reference.reviewedAt).toBe(source.lastReviewedAt);
+        expect(reference).not.toHaveProperty('verifiedAt');
+      }
+    }
+  });
+
+  it('labels indexed sample-report metadata as fictional demonstration content', () => {
+    expect(sampleReport).toContain('<title>Fictional Sample PPI Report | AutoClarity</title>');
+    const description = sampleReport.match(/<meta name="description" content="([^"]+)"/u)?.[1] ?? '';
+    expect(description).toContain('fictional');
+    expect(description).toContain('example findings');
+    expect(description).toContain('labeled photo placeholders');
+    expect(description).toContain('not a customer report');
+    expect(description).not.toContain('exactly what a Las Vegas PPI customer receives');
   });
 
   it('answers the app acceptance questions without expanding the verified storefront', () => {

@@ -116,32 +116,36 @@ Record those approvals before release; engineering must not infer them.
 8. Apply `0009_request_attribution.sql` only after `0008`. Verify the
    `ppi_requests.attribution_source` column has the `ppi_unknown` default and
    the source index exists before deploying code that writes the field.
-9. Export or reconstruct the actual production Pages configuration outside the
+9. Apply `0010_lead_classification.sql` only after `0009`. Verify the
+   `ppi_requests.lead_classification` column has the `needs_owner_review`
+   default, its exact six-value constraint rejects other values, and the lead
+   review index exists before deploying the admin queue that reads the field.
+10. Export or reconstruct the actual production Pages configuration outside the
    repository and review every project name, binding name/ID, bucket, variable,
    route, branch, and compatibility setting. There is intentionally no tracked
    default `wrangler.toml`; never use `wrangler.local.toml` or the generated
    preview configuration for production.
-10. Confirm Access protection, remove the `ADMIN_DEV_KEY` secret entirely from
+11. Confirm Access protection, remove the `ADMIN_DEV_KEY` secret entirely from
    production, and verify the future payment tuple without activating it:
    `PPI_ENV=production`, `PPI_MODE=live`, `PAYMENTS_ENABLED=false`,
    `STRIPE_ENV=live`, `PUBLIC_BASE_URL=https://getautoclarity.com`, and an
    `sk_live_` Stripe secret plus the matching `whsec_` webhook secret. Partial,
    missing, or mixed test/live combinations must remain fail-closed. Confirm the
    live endpoint and signing secret without creating a charge.
-11. Deploy the reviewed build to the production branch using only that audited
+12. Deploy the reviewed build to the production branch using only that audited
    production configuration. `PPI_FULFILLMENT_RELEASED=false` keeps production
    Checkout closed even if an environment value is accidentally changed.
-12. Smoke-test homepage, PPI page, redirects, runtime config, admin lock, public
+13. Smoke-test homepage, PPI page, redirects, runtime config, admin lock, public
    fact documents, webhook
    signature rejection, and failure handling without creating a production
    fixture/customer or completing a charge. Runtime config must report payments
    unavailable. The full paid confirmation/refund workflow must pass in isolated
    Stripe test mode.
-13. Only after the authenticated report author/review/publish and private photo
+14. Only after the authenticated report author/review/publish and private photo
    delivery workflow passes a real preview rehearsal may a separately reviewed
    code release set `PPI_FULFILLMENT_RELEASED=true` and activate
    `PAYMENTS_ENABLED=true`. Monitor the first genuine paid booking end-to-end.
-14. If commerce verification fails, set `PAYMENTS_ENABLED=false` while authentic
+15. If commerce verification fails, set `PAYMENTS_ENABLED=false` while authentic
    late Stripe events continue to reconcile. Roll back application code by
    promoting/redeploying the previously recorded Pages deployment; do not change
    DNS or delete production data.

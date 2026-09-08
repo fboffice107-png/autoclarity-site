@@ -74,7 +74,8 @@ or insurance readiness — those are real-world facts only the owner can confirm
 - [ ] Backup restored into a disposable local database; `integrity_check`,
       `foreign_key_check`, table counts, request/payment counts, gross captured,
       and refund totals reconcile to the pre-migration read-only snapshot
-- [ ] Candidate migration rehearsed against a copy of that restored backup;
+- [ ] Candidate migrations `0009` and `0010` rehearsed in order against a copy
+      of that restored backup;
       post-migration integrity/foreign-key checks and all recorded counts/money
       invariants match, except for the explicitly reviewed additive schema/data
       defaults
@@ -105,6 +106,9 @@ or insurance readiness — those are real-world facts only the owner can confirm
 - [ ] `0009_request_attribution.sql` applied after `0008`; source column,
       unknown default, exact source allowlist constraint, and source index
       verified before application deployment
+- [ ] `0010_lead_classification.sql` applied after `0009`; classification
+      column, `needs_owner_review` default, exact six-value constraint, and lead
+      review index verified before deploying the admin queue
 - [ ] Production D1 binding verified and migrations applied only through the
       independently reviewed production configuration
 - [ ] Production R2 bucket created, binding verified
@@ -114,11 +118,13 @@ or insurance readiness — those are real-world facts only the owner can confirm
       absent—not merely unused—from production)
 - [ ] Email domain authenticated (SPF/DKIM for the sending domain) and
       `RESEND_API_KEY`/`EMAIL_FROM`/`ADMIN_NOTIFY_EMAIL` set
-- [ ] Production env vars form the complete live-payment tuple:
-      `PPI_ENV=production`, `PPI_MODE=live`, `PAYMENTS_ENABLED=true`,
+- [ ] Production pre-release env vars keep Checkout unavailable:
+      `PPI_ENV=production`, `PPI_MODE=live`, `PAYMENTS_ENABLED=false`,
       `STRIPE_ENV=live`, `PUBLIC_BASE_URL=https://getautoclarity.com`; the Stripe
       secret begins with `sk_live_` and the endpoint signing secret begins with
-      `whsec_`. Missing/invalid mode values keep commerce fail-closed.
+      `whsec_`. Missing/invalid mode values keep commerce fail-closed. Set
+      `PAYMENTS_ENABLED=true` only in the separately approved payment release
+      that also sets `PPI_FULFILLMENT_RELEASED=true` after every readiness gate.
 - [ ] Admin mutations reject missing, null, malformed, and cross-origin Origin
       headers before auth/body parsing; JSON/webhook/upload body limits pass
       preview adversarial tests

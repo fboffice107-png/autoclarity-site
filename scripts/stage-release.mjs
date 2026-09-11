@@ -44,7 +44,10 @@ for (const path of sourceFiles.filter(p => p.startsWith('functions/'))) {
   writeFileSync(target, git('show', `${expected}:${path}`));
 }
 // Version-checked local compiler; no deployment config or credentials copied.
-execFileSync(join(root, 'node_modules/.bin/wrangler'), ['pages', 'functions', 'build', 'functions', '--outfile', join(publicDir, '_worker.js'), '--output-routes-path', join(publicDir, '_routes.json'), '--compatibility-date', '2026-07-01'], { cwd: buildSource, stdio: 'pipe', env: { ...process.env, WRANGLER_SEND_METRICS: 'false', WRANGLER_LOG_PATH: join(output, 'compiler.log') } });
+// --outfile emits a multipart upload body in this Wrangler version, not an
+// executable script. Pages advanced mode accepts the module directory below.
+execFileSync(join(root, 'node_modules/.bin/wrangler'), ['pages', 'functions', 'build', 'functions', '--outdir', join(publicDir, '_worker.js'), '--output-routes-path', join(publicDir, '_routes.json'), '--compatibility-date', '2026-07-01'], { cwd: buildSource, stdio: 'pipe', env: { ...process.env, WRANGLER_SEND_METRICS: 'false', WRANGLER_LOG_PATH: join(output, 'compiler.log') } });
+execFileSync(process.execPath, ['--check', join(publicDir, '_worker.js/index.js')], { stdio: 'pipe' });
 const files = [];
 function inventory(dir) {
   for (const name of readdirSync(dir).sort()) {

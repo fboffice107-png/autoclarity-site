@@ -12,10 +12,11 @@ interface PublishedReportRow {
   payload_json: string;
   payload_sha256: string;
   published_at: string;
+  workflow_revision?: number;
 }
 
 type ReportVerdict = 'proceed' | 'negotiate_repair_first' | 'do_not_proceed';
-type ReportResult = 'pass' | 'attention' | 'fail' | 'not_inspected' | 'not_applicable';
+type ReportResult = 'pass' | 'attention' | 'fail' | 'not_inspected' | 'not_accessible' | 'not_applicable';
 type ReportPerformed = 'performed' | 'partial' | 'not_performed';
 type ReportPriority = 'immediate' | 'soon' | 'monitor' | 'informational';
 type ReportNotPerformedReason =
@@ -30,6 +31,10 @@ export interface CustomerReportPayload {
   schema: 'autoclarity.ppi.report';
   schemaVersion: 1;
   inspector?: string;
+  inspectedAt?: string;
+  createdAt?: string;
+  reviewedAt?: string;
+  vehicle?: { year: number | null; make: string; model: string; vin?: string; trim?: string; vinCheck?: string; odometerMiles?: number; plate?: string; plateState?: string; titleStatus?: string; titleDisclosureNotes?: string };
   overall: {
     score: number;
     verdict: ReportVerdict;
@@ -51,7 +56,7 @@ export interface CustomerReportPayload {
       costLowCents?: number;
       costHighCents?: number;
       priority?: ReportPriority;
-      photos?: Array<{ caption?: string }>;
+      photos?: Array<{ id?: string; caption?: string }>;
     }>;
   }>;
   limitations: {
@@ -68,13 +73,14 @@ export interface PublishedReportVersion {
   publishedAt: string;
   payloadSha256: string;
   payload: CustomerReportPayload;
+  workflowRevision?: number;
 }
 
 const MAX_REPORT_PAYLOAD_BYTES = 1_048_576;
 const MAX_REPORT_SECTIONS = 50;
 const MAX_REPORT_ITEMS = 1_000;
 const MAX_ITEMS_PER_SECTION = 250;
-const MAX_PHOTOS_PER_ITEM = 50;
+const MAX_PHOTOS_PER_ITEM = 60;
 const MAX_LIMITATIONS = 100;
 
 class InvalidCustomerReportPayload extends Error {}
@@ -206,7 +212,7 @@ export function projectCustomerReportPayload(value: unknown): CustomerReportPayl
               item,
               'result',
               `${path}.result`,
-              ['pass', 'attention', 'fail', 'not_inspected', 'not_applicable'] as const,
+              ['pass', 'attention', 'fail', 'not_inspected', 'not_accessible', 'not_applicable'] as const,
             ),
           };
           const note = optionalText(item, 'note', `${path}.note`, 8_000);
@@ -242,7 +248,9 @@ export function projectCustomerReportPayload(value: unknown): CustomerReportPayl
             projectedItem.photos = array(item['photos'], `${path}.photos`, MAX_PHOTOS_PER_ITEM).map((rawPhoto, photoIndex) => {
               const photo = record(rawPhoto, `${path}.photos[${photoIndex}]`);
               const caption = optionalText(photo, 'caption', `${path}.photos[${photoIndex}].caption`, 1_000);
-              return caption ? { caption } : {};
+              const id = optionalText(photo, 'id', `${path}.photos[${photoIndex}].id`, 80);
+              if (id && !/^rp_[a-zA-Z0-9_-]+$/.test(id)) throw new InvalidCustomerReportPayload('Invalid private photo reference.');
+              return { ...(id ? { id } : {}), ...(caption ? { caption } : {}) };
             });
           }
           return projectedItem;
@@ -261,7 +269,10 @@ export function projectCustomerReportPayload(value: unknown): CustomerReportPayl
     });
 
     const limitationsRaw = record(root['limitations'], 'report.limitations');
-    const standard = array(limitationsRaw['standard'], 'report.limitations.standard', MAX_LIMITATIONS)
+    // The real legacy report writer used one bounded paragraph here. Normalize
+    // its presentation only; the stored immutable body and digest stay exact.
+    const rawStandard = typeof limitationsRaw['standard'] === 'string' ? [limitationsRaw['standard']] : limitationsRaw['standard'];
+    const standard = array(rawStandard, 'report.limitations.standard', MAX_LIMITATIONS)
       .map((item, index) => {
         const wrapper = { value: item };
         return requiredText(wrapper, 'value', `report.limitations.standard[${index}]`, 2_000);
@@ -271,11 +282,31 @@ export function projectCustomerReportPayload(value: unknown): CustomerReportPayl
       throw new InvalidCustomerReportPayload('The report must disclose at least one limitation.');
     }
     const inspector = optionalText(root, 'inspector', 'report.inspector', 200);
+    const metadata: Pick<CustomerReportPayload, 'inspectedAt' | 'createdAt' | 'reviewedAt' | 'vehicle'> = {};
+    for (const field of ['inspectedAt','createdAt','reviewedAt'] as const) {
+      const value = optionalText(root, field, `report.${field}`, 40);
+      if (value) { if (Number.isNaN(Date.parse(value))) throw new InvalidCustomerReportPayload('Invalid report timestamp.'); metadata[field]=value; }
+    }
+    if (root.vehicle && typeof root.vehicle === 'object') {
+      const vehicle=record(root.vehicle,'report.vehicle');
+      const year=vehicle.year;
+      if (year !== undefined && year !== null && (!Number.isSafeInteger(year) || Number(year)<1885 || Number(year)>2200)) throw new InvalidCustomerReportPayload('Invalid vehicle year.');
+      const projected: NonNullable<CustomerReportPayload['vehicle']>={year:year==null?null:Number(year),make:requiredText(vehicle,'make','vehicle.make',100),model:requiredText(vehicle,'model','vehicle.model',100)};
+      for(const field of ['vin','trim','vinCheck','plate','plateState','titleStatus','titleDisclosureNotes'] as const){
+        const value=optionalText(vehicle,field,`vehicle.${field}`,field==='titleDisclosureNotes'?8000:200);if(value)projected[field]=value;
+      }
+      if(vehicle.odometerMiles!==undefined && vehicle.odometerMiles!==null){
+        if(!Number.isSafeInteger(vehicle.odometerMiles)||Number(vehicle.odometerMiles)<0)throw new InvalidCustomerReportPayload('Invalid odometer.');
+        projected.odometerMiles=Number(vehicle.odometerMiles);
+      }
+      metadata.vehicle=projected;
+    }
 
     return {
       schema: 'autoclarity.ppi.report',
       schemaVersion: 1,
       ...(inspector ? { inspector } : {}),
+      ...metadata,
       overall,
       sections,
       limitations: {
@@ -301,14 +332,14 @@ export async function loadPublishedReportVersion(
   const row = await db
     .prepare(
       `SELECT ir.id AS report_id, rv.id AS version_id, rv.version, rv.kind,
-              rv.payload_json, rv.payload_sha256, rv.published_at
+              rv.payload_json, rv.payload_sha256, rv.published_at, rv.workflow_revision
        FROM inspection_reports ir
        JOIN report_versions rv
          ON rv.id = ir.published_version_id
         AND rv.report_id = ir.id
         AND rv.request_id = ir.request_id
        WHERE ir.request_id = ?
-         AND ir.state = 'published'
+         AND (ir.state = 'published' OR rv.workflow_revision = 1 OR ir.amendment_reason IS NOT NULL)
          AND rv.status = 'published'
        LIMIT 1`,
     )
@@ -335,6 +366,12 @@ export async function loadPublishedReportVersion(
   }
   const customerPayload = projectCustomerReportPayload(payload);
   if (!customerPayload) return null;
+  if (row.workflow_revision === 1) {
+    const delivery=await db.prepare(`SELECT d.id FROM report_deliveries d JOIN inspection_reports ir ON ir.id=d.report_id
+      WHERE d.version_id=? AND d.request_id=? AND d.report_id=? AND d.customer_id=ir.customer_id`)
+      .bind(row.version_id,requestId,row.report_id).first();
+    if(!delivery)return null;
+  }
 
   return {
     reportId: row.report_id,
@@ -344,6 +381,7 @@ export async function loadPublishedReportVersion(
     publishedAt: row.published_at,
     payloadSha256: storedDigest,
     payload: customerPayload,
+    ...(row.workflow_revision === 1 ? { workflowRevision: 1 } : {}),
   };
 }
 
@@ -364,6 +402,11 @@ export async function completeWithPublishedReport(
 ): Promise<CompleteWithPublishedReportResult> {
   const report = await loadPublishedReportVersion(db, requestId);
   if (!report) return { ok: false, code: 'report_required' };
+  if(report.workflowRevision===1){
+    const notification=await db.prepare(`SELECT delivery_id FROM report_notification_evidence
+      WHERE version_id=? AND request_id=? AND (status='sent' OR (status='recorded' AND is_current=1))`).bind(report.versionId,requestId).first();
+    if(!notification)return {ok:false,code:'report_required'};
+  }
 
   const now = new Date().toISOString();
   const historyId = `sh_report_completed_${report.versionId}`;
@@ -388,6 +431,8 @@ export async function completeWithPublishedReport(
              AND ir.state = 'published'
              AND rv.id = ?
              AND rv.status = 'published'
+             AND (rv.workflow_revision=0 OR EXISTS(SELECT 1 FROM report_notification_evidence n
+               WHERE n.version_id=rv.id AND n.request_id=r.id AND (n.status='sent' OR (n.status='recorded' AND n.is_current=1))))
          )`,
       )
       .bind(
@@ -418,6 +463,8 @@ export async function completeWithPublishedReport(
                AND ir.state = 'published'
                AND rv.id = ?
                AND rv.status = 'published'
+               AND (rv.workflow_revision=0 OR EXISTS(SELECT 1 FROM report_notification_evidence n
+                 WHERE n.version_id=rv.id AND n.request_id=ppi_requests.id AND (n.status='sent' OR (n.status='recorded' AND n.is_current=1))))
            )`,
       )
       .bind(now, requestId, report.reportId, report.versionId),

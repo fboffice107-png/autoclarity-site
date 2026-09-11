@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { verifyIndexNowTargets } from './submit-indexnow.mjs';
 
 const base = 'https://getautoclarity.com';
-const build = 'ac-ai-20260908-r1';
+const build = 'ac-ai-20260911-r1';
 const files = new Map([
   [`${base}/`, await readFile(new URL('../index.html', import.meta.url), 'utf8')],
   [`${base}/las-vegas-pre-purchase-inspection/`, await readFile(new URL('../las-vegas-pre-purchase-inspection/index.html', import.meta.url), 'utf8')],

@@ -3,8 +3,8 @@
 
 import { modeFlags, type Env } from './types.ts';
 import type { PpiConfig } from './config.ts';
-import { verifyMagicToken } from './magic.ts';
-import { rateLimit } from './ratelimit.ts';
+import { inspectMagicToken, verifyMagicToken } from './magic.ts';
+import { rateLimit, rateLimitStatus } from './ratelimit.ts';
 import { clientIp, errorJson, nowIso } from './util.ts';
 import { latestAgreements } from './agreements.ts';
 import { STATUS_LABELS, type Status } from './status.ts';
@@ -12,6 +12,20 @@ import { quoteExpired } from './pricing.ts';
 import { loadPublishedReportVersion, type CustomerReportPayload } from './published-report.ts';
 
 export type PortalAuth = { ok: true; requestId: string; token: string } | { ok: false; response: Response };
+
+/** Private report photos use a separate bounded asset budget. Invalid tokens
+ * retain a prechecked 60/hour failure budget; every read rechecks revocation. */
+export async function requirePortalAsset(request:Request,env:Env):Promise<PortalAuth>{
+  const ip=clientIp(request);
+  const failureBudget=await rateLimitStatus(env.DB,ip,'portal_asset_invalid',60,3600);
+  const assetBudget=await rateLimit(env.DB,ip,'portal_asset',600,3600);
+  if(!failureBudget.allowed||!assetBudget.allowed)return {ok:false,response:errorJson('rate_limited','Too many attempts. Please try again later.',429)};
+  const header=request.headers.get('authorization')||'';
+  const token=header.startsWith('Bearer ')?header.slice(7):'';
+  const result=await inspectMagicToken(env.DB,token);
+  if(!result.ok){await rateLimit(env.DB,ip,'portal_asset_invalid',60,3600);return {ok:false,response:errorJson(`link_${result.reason}`,'Use your current secure AutoClarity portal link to view this photo.',401)};}
+  return {ok:true,requestId:result.requestId,token};
+}
 
 export async function requirePortal(request: Request, env: Env): Promise<PortalAuth> {
   const limited = await rateLimit(env.DB, clientIp(request), 'portal_token', 60, 3600);

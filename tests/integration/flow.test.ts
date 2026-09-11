@@ -112,6 +112,54 @@ async function getProviderState(): Promise<Json> {
   return (await (await fetch('http://127.0.0.1:8798/test-state')).json()) as Json;
 }
 
+let agreementFixtureSequence = 0;
+
+// Independent disposable requests keep invalid/historical evidence append-only.
+// The normal owner-link and customer time-selection APIs are still exercised.
+async function seedAgreementFixture(suffix: string): Promise<{
+  requestId: string; quoteId: string; portalHeaders: Record<string, string>; view: Json;
+}> {
+  agreementFixtureSequence += 1;
+  const requestId = `req_agreement_${suffix}`;
+  const quoteId = `qot_agreement_${suffix}`;
+  const slotId = `slt_agreement_${suffix}`;
+  const customerId = `cus_agreement_${suffix}`;
+  const vehicleId = `veh_agreement_${suffix}`;
+  const now = new Date().toISOString();
+  const start = new Date(Date.now() + (10 + agreementFixtureSequence) * 86_400_000);
+  start.setUTCHours(20, 0, 0, 0);
+  const startsAt = start.toISOString();
+  const endsAt = new Date(Date.parse(startsAt) + 2 * 3600_000).toISOString();
+  await executeLocalD1(`
+    INSERT INTO customers (id, full_name, email, phone, created_at, updated_at)
+    VALUES (${sqlLiteral(customerId)}, 'Agreement Fixture', ${sqlLiteral(`${suffix}@example.com`)}, '702-555-0189', ${sqlLiteral(now)}, ${sqlLiteral(now)});
+    INSERT INTO vehicles (id, make, model, created_at, updated_at)
+    VALUES (${sqlLiteral(vehicleId)}, 'Test', 'Agreement Vehicle', ${sqlLiteral(now)}, ${sqlLiteral(now)});
+    INSERT INTO ppi_requests (id, ref, customer_id, vehicle_id, status, created_at, updated_at)
+    VALUES (${sqlLiteral(requestId)}, ${sqlLiteral(`PPI-AGREEMENT-${suffix.toUpperCase()}`)}, ${sqlLiteral(customerId)}, ${sqlLiteral(vehicleId)}, 'quote_sent', ${sqlLiteral(now)}, ${sqlLiteral(now)});
+    INSERT INTO quotes (id, request_id, version, status, tier, currency, subtotal_cents, total_cents, expires_at, approved_by, created_at, updated_at)
+    VALUES (${sqlLiteral(quoteId)}, ${sqlLiteral(requestId)}, 1, 'draft', 'standard', 'usd', 19900, 19900, '2041-01-01T00:00:00.000Z', 'test', ${sqlLiteral(now)}, ${sqlLiteral(now)});
+    INSERT INTO quote_line_items (id, quote_id, kind, label, amount_cents, sort)
+    VALUES (${sqlLiteral(`qli_agreement_${suffix}`)}, ${sqlLiteral(quoteId)}, 'base', 'Standard Vehicle PPI', 19900, 0);
+    UPDATE quotes SET status = 'sent' WHERE id = ${sqlLiteral(quoteId)};
+    INSERT INTO appointment_slots (id, request_id, starts_at, ends_at, status, created_at, updated_at)
+    VALUES (${sqlLiteral(slotId)}, ${sqlLiteral(requestId)}, ${sqlLiteral(startsAt)}, ${sqlLiteral(endsAt)}, 'offered', ${sqlLiteral(now)}, ${sqlLiteral(now)});
+  `);
+  const link = await adminPost(requestId, { action: 'reissue_link' });
+  expect(link.status).toBe(200);
+  const token = new URL(link.body.url).searchParams.get('t')!;
+  const portalHeaders = {
+    authorization: `Bearer ${token}`,
+    'cf-connecting-ip': `198.51.100.${180 + agreementFixtureSequence}`,
+  };
+  const selection = await post('/api/portal/action', { action: 'select_slot', slotId }, portalHeaders);
+  expect(selection.status, JSON.stringify(selection.body)).toBe(200);
+  const view = await get('/api/portal', portalHeaders);
+  expect(view.status).toBe(200);
+  expect(view.body.status).toBe('awaiting_agreement');
+  return { requestId, quoteId, portalHeaders, view: view.body };
+}
+
 let checkoutWebhookFixtureSequence = 0;
 
 interface CheckoutWebhookFixtureOptions {
@@ -588,12 +636,9 @@ describe('quote → slot → agreements → payment (EUROLX fixture)', () => {
     expect((await get('/api/portal', portalHeaders)).body.status).toBe('awaiting_agreement');
   });
 
-  it('blocks checkout for stale same-count, wrong/null-quote, and unaccepted rows', async () => {
-    const portalHeaders = { authorization: `Bearer ${euroOldToken}`, 'cf-connecting-ip': '198.51.100.72' };
-    const view = await get('/api/portal', portalHeaders);
+  it('blocks checkout for retained stale same-count, wrong-quote, and unaccepted evidence; rejects new null-quote evidence', async () => {
+    const view = await get('/api/portal', { authorization: `Bearer ${euroOldToken}`, 'cf-connecting-ip': '198.51.100.72' });
     const required = view.body.agreements.required as Json[];
-    const quoteId = view.body.quote.id as string;
-    const wrongQuoteId = 'qot_int_wrong_acceptance_quote';
     const now = new Date().toISOString();
     const historical = required.map((doc, index) => ({ id: `ag_int_stale_${index}`, docKey: doc.docKey }));
     await executeLocalD1(
@@ -601,38 +646,52 @@ describe('quote → slot → agreements → payment (EUROLX fixture)', () => {
         `INSERT INTO agreement_versions (id, doc_key, version, title, body_md, sha256, created_at) VALUES (` +
         `${sqlLiteral(doc.id)},${sqlLiteral(doc.docKey)},-200,'Historical test copy','Historical test copy',` +
         `${sqlLiteral(`test-sha-${doc.id}`)},${sqlLiteral(now)})`,
-      ).join(';') + ';' +
-      `INSERT INTO quotes (id, request_id, version, status, tier, currency, subtotal_cents, travel_cents, addons_cents, discount_cents, total_cents, expires_at, admin_note_internal, customer_note, approved_by, created_at, updated_at) ` +
-      `SELECT ${sqlLiteral(wrongQuoteId)}, request_id, -200, 'draft', tier, currency, subtotal_cents, travel_cents, addons_cents, discount_cents, total_cents, expires_at, admin_note_internal, customer_note, approved_by, created_at, updated_at FROM quotes WHERE id = ${sqlLiteral(quoteId)};` +
-      `INSERT INTO quote_line_items (id, quote_id, kind, label, amount_cents, sort) ` +
-      `SELECT 'qli_wrong_acceptance_' || id, ${sqlLiteral(wrongQuoteId)}, kind, label, amount_cents, sort FROM quote_line_items WHERE quote_id = ${sqlLiteral(quoteId)};` +
-      `UPDATE quotes SET status = 'superseded' WHERE id = ${sqlLiteral(wrongQuoteId)};`,
+      ).join(';') + ';',
     );
 
     const cases = [
-      { name: 'stale same-count versions', ids: historical.map((doc) => doc.id), quote: sqlLiteral(quoteId), accepted: 1 },
-      { name: 'wrong quote', ids: required.map((doc) => doc.id), quote: sqlLiteral(wrongQuoteId), accepted: 1 },
-      { name: 'null quote', ids: required.map((doc) => doc.id), quote: 'NULL', accepted: 1 },
-      { name: 'accepted=0', ids: required.map((doc) => doc.id), quote: sqlLiteral(quoteId), accepted: 0 },
+      { name: 'stale same-count versions', suffix: 'stale', ids: historical.map((doc) => doc.id), accepted: 1 },
+      { name: 'wrong quote', suffix: 'wrong', ids: required.map((doc) => doc.id), accepted: 1 },
+      { name: 'null quote', suffix: 'null', ids: required.map((doc) => doc.id), accepted: 1 },
+      { name: 'accepted=0', suffix: 'declined', ids: required.map((doc) => doc.id), accepted: 0 },
     ];
     for (const [caseIndex, scenario] of cases.entries()) {
+      const fixture = await seedAgreementFixture(scenario.suffix);
+      let quote = sqlLiteral(fixture.quoteId);
+      if (scenario.suffix === 'wrong') {
+        const wrongQuoteId = 'qot_int_wrong_acceptance_quote';
+        await executeLocalD1(
+          `INSERT INTO quotes (id, request_id, version, status, tier, currency, subtotal_cents, total_cents, expires_at, approved_by, created_at, updated_at) ` +
+          `SELECT ${sqlLiteral(wrongQuoteId)}, request_id, 2, 'draft', tier, currency, subtotal_cents, total_cents, expires_at, approved_by, created_at, updated_at FROM quotes WHERE id = ${sqlLiteral(fixture.quoteId)};` +
+          `INSERT INTO quote_line_items (id, quote_id, kind, label, amount_cents, sort) ` +
+          `SELECT 'qli_wrong_acceptance_' || id, ${sqlLiteral(wrongQuoteId)}, kind, label, amount_cents, sort FROM quote_line_items WHERE quote_id = ${sqlLiteral(fixture.quoteId)};` +
+          `UPDATE quotes SET status = 'superseded' WHERE id = ${sqlLiteral(wrongQuoteId)};`,
+        );
+        quote = sqlLiteral(wrongQuoteId);
+      } else if (scenario.suffix === 'null') quote = 'NULL';
       const rows = scenario.ids.map((agreementId, index) =>
-        `(${sqlLiteral(`aa_int_invalid_${caseIndex}_${index}`)},${sqlLiteral(euroId)},${scenario.quote},` +
+        `(${sqlLiteral(`aa_int_invalid_${caseIndex}_${index}`)},${sqlLiteral(fixture.requestId)},${quote},` +
         `${sqlLiteral(agreementId)},'Invalid fixture',${scenario.accepted},${sqlLiteral(now)})`,
       ).join(',');
-      await executeLocalD1(
-        `DELETE FROM agreement_acceptances WHERE request_id = ${sqlLiteral(euroId)};` +
-        `UPDATE ppi_requests SET status = 'awaiting_payment' WHERE id = ${sqlLiteral(euroId)};` +
-        `INSERT INTO agreement_acceptances (id, request_id, quote_id, agreement_version_id, typed_name, accepted, created_at) VALUES ${rows};`,
-      );
-      const checkout = await post('/api/portal/action', { action: 'checkout' }, portalHeaders);
+      const insert = `INSERT INTO agreement_acceptances (id, request_id, quote_id, agreement_version_id, typed_name, accepted, created_at) VALUES ${rows};`;
+      if (scenario.suffix === 'null') {
+        await expect(executeLocalD1(insert)).rejects.toThrow(/same-request committed quote/);
+      } else await executeLocalD1(insert);
+      await executeLocalD1(`UPDATE ppi_requests SET status = 'awaiting_payment' WHERE id = ${sqlLiteral(fixture.requestId)};`);
+      const before = await get(`/api/admin/requests/${fixture.requestId}`, admin);
+      expect(before.body.acceptances).toHaveLength(scenario.suffix === 'null' ? 0 : required.length);
+      const checkout = await post('/api/portal/action', { action: 'checkout' }, fixture.portalHeaders);
       expect(checkout.status, scenario.name).toBe(409);
       expect(checkout.body.error.code, scenario.name).toBe('agreements_missing');
+      const after = await get(`/api/admin/requests/${fixture.requestId}`, admin);
+      expect(after.body.acceptances).toEqual(before.body.acceptances);
+      expect(after.body.payments).toHaveLength(0);
+      // Release disposable scheduling capacity through the real unpaid-cancel
+      // path, retaining its agreement/history rows for subsequent assertions.
+      expect((await post('/api/portal/action', { action: 'cancel' }, fixture.portalHeaders)).status).toBe(200);
+      expect((await get(`/api/admin/requests/${fixture.requestId}`, admin)).body.acceptances)
+        .toEqual(before.body.acceptances);
     }
-    await executeLocalD1(
-      `DELETE FROM agreement_acceptances WHERE request_id = ${sqlLiteral(euroId)};` +
-      `UPDATE ppi_requests SET status = 'awaiting_agreement' WHERE id = ${sqlLiteral(euroId)};`,
-    );
   });
 
   it('records one exact quote-bound acceptance set and advances with a checked CAS', async () => {
@@ -654,23 +713,25 @@ describe('quote → slot → agreements → payment (EUROLX fixture)', () => {
     expect(detail.body.history.filter((entry: Json) => entry.to_status === 'awaiting_payment')).toHaveLength(1);
   });
 
-  it('lets an awaiting-payment customer accept newly published agreement versions without losing the held time', async () => {
-    const portalHeaders = { authorization: `Bearer ${euroOldToken}`, 'cf-connecting-ip': '198.51.100.75' };
+  it('lets an awaiting-payment customer append current acceptance while preserving historical versions and the held time', async () => {
+    const fixture = await seedAgreementFixture('reaccept');
+    const { portalHeaders, requestId } = fixture;
+    const now = new Date().toISOString();
+    // Model prior acceptance under older terms without deleting or mutating it.
+    await executeLocalD1(
+      `INSERT INTO agreement_acceptances (id, request_id, quote_id, agreement_version_id, typed_name, accepted, created_at) ` +
+      `SELECT 'aa_reaccept_' || id, ${sqlLiteral(requestId)}, ${sqlLiteral(fixture.quoteId)}, id, 'Original Fixture Buyer', 1, ${sqlLiteral(now)} ` +
+      `FROM agreement_versions WHERE id LIKE 'ag_int_stale_%';` +
+      `UPDATE ppi_requests SET status = 'awaiting_payment' WHERE id = ${sqlLiteral(requestId)};`,
+    );
     const before = await get('/api/portal', portalHeaders);
     const ids = before.body.agreements.required.map((doc: Json) => doc.id);
     const heldSlot = before.body.slots.find((slot: Json) => slot.status === 'held');
     expect(before.body.status).toBe('awaiting_payment');
     expect(heldSlot).toBeTruthy();
-
-    // Model a deployment that publishes a new current set after the customer
-    // previously advanced under older versions. Historical version rows remain
-    // immutable; only this disposable fixture's current acceptances are absent.
-    await executeLocalD1(
-      `DELETE FROM agreement_acceptances WHERE request_id = ${sqlLiteral(euroId)} AND quote_id = ${sqlLiteral(before.body.quote.id)};`,
-    );
-    const missing = await get('/api/portal', portalHeaders);
-    expect(missing.body.status).toBe('awaiting_payment');
-    expect(missing.body.agreements.accepted).toHaveLength(0);
+    expect(before.body.agreements.accepted).toHaveLength(0);
+    const historical = (await get(`/api/admin/requests/${requestId}`, admin)).body.acceptances;
+    expect(historical).toHaveLength(ids.length);
 
     const accepted = await post('/api/portal/action', {
       action: 'accept_agreements',
@@ -691,14 +752,18 @@ describe('quote → slot → agreements → payment (EUROLX fixture)', () => {
     expect(duplicate.status).toBe(409);
     expect(duplicate.body.error.code).toBe('wrong_state');
 
-    const detail = await get(`/api/admin/requests/${euroId}`, admin);
+    const detail = await get(`/api/admin/requests/${requestId}`, admin);
+    expect(detail.body.acceptances).toHaveLength(ids.length * 2);
+    expect(detail.body.acceptances.filter((row: Json) => row.id.startsWith('aa_reaccept_'))).toEqual(historical);
     expect(detail.body.history.some((entry: Json) =>
       entry.from_status === 'awaiting_payment'
       && entry.to_status === 'awaiting_payment'
       && entry.reason === 'Current agreement versions accepted')).toBe(true);
+    expect((await post('/api/portal/action', { action: 'cancel' }, portalHeaders)).status).toBe(200);
+    expect((await get(`/api/admin/requests/${requestId}`, admin)).body.acceptances).toEqual(detail.body.acceptances);
   });
 
-  it('expires the provider Session if current agreement evidence changes during Checkout creation', async () => {
+  it('rejects agreement-evidence tampering during Checkout creation without changing accepted facts', async () => {
     const portalHeaders = { authorization: `Bearer ${euroOldToken}`, 'cf-connecting-ip': '198.51.100.74' };
     const view = await get('/api/portal', portalHeaders);
     const doc = view.body.agreements.required[0] as Json;
@@ -716,33 +781,29 @@ describe('quote → slot → agreements → payment (EUROLX fixture)', () => {
     }
     expect(waiting).toBe(true);
 
-    await executeLocalD1(
-      `UPDATE agreement_acceptances SET accepted = 0 ` +
-      `WHERE request_id = ${sqlLiteral(euroId)} AND quote_id = ${sqlLiteral(view.body.quote.id)} ` +
-      `AND agreement_version_id = ${sqlLiteral(doc.id)};`,
-    );
-    expect((await fetch('http://127.0.0.1:8798/test/release-checkout', { method: 'POST' })).status).toBe(200);
+    const evidenceBefore = (await get(`/api/admin/requests/${euroId}`, admin)).body.acceptances;
+    try {
+      await expect(executeLocalD1(
+        `UPDATE agreement_acceptances SET accepted = 0 ` +
+        `WHERE request_id = ${sqlLiteral(euroId)} AND quote_id = ${sqlLiteral(view.body.quote.id)} ` +
+        `AND agreement_version_id = ${sqlLiteral(doc.id)};`,
+      )).rejects.toThrow(/agreement acceptances are immutable/);
+    } finally {
+      expect((await fetch('http://127.0.0.1:8798/test/release-checkout', { method: 'POST' })).status).toBe(200);
+    }
 
     const checkout = await checkoutPromise;
-    expect(checkout.status).toBe(409);
-    expect(checkout.body.error.code).toBe('checkout_state_changed');
+    expect(checkout.status).toBe(200);
 
     const detail = await get(`/api/admin/requests/${euroId}`, admin);
-    const expiredClaim = detail.body.payments.find((payment: Json) => payment.status === 'expired' && payment.stripe_session_id);
-    expect(expiredClaim).toBeTruthy();
+    expect(detail.body.acceptances).toEqual(evidenceBefore);
+    expect(detail.body.payments).toHaveLength(1);
+    expect(detail.body.payments[0].status).toBe('created');
     const providerAfter = await getProviderState();
     expect(providerAfter.sessionCount).toBe(providerBefore.sessionCount + 1);
-    expect(providerAfter.expiredSessions).toContain(expiredClaim.stripe_session_id);
+    expect(providerAfter.expiredSessions).not.toContain(detail.body.payments[0].stripe_session_id);
     expect(detail.body.request.status).toBe('awaiting_payment');
-
-    // Keep later lifecycle tests focused on their own attempts and restore the
-    // mutable acceptance fixture. Agreement-version rows remain append-only.
-    await executeLocalD1(
-      `DELETE FROM payments WHERE id = ${sqlLiteral(expiredClaim.id)};` +
-      `UPDATE agreement_acceptances SET accepted = 1 ` +
-      `WHERE request_id = ${sqlLiteral(euroId)} AND quote_id = ${sqlLiteral(view.body.quote.id)} ` +
-      `AND agreement_version_id = ${sqlLiteral(doc.id)};`,
-    );
+    expect((await get('/api/portal', portalHeaders)).body.booking.status).toBe('pending_payment');
   });
 
   it('creates a Stripe checkout session with id-only metadata', async () => {

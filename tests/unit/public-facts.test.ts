@@ -183,10 +183,10 @@ describe('crawler and sitemap policy', () => {
     expect(indexNowScript).not.toContain("catalog?.canonicalUrl !== 'https://getautoclarity.com/las-vegas-pre-purchase-inspection/'");
     expect(indexNowScript).toContain('const expectedCanonical = `<link rel="canonical" href="${url}"`;');
     expect(indexNowScript).toContain('!body.includes(expectedCanonical)');
-    expect(indexNowScript).toContain("const expectedBuild = 'ac-ai-20260908-r1'");
+    expect(indexNowScript).toContain("const expectedBuild = 'ac-ai-20260911-r1'");
     expect(indexNowScript).toContain("response.headers.get('x-autoclarity-build') !== expectedBuild");
     expect(indexNowScript).toContain("response.headers.get('x-robots-tag') ?? ''");
-    expect(headers).toContain('X-AutoClarity-Build: ac-ai-20260908-r1');
+    expect(headers).toContain('X-AutoClarity-Build: ac-ai-20260911-r1');
     expect(indexNowScript).not.toContain('/ppi/portal');
   });
 

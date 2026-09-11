@@ -223,10 +223,11 @@ async function recordEmail(
     const inserted = await db
       .prepare(
         `INSERT INTO messages (id, request_id, direction, channel, template, to_email, subject, body_text, status, created_at, dedupe_key)
-         VALUES (?, ?, 'outbound', 'email', ?, ?, ?, ?, 'recorded', ?, ?)
+         SELECT ?, ?, 'outbound', 'email', ?, ?, ?, ?, 'recorded', ?, ?
+         WHERE ? IS NULL OR NOT EXISTS (SELECT 1 FROM messages WHERE dedupe_key = ?)
          ON CONFLICT(dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING`,
       )
-      .bind(id, requestId, template, msg.to, msg.subject, msg.text, createdAt, msg.dedupeKey ?? null)
+      .bind(id, requestId, template, msg.to, msg.subject, msg.text, createdAt, msg.dedupeKey ?? null, msg.dedupeKey ?? null, msg.dedupeKey ?? null)
       .run();
     if (msg.dedupeKey) {
       if ((inserted.meta?.changes ?? 0) === 1) {
@@ -690,7 +691,7 @@ export const EMAIL_TEMPLATES = {
   }),
   report_ready: (ctx: TemplateCtx) => ({
     subject: `AutoClarity — your inspection results are ready (${ctx.ref})`,
-    text: ['Your written inspection results and recommendation are ready.', '', 'View them securely here:', ctx.portalUrl ?? '', footer(ctx)].join('\n'),
+    text: ['Your written inspection results and recommendation are ready.', optionalDetail('Vehicle', ctx.extra?.['vehicle']), '', 'View them securely in your existing AutoClarity customer portal:', ctx.portalUrl ?? '', '', `Questions? ${ctx.supportEmail}`, 'AutoClarity — Las Vegas Pre-Purchase Inspections'].filter(Boolean).join('\n'),
   }),
   owner_new_request: (ctx: TemplateCtx) => ({
     subject: `New PPI request — ${ctx.ref}`,

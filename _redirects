@@ -3,3 +3,5 @@
 /pre-purchase-inspection/ /las-vegas-pre-purchase-inspection/ 301
 /ppi /las-vegas-pre-purchase-inspection/ 301
 /ppi/ /las-vegas-pre-purchase-inspection/ 301
+/inspector /ppi/admin/ 302
+/inspector/ /ppi/admin/ 302

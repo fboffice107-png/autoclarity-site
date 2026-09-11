@@ -77,6 +77,13 @@ function seedDatabase(): { sqlite: InstanceType<typeof DatabaseSync>; db: D1Data
   sqlite.exec('PRAGMA foreign_keys = ON;');
   sqlite.exec(initialMigration);
   sqlite.exec(reportsMigration);
+  // Reader-defense fixtures intentionally model potentially corrupt legacy
+  // rows predating the new insert guards. Full 0011 enforcement is exercised
+  // separately in report-workflow.test.ts and the HTTP fulfillment tests.
+  sqlite.exec(`ALTER TABLE report_versions ADD COLUMN workflow_revision INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE inspection_reports ADD COLUMN amendment_reason TEXT;
+    CREATE TABLE report_deliveries(id TEXT,version_id TEXT,request_id TEXT,report_id TEXT,customer_id TEXT,notification_message_id TEXT,notification_key TEXT);
+    CREATE VIEW report_notification_evidence AS SELECT d.id AS delivery_id,d.version_id,d.request_id,m.status,1 AS is_current FROM report_deliveries d JOIN messages m ON m.id=d.notification_message_id;`);
   sqlite.exec(`
     INSERT INTO customers (id, full_name, email, phone, created_at, updated_at)
     VALUES
@@ -180,6 +187,19 @@ async function insertReportFixture(
 }
 
 describe('published report authority', () => {
+  it('reads the exact legacy string limitation without rewriting the immutable body or digest', async () => {
+    const {sqlite,db}=seedDatabase();
+    try{
+      const payload={...validReportPayload(),limitations:{standard:'Exact legacy limitation paragraph.'}};
+      const fixture=await insertReportFixture(db,{payload});
+      const report=await loadPublishedReportVersion(db,'req_report_a');
+      expect(report?.payload.limitations.standard).toEqual(['Exact legacy limitation paragraph.']);
+      sqlite.exec("UPDATE inspection_reports SET state='in_progress',amendment_reason='Owner is preparing a reviewed amendment'");
+      expect((await loadPublishedReportVersion(db,'req_report_a'))?.versionId).toBe(fixture.versionId);
+      expect(sqlite.prepare('SELECT payload_json,payload_sha256 FROM report_versions WHERE id=?').get(fixture.versionId))
+        .toEqual(expect.objectContaining({payload_json:fixture.payloadJson,payload_sha256:await sha256Hex(fixture.payloadJson)}));
+    }finally{sqlite.close();}
+  });
   it('loads the report pointer, not a newer loose version, and the portal exposes that exact snapshot only', async () => {
     const { sqlite, db } = seedDatabase();
     try {
@@ -352,7 +372,7 @@ describe('published report portal rendering', () => {
   it('uses report-dependent completion copy and escapes the snapshot fields it renders', () => {
     expect(portalScript).toContain('completed: v.report');
     expect(portalScript).toContain('renderPublishedReport(v.report)');
-    expect(portalScript).toContain('esc(details.join(" · "))');
+    expect(portalScript).toContain('AutoClarityReportView.render(report)');
     expect(portalScript).toContain('AutoClarity will review the vehicle, location, access, and requested timing, then follow up by email with next steps.');
     expect(portalScript).not.toContain('typically responds within 24 hours');
     expect(portalScript).not.toContain('Your inspection is complete. Your results are in the messages below.');

@@ -501,7 +501,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           return completion.code === 'report_required'
             ? errorJson(
                 'report_required',
-                'Publish this request\'s inspection report before marking it completed.',
+                'Publish this request\'s inspection report and record its Report Ready delivery before marking it completed.',
                 409,
               )
             : errorJson('conflict', 'The request or published report changed concurrently — reload and retry.', 409);
@@ -529,7 +529,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       const templateByStatus: Partial<Record<Status, EmailTemplateKey>> = {
         needs_info: 'needs_info',
         seller_access_pending: 'seller_access',
-        completed: 'report_ready',
+        // New fulfillment versions already have their durable report-ready
+        // event before completion; never bypass its safe retry/successor path.
+        ...(completedReport?.workflowRevision===1?{}:{completed:'report_ready' as const}),
         customer_cancelled: 'cancellation_confirmed',
         admin_cancelled: 'cancellation_confirmed',
       };

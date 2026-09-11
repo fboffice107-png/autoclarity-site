@@ -48,6 +48,7 @@
   function api(path, options) {
     options = options || {};
     options.headers = Object.assign({ authorization: "Bearer " + token }, options.headers || {});
+    options.cache = "no-store";
     return fetch(path, options).then(function (res) {
       return res.json().then(function (body) { return { status: res.status, ok: res.ok, body: body }; });
     });
@@ -75,6 +76,7 @@
   }
 
   function showError(msg) {
+    if (reportPhotoDispose) { reportPhotoDispose(); reportPhotoDispose = null; }
     elLoading.hidden = true;
     elContent.hidden = true;
     elError.hidden = false;
@@ -154,97 +156,11 @@
     });
   }
 
-  function reportObject(value) {
-    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  }
-
-  function reportResultLabel(value) {
-    return ({
-      pass: "Pass",
-      attention: "Needs attention",
-      fail: "Fail",
-      not_inspected: "Not inspected",
-      not_applicable: "Not applicable"
-    })[String(value || "")] || String(value || "Not recorded").replace(/_/g, " ");
-  }
-
+  var reportPhotoDispose = null;
   function renderPublishedReport(report) {
-    var payload = reportObject(report.payload);
-    var overall = reportObject(payload.overall);
-    var sections = Array.isArray(payload.sections) ? payload.sections : [];
-    var limitations = reportObject(payload.limitations);
-    var html = '<section class="portal-card"><h2>Your published inspection report</h2>' +
-      '<dl class="kv"><dt>Version</dt><dd>' + esc(report.version) + (report.amended ? " (amended)" : "") + "</dd>" +
-      "<dt>Published</dt><dd>" + esc(fmtWhen(report.publishedAt)) + "</dd>";
-
-    if (payload.inspector) html += "<dt>Inspector</dt><dd>" + esc(payload.inspector) + "</dd>";
-    if (overall.score !== null && overall.score !== undefined && overall.score !== "") {
-      html += "<dt>Overall score</dt><dd>" + esc(overall.score) + " / 10</dd>";
-    }
-    if (overall.verdictLabel || overall.verdict) {
-      html += "<dt>Recommendation</dt><dd>" + esc(overall.verdictLabel || String(overall.verdict).replace(/_/g, " ")) + "</dd>";
-    }
-    html += "</dl>";
-
-    [
-      ["Summary", overall.executiveSummary],
-      ["Positive findings", overall.positiveFindings],
-      ["Negotiation notes", overall.negotiationSummary]
-    ].forEach(function (entry) {
-      if (entry[1]) html += "<h3>" + esc(entry[0]) + "</h3><p>" + esc(entry[1]) + "</p>";
-    });
-
-    if (sections.length) {
-      html += "<h3>Inspection details</h3>";
-      sections.forEach(function (rawSection) {
-        var section = reportObject(rawSection);
-        var items = Array.isArray(section.items) ? section.items : [];
-        html += '<details class="agree-doc"><summary>' + esc(section.title || "Inspection section") + "</summary>";
-        if (section.performed && section.performed !== "performed") {
-          html += "<p><strong>Scope:</strong> " + esc(String(section.performed).replace(/_/g, " "));
-          if (section.notPerformedReason) html += " — " + esc(String(section.notPerformedReason).replace(/_/g, " "));
-          html += "</p>";
-        }
-        if (section.summary) html += "<p>" + esc(section.summary) + "</p>";
-        if (items.length) {
-          html += '<ul class="msg-list">';
-          items.forEach(function (rawItem) {
-            var item = reportObject(rawItem);
-            var measurement = reportObject(item.measurement);
-            var photos = Array.isArray(item.photos) ? item.photos : [];
-            var details = [];
-            if (item.note) details.push(String(item.note));
-            if (measurement.value) details.push([measurement.label, measurement.value, measurement.unit].filter(Boolean).join(" "));
-            if (Number.isFinite(item.costLowCents) || Number.isFinite(item.costHighCents)) {
-              var low = Number.isFinite(item.costLowCents) ? money(item.costLowCents) : null;
-              var high = Number.isFinite(item.costHighCents) ? money(item.costHighCents) : null;
-              details.push("Estimated cost: " + (low && high && low !== high ? low + "–" + high : (low || high)));
-            }
-            if (item.priority) details.push("Priority: " + String(item.priority).replace(/_/g, " "));
-            if (photos.length) {
-              var captions = photos.map(function (photo) { return reportObject(photo).caption; }).filter(Boolean);
-              details.push(photos.length + " report photo" + (photos.length === 1 ? "" : "s") + (captions.length ? ": " + captions.join("; ") : ""));
-            }
-            html += "<li><strong>" + esc(item.label || "Inspection item") + " — " + esc(reportResultLabel(item.result)) + "</strong>" +
-              (details.length ? "<br>" + esc(details.join(" · ")) : "") + "</li>";
-          });
-          html += "</ul>";
-        }
-        html += "</details>";
-      });
-    }
-
-    var standardLimitations = Array.isArray(limitations.standard) ? limitations.standard : [];
-    if (standardLimitations.length || limitations.additional) {
-      html += "<h3>Limitations</h3><ul>";
-      standardLimitations.forEach(function (item) { html += "<li>" + esc(item) + "</li>"; });
-      if (limitations.additional) html += "<li>" + esc(limitations.additional) + "</li>";
-      html += "</ul>";
-    }
-
-    return html + "</section>";
+    return '<div class="report-print-actions"><button type="button" class="btn btn-ghost" id="printReport">Print / save report as PDF</button><p class="field-hint" id="reportPrintStatus" role="status">Your private report stays in this secure portal. Keep printed or downloaded copies private.</p></div>' +
+      window.AutoClarityReportView.render(report);
   }
-
   var STATUS_KIND = {
     submitted: "", needs_info: "warn", seller_access_pending: "warn", ready_for_review: "",
     quote_prepared: "", quote_sent: "good", awaiting_time_selection: "good",
@@ -432,11 +348,42 @@
         '<p class="form-status" id="cancelStatus" role="status" aria-live="polite"></p></section>';
     }
 
+    if (reportPhotoDispose) reportPhotoDispose();
     elContent.innerHTML = html;
+    if (v.report) {
+      reportPhotoDispose = window.AutoClarityReportView.hydrate(elContent, function (id, signal) {
+        return fetch("/api/portal/report-photo?id=" + encodeURIComponent(id) + "&versionId=" + encodeURIComponent(v.report.versionId), {
+          headers: { authorization: "Bearer " + token }, cache: "no-store", signal: signal
+        }).then(function (response) { if (!response.ok) throw new Error("Private photo unavailable"); return response.blob(); });
+      });
+    }
     bindActions();
   }
 
   function bindActions() {
+    var printReport = document.getElementById("printReport");
+    if (printReport) printReport.addEventListener("click", async function () {
+      printReport.disabled = true;
+      var printStatus = document.getElementById("reportPrintStatus");
+      printStatus.textContent = "Preparing the full report and private photos…";
+      var photos = reportPhotoDispose ? await reportPhotoDispose.loadAll() : { failed: 0 };
+      if (photos.failed) {
+        printReport.disabled = false;
+        printStatus.textContent = photos.failed + " private photo(s) could not load. Refresh the portal and retry before printing a complete report.";
+        return;
+      }
+      var decoded = await Promise.allSettled(Array.from(elContent.querySelectorAll("[data-report-photo]")).filter(function (img) { return img.src && !img.hidden; }).map(function (img) { return img.decode ? img.decode() : Promise.resolve(); }));
+      if (!printReport.isConnected) return;
+      if (decoded.some(function (result) { return result.status === "rejected"; })) {
+        printReport.disabled = false;
+        printStatus.textContent = "A report photo could not be decoded. Refresh and retry, or contact AutoClarity before printing an incomplete report.";
+        return;
+      }
+      document.body.classList.add("printing-report");
+      window.print();
+      printReport.disabled = false;
+      printStatus.textContent = "Use your browser’s print menu to save as PDF. Keep your private report secure.";
+    });
     elContent.querySelectorAll(".slot-btn").forEach(function (btn) {
       btn.addEventListener("click", function () {
         btn.disabled = true;
@@ -570,4 +517,6 @@
       if (navigator.sendBeacon) navigator.sendBeacon("/api/ppi/events", new Blob([body], { type: "application/json" }));
     } catch (e) {}
   }
+  window.addEventListener("afterprint", function () { document.body.classList.remove("printing-report"); });
+  window.addEventListener("pagehide", function () { if (reportPhotoDispose) reportPhotoDispose(); });
 })();

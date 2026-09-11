@@ -2,7 +2,7 @@ import { pathToFileURL } from 'node:url';
 
 const host = 'getautoclarity.com';
 const key = '170f59a6dd75523c8f9318a7ae04ae2e';
-const expectedBuild = 'ac-ai-20260908-r1';
+const expectedBuild = 'ac-ai-20260911-r1';
 const keyLocation = `https://${host}/${key}.txt`;
 const urlList = [
   `https://${host}/`,

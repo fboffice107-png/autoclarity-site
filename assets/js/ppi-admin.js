@@ -14,6 +14,16 @@
   var currentRequestId = null;
   var detailCache = null;
   var requestListNotice = "";
+  var reportEditor = null;
+  var uploadBlobUrls = [];
+  function leaveDetail() {
+    if (reportEditor && !reportEditor.canLeave()) return false;
+    if (reportEditor) reportEditor.dispose();
+    reportEditor = null;
+    uploadBlobUrls.forEach(function (url) { URL.revokeObjectURL(url); });
+    uploadBlobUrls = [];
+    return true;
+  }
   var requestedRequestId = (function () {
     try {
       var value = new URL(window.location.href).searchParams.get("request") || "";
@@ -37,10 +47,13 @@
   function api(path, options) {
     options = options || {};
     options.headers = Object.assign({}, options.headers || {});
+    options.cache = "no-store";
     var key = adminKey();
     if (key) options.headers["authorization"] = "Bearer " + key;
     return fetch(path, options).then(function (res) {
-      if (res.status === 401) { showLogin(); throw new Error("unauthorized"); }
+      // An expired session must not erase an in-memory inspection draft.
+      // The editor retains its controls and offers an explicit recovery copy.
+      if (res.status === 401 && !reportEditor) { showLogin(); throw new Error("unauthorized"); }
       return res.json().then(function (body) { return { status: res.status, ok: res.ok, body: body }; });
     });
   }
@@ -63,7 +76,9 @@
   document.querySelector("#loginForm button[type=submit]").addEventListener("click", doLogin);
 
   nav.querySelectorAll(".tab-btn").forEach(function (btn) {
-    btn.addEventListener("click", function () {
+    btn.addEventListener("click", function (event) {
+      if (!leaveDetail()) { event.preventDefault(); return; }
+      if (btn.tagName === "A") return;
       nav.querySelectorAll(".tab-btn").forEach(function (b) { b.classList.remove("active"); });
       btn.classList.add("active");
       currentRequestId = null;
@@ -113,6 +128,10 @@
   function when(iso) {
     if (!iso) return "—";
     return new Date(iso).toLocaleString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  }
+  function safeListingUrl(value) {
+    try { var url = new URL(value); return /^https?:$/.test(url.protocol) ? url.href : ""; }
+    catch (e) { return ""; }
   }
 
   function refundStatusGuidance(status) {
@@ -330,19 +349,15 @@
       api("/api/admin/requests" + (filter ? "?status=" + encodeURIComponent(filter) : "")).then(function (r) {
         if (!r.ok) return;
         var rows = r.body.requests || [];
-        var t = '<section class="portal-card"><table class="admin-table"><thead><tr>' +
-          "<th>Ref</th><th>Status</th><th>Vehicle</th><th>Customer</th><th>Area</th><th>Tier</th><th>Created</th></tr></thead><tbody>";
+        var t = '<section class="admin-job-list" aria-label="Inspection requests">';
         rows.forEach(function (row) {
           var manual = row.manual_review_reasons && row.manual_review_reasons !== "[]";
-          t += '<tr data-req="' + esc(row.id) + '"><td class="mono">' + esc(row.ref) + "</td>" +
-            "<td>" + esc(String(row.status).replace(/_/g, " ")) + (manual ? " ⚠" : "") + (row.same_day_priority ? " ⚡" : "") + "</td>" +
-            "<td>" + esc([row.year, row.make, row.model].filter(Boolean).join(" ")) + "</td>" +
-            "<td>" + esc(row.full_name) + "</td>" +
-            "<td>" + esc([row.loc_city, row.loc_zip].filter(Boolean).join(" ")) + "</td>" +
-            "<td>" + esc(row.suggested_tier || "—") + "</td>" +
-            '<td class="mono">' + esc(when(row.created_at)) + "</td></tr>";
+          t += '<button type="button" class="portal-card admin-job-card" data-req="' + esc(row.id) + '"><strong>' + esc(row.ref) + ' · ' + esc([row.year, row.make, row.model].filter(Boolean).join(" ")) + '</strong>' +
+            '<span class="msg-meta">' + esc(String(row.status).replace(/_/g, " ")) + (manual ? " · Manual review" : "") + (row.same_day_priority ? " · Same-day priority" : "") + '</span>' +
+            '<span class="msg-meta">' + esc(row.full_name) + ' · ' + esc([row.loc_city, row.loc_zip].filter(Boolean).join(" ")) + ' · ' + esc(row.suggested_tier || "Tier not set") + '</span>' +
+            '<span class="msg-meta">Created ' + esc(when(row.created_at)) + '</span></button>';
         });
-        t += "</tbody></table>" + (rows.length === 0 ? '<p style="color:var(--text-3);padding:12px 0 0;">No requests.</p>' : "") + "</section>";
+        t += (rows.length === 0 ? '<p style="color:var(--text-3);padding:12px 0 0;">No requests.</p>' : "") + "</section>";
         document.getElementById("requestsTable").innerHTML = t;
         document.querySelectorAll("#requestsTable [data-req]").forEach(function (tr) {
           tr.addEventListener("click", function () { openDetail(tr.getAttribute("data-req")); });
@@ -353,6 +368,7 @@
 
   /* ================= Request detail ================= */
   function openDetail(id) {
+    if (!leaveDetail()) return;
     currentRequestId = id;
     setRequestUrl(id);
     api("/api/admin/requests/" + encodeURIComponent(id)).then(function (r) {
@@ -391,10 +407,19 @@
   function renderDetail() {
     var d = detailCache;
     var req = d.request;
-    var html = '<button class="btn btn-ghost btn-sm" id="backToList">← Back</button>';
+    var html = '<div class="report-actions"><button class="btn btn-ghost btn-sm" id="backToList">← Back</button><button class="btn btn-ghost btn-sm" id="refreshJob">Refresh job status &amp; messages</button></div>';
 
     html += '<div class="portal-topbar" style="margin-top:14px;"><h1 style="font-size:24px;">' + esc(req.ref) + "</h1>" +
-      '<span class="status-pill">' + esc(d.statusLabel) + "</span></div>";
+      '<span class="status-pill" id="requestStatusPill">' + esc(d.statusLabel) + "</span></div>";
+
+    var confirmedSlot = (d.slots || []).filter(function (slot) { return slot.status === "confirmed"; })[0];
+    var paid = (d.payments || []).filter(function (payment) { return ["succeeded", "partially_refunded"].indexOf(payment.status) !== -1; });
+    html += '<section class="portal-card job-at-a-glance" aria-label="Job at a glance"><h2>Job at a glance</h2><dl class="kv">' +
+      '<dt>Appointment</dt><dd>' + esc(confirmedSlot ? when(confirmedSlot.starts_at) : 'No confirmed appointment') + '</dd>' +
+      '<dt>Payment record</dt><dd>' + esc(paid.length ? paid.map(function (p) { return money(p.amount_cents) + ' · ' + p.status.replace(/_/g, ' '); }).join('; ') : 'No successful payment recorded') + '</dd>' +
+      '<dt>Agreement evidence</dt><dd>' + esc((d.acceptances || []).length) + ' acceptance record(s) — exact versions below</dd>' +
+      '<dt>Inspection state</dt><dd id="jobInspectionState">' + esc(d.statusLabel) + '</dd><dt>Report state</dt><dd id="jobReportState">Loading…</dd></dl>' +
+      '<nav class="report-actions" aria-label="Job sections"><a class="btn btn-primary btn-sm" href="#inspectionReport">Open inspection report</a><a class="btn btn-ghost btn-sm" href="#jobMessages">Messages</a><a class="btn btn-ghost btn-sm" href="#jobScheduling">Scheduling</a><a class="btn btn-ghost btn-sm" href="#jobPayments">Payments / refunds</a></nav></section>';
 
     if (req.manual_review_reasons && req.manual_review_reasons !== "[]") {
       var reasons = [];
@@ -408,7 +433,7 @@
       "<dt>Vehicle</dt><dd>" + esc([req.year, req.make, req.model, req.vehicle_trim].filter(Boolean).join(" ")) + " · " + esc(req.mileage ? Number(req.mileage).toLocaleString() + " mi" : "mileage n/a") + "</dd>" +
       "<dt>VIN</dt><dd class=\"mono\">" + esc(req.vin || "not provided") + "</dd>" +
       "<dt>Prices</dt><dd>Asking " + (req.asking_price_cents ? money(req.asking_price_cents) : "—") + " · Expecting " + (req.expected_price_cents ? money(req.expected_price_cents) : "—") + "</dd>" +
-      "<dt>Listing</dt><dd>" + (req.listing_url ? '<a href="' + esc(req.listing_url) + '" target="_blank" rel="noopener noreferrer">open listing ↗</a>' : "—") + "</dd>" +
+      "<dt>Listing</dt><dd>" + (safeListingUrl(req.listing_url) ? '<a href="' + esc(safeListingUrl(req.listing_url)) + '" target="_blank" rel="noopener noreferrer">open listing ↗</a>' : "—") + "</dd>" +
       "<dt>Condition</dt><dd>Mods: " + esc(req.mod_status) + " · Title: " + esc(req.title_status) + " · Starts/drives: " + esc(req.starts_drives) + "</dd>" +
       "<dt>Warnings</dt><dd>" + esc(req.warning_lights || "—") + "</dd>" +
       "<dt>Known issues</dt><dd>" + esc(req.known_issues || "—") + "</dd>" +
@@ -420,6 +445,8 @@
       "<dt>Acquisition source</dt><dd>" + esc(attributionLabel(req.attribution_source)) + "</dd>" +
       "<dt>Customer notes</dt><dd>" + esc(req.customer_notes || "—") + "</dd>" +
       "</dl></section>";
+
+    html += '<section class="portal-card" id="inspectionReport" aria-label="Inspection report workspace"></section>';
 
     // ----- uploads -----
     if ((d.uploads || []).length) {
@@ -434,10 +461,10 @@
 
     // ----- status control -----
     html += '<section class="portal-card"><h2>Status</h2><div class="admin-toolbar">' +
-      '<select id="statusTo"><option value="">Move to…</option>' +
+      '<select id="statusTo" aria-label="New request status"><option value="">Move to…</option>' +
       (d.allowedTransitions || []).map(function (s) { return '<option value="' + s + '">' + s.replace(/_/g, " ") + "</option>"; }).join("") +
-      '</select><input id="statusReason" placeholder="Reason (internal + history)" style="flex:1;min-width:200px;" />' +
-      '<input id="statusNote" placeholder="Optional note emailed to customer" style="flex:1;min-width:200px;" />' +
+      '</select><input id="statusReason" aria-label="Status change reason (internal and history)" placeholder="Reason (internal + history)" style="flex:1;min-width:200px;" />' +
+      '<input id="statusNote" aria-label="Optional status note emailed to customer" placeholder="Optional note emailed to customer" style="flex:1;min-width:200px;" />' +
       '<button class="btn btn-primary" id="statusGo">Apply</button></div></section>';
 
     // ----- quote editor -----
@@ -471,7 +498,7 @@
       '<button class="btn btn-ghost" id="qCreate">Create draft quote</button></section>';
 
     // ----- scheduling -----
-    html += '<section class="portal-card"><h2>Scheduling</h2>';
+    html += '<section class="portal-card" id="jobScheduling"><h2>Scheduling</h2>';
     if ((d.slots || []).length) {
       html += '<table class="admin-table"><thead><tr><th>Start</th><th>Status</th><th></th></tr></thead><tbody>';
       d.slots.forEach(function (s) {
@@ -488,7 +515,7 @@
       '<p class="field-hint">Suggested templates: 9:00 AM, 12:30 PM, 4:00 PM. Conflicts (incl. travel/report buffers) are rejected automatically.</p></section>';
 
     // ----- payments -----
-    html += '<section class="portal-card"><h2>Payments</h2>';
+    html += '<section class="portal-card" id="jobPayments"><h2>Payments</h2>';
     if ((d.payments || []).length) {
       html += '<table class="admin-table"><thead><tr><th>Amount</th><th>Status</th><th>Stripe ref</th><th>Date</th><th></th></tr></thead><tbody>';
       d.payments.forEach(function (p) {
@@ -612,7 +639,7 @@
 
     // ----- internal notes & tools -----
     html += '<section class="portal-card"><h2>Internal notes &amp; tools</h2>' +
-      '<div class="field"><textarea id="internalNotes" rows="3" placeholder="Internal notes (never shown to the customer)">' + esc(req.internal_notes || "") + "</textarea></div>" +
+      '<div class="field"><label for="internalNotes">Private job notes — never shown to the customer</label><textarea id="internalNotes" rows="3">' + esc(req.internal_notes || "") + "</textarea></div>" +
       '<div class="admin-toolbar">' +
       '<button class="btn btn-ghost" id="saveNotes">Save notes</button>' +
       '<button class="btn btn-ghost" id="newLink">New portal link</button>' +
@@ -628,6 +655,32 @@
 
     content.innerHTML = html;
     bindDetail();
+    makeDetailAccessible();
+    reportEditor = window.AutoClarityReportEditor.mount(document.getElementById("inspectionReport"), {
+      requestId: currentRequestId,
+      api: api,
+      fetchPhoto: function (path, signal) {
+        var headers = {}, key = adminKey(); if (key) headers.authorization = "Bearer " + key;
+        return fetch(path, { headers: headers, cache: "no-store", signal: signal }).then(function (response) {
+          if (!response.ok) throw new Error("Private photo unavailable");
+          return response.blob();
+        });
+      },
+      onState: function (state) {
+        var summary = document.getElementById("jobReportState");
+        if (summary) summary.textContent = state.report ? state.report.state.replace(/_/g, " ") : "Not started";
+        if (state.requestStatus && state.requestStatus !== detailCache.request.status) {
+          var expectedId = currentRequestId;
+          api("/api/admin/requests/" + encodeURIComponent(expectedId)).then(function (r) {
+            if (!r.ok || expectedId !== currentRequestId) return;
+            detailCache = r.body;
+            ["requestStatusPill", "jobInspectionState"].forEach(function (id) { var label = document.getElementById(id); if (label) label.textContent = r.body.statusLabel; });
+            var dropdown = document.getElementById("statusTo");
+            if (dropdown) dropdown.innerHTML = '<option value="">Move to…</option>' + (r.body.allowedTransitions || []).map(function (s) { return '<option value="' + esc(s) + '">' + esc(s.replace(/_/g, " ")) + '</option>'; }).join('');
+          }).catch(function () {});
+        }
+      }
+    });
   }
 
   function yn(v) { return Number(v) === 1 ? "yes" : "no"; }
@@ -641,7 +694,9 @@
   }
 
   function bindDetail() {
+    document.getElementById("refreshJob").addEventListener("click", function () { openDetail(currentRequestId); });
     document.getElementById("backToList").addEventListener("click", function () {
+      if (!leaveDetail()) return;
       currentRequestId = null;
       setRequestUrl("");
       show("requests");
@@ -652,7 +707,7 @@
       var id = img.getAttribute("data-upload");
       fetch("/api/admin/uploads/" + encodeURIComponent(id), { headers: { authorization: "Bearer " + adminKey() } })
         .then(function (res) { return res.ok ? res.blob() : null; })
-        .then(function (blob) { if (blob) img.src = URL.createObjectURL(blob); })
+        .then(function (blob) { if (blob && img.isConnected) { var url = URL.createObjectURL(blob); uploadBlobUrls.push(url); img.src = url; } })
         .catch(function () {});
     });
     content.querySelectorAll("[data-del-upload]").forEach(function (btn) {
@@ -781,6 +836,19 @@
         if (r.ok) document.getElementById("toolStatus").textContent = "New portal link (share only with the customer): " + r.body.url;
       }).catch(function () {});
     });
+  }
+
+  function makeDetailAccessible() {
+    // Legacy operational controls retain their actions, with persistent names
+    // and stacked cell labels so the same job can be operated on a phone.
+    var names = { qTier: "Quote tier", qBase: "Quote base price in dollars", qTravel: "Travel price in dollars", qAddonLabel: "Add-on description", qAddon: "Add-on price in dollars", qDiscount: "Discount in dollars", qNote: "Customer-facing quote note", qInternal: "Private quote justification", slot1: "First appointment window (local time)", slot2: "Second appointment window (local time)", slot3: "Third appointment window (local time)", adminMsg: "Message to customer (portal and email)" };
+    Object.keys(names).forEach(function (id) { var input = document.getElementById(id); if (input) input.setAttribute("aria-label", names[id]); });
+    content.querySelectorAll(".admin-table").forEach(function (table) {
+      table.classList.add("admin-mobile-cards");
+      var headers = Array.from(table.querySelectorAll("thead th")).map(function (th) { return th.textContent; });
+      table.querySelectorAll("tbody tr").forEach(function (row) { Array.from(row.cells).forEach(function (cell, index) { cell.setAttribute("data-label", headers[index] || "Action"); }); });
+    });
+    var messages = document.getElementById("adminMsg"); if (messages) messages.closest("section").id = "jobMessages";
   }
 
   /* ================= Config ================= */

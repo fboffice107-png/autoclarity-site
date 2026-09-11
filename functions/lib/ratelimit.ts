@@ -9,6 +9,16 @@ export interface RateLimitResult {
   limit: number;
 }
 
+/** Read-only budget check: successful private assets do not spend a failed-
+ * authentication budget or exhaust ordinary interactive portal actions. */
+export async function rateLimitStatus(db:D1Database,identity:string,route:string,limit:number,windowSec:number):Promise<RateLimitResult>{
+  const daySalt=new Date().toISOString().slice(0,10);
+  const bucket=`${route}:${(await sha256Hex(`${daySalt}:${identity}`)).slice(0,24)}`;
+  const windowStart=Math.floor(Date.now()/1000/windowSec)*windowSec;
+  const row=await db.prepare('SELECT count FROM rate_limits WHERE bucket=? AND window_start=?').bind(bucket,windowStart).first<{count:number}>();
+  const count=row?.count??0;return {allowed:count<limit,count,limit};
+}
+
 export async function rateLimit(
   db: D1Database,
   identity: string,

@@ -32,6 +32,8 @@ export class AgreementIntegrityError extends Error {
   }
 }
 
+// Operative production language only. Unapproved scope/underbody v3 proposals
+// remain in docs/AGREEMENT_PROPOSALS_NOT_ACTIVE.md, never in the seeding set.
 export const AGREEMENT_DOCS: AgreementDoc[] = [
   {
     docKey: 'service_agreement',
@@ -59,13 +61,13 @@ The amount due is the exact total in the AutoClarity-approved quote shown in you
   },
   {
     docKey: 'scope_limitations',
-    version: 3,
+    version: 2,
     title: 'Scope and Limitations',
     bodyMd: `- The inspection is visual and non-invasive unless expressly stated otherwise. Components are not disassembled.
 - Hidden, intermittent, or future failures may not be detectable during a single inspection.
 - Seller cooperation and the inspection location can limit what is possible (road test, underbody access, diagnostic scanning, photographs).
 - When a diagnostic scan is included in the confirmed scope, it reports what the vehicle's systems expose at that time; it cannot prove the absence of all faults.
-- Underbody access depends on the location, seller permission, ground conditions, vehicle clearance and available equipment. If deeper access is appropriate, a suitable facility may need to be arranged in advance and separately confirmed in the quote.
+- Underbody access depends on the location, seller permission, ground conditions, vehicle clearance and available equipment. A full lift inspection may require a partner facility and an additional charge.
 - The written report reflects conditions observable at the time of inspection only.`,
   },
   {
@@ -102,9 +104,9 @@ Paid cancellation and rescheduling requests are reviewed personally rather than 
   },
   {
     docKey: 'underbody_limitations',
-    version: 3,
+    version: 2,
     title: 'Underbody, Jacking and Lift Limitations',
-    bodyMd: `Underbody review is performed only where it is safe, legal and physically possible at the inspection location. Not every vehicle can be lifted. Ground clearance, surface conditions, seller permission and available equipment all affect what can be observed underneath. If deeper access is appropriate, a suitable facility may need to be arranged in advance and separately confirmed in the quote.`,
+    bodyMd: `Underbody review is performed only where it is safe, legal and physically possible at the inspection location. Not every vehicle can be lifted. Ground clearance, surface conditions, seller permission and available equipment all affect what can be observed underneath. A full lift inspection may require a partner facility and an additional charge quoted in advance.`,
   },
   {
     docKey: 'privacy_notice',

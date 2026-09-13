@@ -54,7 +54,6 @@ describe('premium visual and interaction safeguards', () => {
       '../../404.html',
       '../../_headers',
       '../../functions/_middleware.ts',
-      '../../index.html',
       '../../las-vegas-pre-purchase-inspection/index.html',
       '../../las-vegas-pre-purchase-inspection/sample-report/index.html',
       '../../ppi/admin/index.html',

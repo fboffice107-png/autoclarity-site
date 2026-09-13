@@ -49,7 +49,7 @@ function expectScrollCueTargetsToExist(source: string): void {
 }
 
 describe('premium visual and interaction safeguards', () => {
-  it('uses one production build fingerprint across cache keys and response headers', () => {
+  it('preserves the backend fingerprint and versions the changed visual assets independently', () => {
     const sources = [
       '../../404.html',
       '../../_headers',
@@ -63,6 +63,13 @@ describe('premium visual and interaction safeguards', () => {
       '../../terms.html',
     ].map((path) => nodeFs.readFileSync(new URL(path, import.meta.url), 'utf8'));
 
+    for (const page of [homePage, ppiPage]) {
+      expect(page).toContain('assets/css/site.css?v=ac-visual-20260913-r1');
+      expect(page).toContain('assets/js/main.js?v=ac-visual-20260913-r1');
+    }
+    for (const page of [adminPage, portalPage]) {
+      expect(page).not.toContain('ac-visual-20260913-r1');
+    }
     for (const source of sources) {
       const fingerprints = source.match(/ac-(?:prod|ai)-\d{8}-r\d+/gu) ?? [];
       expect(fingerprints.length).toBeGreaterThan(0);

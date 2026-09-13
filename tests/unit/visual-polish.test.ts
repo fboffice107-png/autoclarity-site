@@ -78,16 +78,20 @@ describe('premium visual and interaction safeguards', () => {
     expect(desktopNav).not.toContain('Las Vegas PPI');
   });
 
-  it('uses the exact canonical service CTA in desktop and mobile navigation', () => {
+  it('keeps the canonical service CTA visible with responsive header labels and a full menu label', () => {
     for (const className of ['nav-service-cta', 'nav-mobile-service']) {
       const anchor = anchorWithClass(homePage, className);
       expect(anchor.attributes).toContain(`href="${ppiPath}"`);
       expect(anchor.attributes).toContain('aria-label="Las Vegas Pre-Purchase Inspection"');
       expect(anchor.attributes).not.toContain('#');
-      expect(markupText(anchor.content)).toBe('Las Vegas Pre-Purchase Inspection');
       expect(anchor.content).toMatch(/<span class="status-dot" aria-hidden="true"><\/span>/u);
       expect(anchor.attributes).toContain('data-analytics="ppi_cta_click"');
     }
+
+    const headerCta = anchorWithClass(homePage, 'nav-service-cta');
+    expect(headerCta.content).toContain('<span class="nav-service-label-full">Las Vegas Pre-Purchase Inspection</span>');
+    expect(headerCta.content).toContain('<span class="nav-service-label-short" aria-hidden="true">Las Vegas PPI</span>');
+    expect(markupText(anchorWithClass(homePage, 'nav-mobile-service').content)).toBe('Las Vegas Pre-Purchase Inspection');
 
     const mobileMenu = homePage.match(/<details class="nav-mobile-menu">([\s\S]*?)<\/details>/u)?.[1] ?? '';
     const mobileLinks = mobileMenu.match(/<nav class="nav-mobile-links"[^>]*>([\s\S]*?)<\/nav>/u)?.[1] ?? '';
@@ -100,8 +104,12 @@ describe('premium visual and interaction safeguards', () => {
       'Support',
     ]);
     expect(mobileMenu).toContain('data-step="service_discovery_home_menu"');
+    const mobileNavStyles = siteCss.match(/@media \(max-width: 1000px\)\s*\{([\s\S]*?)\n\}/u)?.[1] ?? '';
+    expect(mobileNavStyles).toMatch(/\.home-nav \.nav-mobile-menu\s*\{\s*display:\s*block;\s*\}/u);
+    expect(mobileNavStyles).not.toMatch(/nav-service-cta[^}]*display:\s*none/u);
+    expect(siteCss).toMatch(/\.nav-service-label-short\s*\{\s*display:\s*none;\s*\}/u);
     expect(siteCss).toMatch(
-      /@media \(max-width: 1000px\)[\s\S]*?\.home-nav \.nav-service-cta\s*\{\s*display:\s*none;\s*\}[\s\S]*?\.home-nav \.nav-mobile-menu\s*\{\s*display:\s*block;\s*\}/u,
+      /@media \(max-width: 780px\)[\s\S]*?\.home-nav \.nav-service-label-full\s*\{\s*display:\s*none;\s*\}[\s\S]*?\.home-nav \.nav-service-label-short\s*\{\s*display:\s*inline;\s*\}/u,
     );
   });
 

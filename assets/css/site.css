@@ -263,6 +263,7 @@ a { color: var(--blue-bright); }
 }
 
 .nav-service-cta { gap: 8px; white-space: nowrap; }
+.nav-service-label-short { display: none; }
 
 /* Availability marker for the in-person service CTA. The light center and
    dark keyline keep it visibly green against the green button itself. */
@@ -359,11 +360,12 @@ a { color: var(--blue-bright); }
 }
 
 @media (max-width: 1000px) {
-  .home-nav .nav-links,
-  .home-nav .nav-service-cta { display: none; }
+  .home-nav .nav-links { display: none; }
   .home-nav .nav-inner { justify-content: space-between; }
   .home-nav .nav-actions { margin-left: auto; }
+  .home-nav .nav-actions .btn-nav { min-height: 44px; }
   .home-nav .nav-mobile-menu { display: block; }
+  .home-nav .nav-mobile-menu summary { width: 44px; height: 44px; }
   .home-nav:has(.nav-mobile-menu[open]) {
     background: rgba(7, 12, 26, 0.92);
     -webkit-backdrop-filter: saturate(150%) blur(16px);
@@ -374,6 +376,8 @@ a { color: var(--blue-bright); }
 @media (max-width: 780px) {
   .nav-links { display: none; }
   .nav-inner { justify-content: space-between; }
+  .home-nav .nav-service-label-full { display: none; }
+  .home-nav .nav-service-label-short { display: inline; }
 }
 
 @media (max-width: 520px) {
@@ -387,6 +391,21 @@ a { color: var(--blue-bright); }
     right: 14px;
     width: min(340px, calc(100% - 28px));
   }
+  .home-nav .nav-inner { gap: 6px; padding-inline: 10px; }
+  .home-nav .nav-brand {
+    justify-content: center;
+    flex: 0 0 44px;
+    min-height: 44px;
+  }
+  .home-nav .nav-service-cta { gap: 6px; }
+  .home-nav .nav-mobile-panel { top: calc(64px + env(safe-area-inset-top)); }
+}
+
+@media (max-width: 360px) {
+  .home-nav .nav-inner { gap: 4px; padding-inline: 6px; }
+  .home-nav .nav-actions { gap: 4px; }
+  .home-nav .nav-actions .btn-nav { padding-inline: 5px; font-size: 12px; }
+  .home-nav .nav-service-cta { gap: 5px; }
 }
 
 /* ---------- Pointer / touch ambience ----------
@@ -687,20 +706,20 @@ body[data-fx-full] .hero-grid { display: none; }
   font-weight: 600;
 }
 
-/* A quiet cue that helps the first viewport feel intentional without
-   competing with either primary CTA. */
+/* A compact, higher-contrast cue without continuous motion. */
 .scroll-cue {
   position: absolute;
   left: 50%;
   bottom: 18px;
   z-index: 2;
-  width: 44px;
-  height: 44px;
+  width: 64px;
+  height: 48px;
   display: grid;
   place-items: center;
-  border-radius: 50%;
-  color: var(--blue-soft);
-  opacity: 0.68;
+  border-radius: 14px;
+  color: #c5d6ff;
+  opacity: 0.9;
+  text-decoration: none;
   transform: translateX(-50%);
   transition: opacity 0.35s ease, background 0.2s ease, border-color 0.2s ease;
 }
@@ -716,30 +735,33 @@ body[data-fx-full] .hero-grid { display: none; }
 .scroll-cue > span,
 .scroll-cue > span::after {
   display: block;
-  width: 9px;
-  height: 9px;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
+  width: 11px;
+  height: 11px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
 }
 .scroll-cue > span {
   position: relative;
   margin-top: -5px;
   transform: rotate(45deg);
-  animation: cue-drift 3.1s ease-in-out infinite;
 }
 .scroll-cue > span::after {
   content: "";
   position: absolute;
   top: 6px;
   left: 6px;
-  opacity: 0.46;
+  opacity: 0.75;
   transform: none;
 }
 
-@keyframes cue-drift {
-  0%, 100% { transform: translateY(0) rotate(45deg); }
-  50% { transform: translateY(5px) rotate(45deg); }
+.scroll-cue::before {
+  content: "Scroll";
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
 }
+.page-scroll-cue { display: none; }
+.page-scroll-cue[hidden] { display: none !important; }
 
 /* ---------- Phone ---------- */
 
@@ -1056,6 +1078,37 @@ body[data-fx-full] .hero-grid { display: none; }
     bottom: auto;
     margin: 22px auto -4px;
     transform: none;
+  }
+  .js-scroll-cue .scroll-cue { visibility: hidden; width: 44px; height: 44px; }
+  .page-scroll-cue {
+    position: fixed;
+    z-index: 40;
+    right: max(12px, env(safe-area-inset-right));
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    min-width: 78px;
+    height: 44px;
+    padding: 0 12px;
+    border: 1px solid rgba(148, 176, 255, 0.4);
+    border-radius: 14px;
+    background: rgba(9, 19, 41, 0.95);
+    color: #d8e4ff;
+    font: 700 12px/1 var(--font);
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  }
+  .page-scroll-cue[data-position="left"] { right: auto; left: max(12px, env(safe-area-inset-left)); }
+  .page-scroll-cue[data-position="center"] { right: auto; left: 50%; transform: translateX(-50%); }
+  .page-scroll-cue i {
+    width: 10px;
+    height: 10px;
+    margin-top: -5px;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: rotate(45deg);
   }
 }
 

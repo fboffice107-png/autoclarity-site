@@ -13,6 +13,100 @@
   /* ---------- Nav: elevate on scroll ---------- */
   var nav = document.querySelector(".nav");
   var scrollCues = Array.prototype.slice.call(document.querySelectorAll(".scroll-cue"));
+  var mobileViewport = window.matchMedia("(max-width: 940px)");
+  var pageCue = null;
+  var cueFrame = null;
+  if (document.querySelector(".home-hero, .ppi-hero")) {
+    document.documentElement.classList.add("js-scroll-cue");
+    pageCue = document.createElement("button");
+    pageCue.type = "button";
+    pageCue.className = "page-scroll-cue";
+    pageCue.setAttribute("aria-label", "Scroll down to see more");
+    pageCue.innerHTML = '<span>Scroll</span><i aria-hidden="true"></i>';
+    pageCue.hidden = true;
+    document.body.appendChild(pageCue);
+    pageCue.addEventListener("click", function () {
+      window.scrollBy({ top: window.innerHeight * 0.65, behavior: reducedMotion.matches ? "instant" : "smooth" });
+    });
+  }
+
+  /* A single event-driven update; no continuous animation. Keep the cue out
+     of text, controls, the keyboard and the open navigation panel. */
+  function updatePageCue() {
+    cueFrame = null;
+    if (!pageCue) return;
+    var viewport = window.visualViewport;
+    var visibleBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
+    var remaining = document.documentElement.scrollHeight - (window.scrollY + visibleBottom);
+    var focused = document.activeElement;
+    var editing = focused && focused.matches("input, textarea, select, [contenteditable]:not([contenteditable='false'])");
+    var keyboard = viewport && window.innerHeight - viewport.height > 150;
+    var menuOpen = document.querySelector(".nav-mobile-menu[open]");
+    pageCue.hidden = !mobileViewport.matches || remaining <= 24 || editing || keyboard || !!menuOpen;
+    if (pageCue.hidden) return;
+    var sticky = document.querySelector(".ppi-sticky.show");
+    var bottomOffset = sticky ? Math.max(0, window.innerHeight - sticky.getBoundingClientRect().top) : 0;
+
+    // Test all three placements against the actual content after each resize,
+    // form expansion or scroll. Hide if there is no clear space at the bottom.
+    var obstacles = document.querySelectorAll("main p, main h1, main h2, main h3, main li, main form, main .form-shell, main a, main button, main input, main select, main textarea, main iframe, footer p, footer h3, footer a, .nav, .ppi-sticky.show");
+    var boxes = [];
+    var measuredText = new Set();
+    obstacles.forEach(function (el) {
+      var bounds = el.getBoundingClientRect();
+      if (!bounds.width || !bounds.height || bounds.bottom < visibleBottom - bottomOffset - 240 || bounds.top > visibleBottom) return;
+      if (el.matches("p, h1, h2, h3, li")) {
+        var range = document.createRange();
+        var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        var text;
+        while ((text = walker.nextNode())) {
+          if (!text.textContent.trim() || measuredText.has(text)) continue;
+          measuredText.add(text);
+          range.selectNodeContents(text);
+          Array.prototype.push.apply(boxes, range.getClientRects());
+        }
+      } else {
+        boxes.push(bounds);
+      }
+    });
+    var positions = ["right", "left", "center"];
+    var clear = [0, 52, 104].some(function (offset) {
+      pageCue.style.marginBottom = bottomOffset + offset + "px";
+      return positions.some(function (position) {
+        pageCue.dataset.position = position;
+        var cueBox = pageCue.getBoundingClientRect();
+        return !boxes.some(function (box) {
+          return box.width && box.height && box.left < cueBox.right + 4 && box.right > cueBox.left - 4 && box.top < cueBox.bottom + 4 && box.bottom > cueBox.top - 4;
+        });
+      });
+    });
+    pageCue.hidden = !clear;
+  }
+  function scheduleCueUpdate() {
+    if (pageCue && cueFrame === null) cueFrame = requestAnimationFrame(updatePageCue);
+  }
+  window.addEventListener("resize", scheduleCueUpdate, { passive: true });
+  document.addEventListener("focusin", scheduleCueUpdate);
+  document.addEventListener("focusout", scheduleCueUpdate);
+  document.addEventListener("toggle", scheduleCueUpdate, true);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", scheduleCueUpdate, { passive: true });
+    window.visualViewport.addEventListener("scroll", scheduleCueUpdate, { passive: true });
+  }
+  if (pageCue && "ResizeObserver" in window) {
+    var cueResizeObserver = new ResizeObserver(scheduleCueUpdate);
+    cueResizeObserver.observe(document.body);
+    cueResizeObserver.observe(document.documentElement);
+    document.querySelectorAll("main, .form-shell").forEach(function (el) { cueResizeObserver.observe(el); });
+  }
+  if (pageCue && "MutationObserver" in window) {
+    var cueContentObserver = new MutationObserver(function () {
+      var sticky = document.querySelector(".ppi-sticky");
+      if (sticky) cueContentObserver.observe(sticky, { attributes: true, attributeFilter: ["class", "hidden"] });
+      scheduleCueUpdate();
+    });
+    cueContentObserver.observe(document.body, { childList: true, subtree: true });
+  }
   var lastScrolled = null;
   function onScroll() {
     var scrolled = window.scrollY > 8;
@@ -24,6 +118,7 @@
     scrollCues.forEach(function (cue) {
       cue.classList.toggle("is-dismissed", cueDismissed);
     });
+    scheduleCueUpdate();
   }
   window.addEventListener("scroll", onScroll, { passive: true });
   onScroll();

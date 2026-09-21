@@ -271,6 +271,9 @@
     // A price with no times to pick is the dead end this page used to show.
     // It is now named out loud instead of leaving the customer guessing.
     var awaitingTimes = step === 1 && offered.length === 0;
+    // An offer whose quote has lapsed is the other way to reach a page with
+    // nothing to press. Say so, and give them one button that fixes it.
+    var offerStale = step === 1 && Boolean(v.quote && v.quote.expired) && !paidReselection;
 
     html += '<div class="portal-topbar">' +
       "<h1>Request " + esc(v.ref) + "</h1>" +
@@ -284,14 +287,18 @@
       seller_access_pending: "You'll be notified the moment the seller confirms access.",
       ready_for_review: "Nothing to do right now — your exact price and appointment times are on the way by email.",
       quote_prepared: "Nothing to do right now — your exact price and appointment times are on the way by email.",
-      quote_sent: awaitingTimes
-        ? "Your price is confirmed below. AutoClarity is finalising which appointment times to offer you and will email them shortly — you don't need to do anything yet."
-        : "Pick the appointment that suits you. Nothing is charged until you accept the agreements and pay.",
+      quote_sent: offerStale
+        ? "This offer has passed its valid-until date, so it can't be booked as it stands. Ask AutoClarity for a refreshed quote below — it only takes a moment and you have not been charged anything."
+        : awaitingTimes
+          ? "Your price is confirmed below. AutoClarity is finalising which appointment times to offer you and will email them shortly — you don't need to do anything yet."
+          : "Pick the appointment that suits you. Nothing is charged until you accept the agreements and pay.",
       awaiting_time_selection: paidReselection
         ? "Your payment is already recorded. Choose a replacement time below — you will not be charged again."
-        : awaitingTimes
-          ? "Your price is confirmed below. AutoClarity is finalising which appointment times to offer you and will email them shortly."
-          : "Pick the appointment that suits you. Nothing is charged until you accept the agreements and pay.",
+        : offerStale
+          ? "This offer has passed its valid-until date, so it can't be booked as it stands. Ask AutoClarity for a refreshed quote below — you have not been charged anything."
+          : awaitingTimes
+            ? "Your price is confirmed below. AutoClarity is finalising which appointment times to offer you and will email them shortly."
+            : "Pick the appointment that suits you. Nothing is charged until you accept the agreements and pay.",
       awaiting_agreement: canAcceptCurrentAgreements
         ? "Your time is held. Read and accept the agreements below to continue to payment."
         : "Your held time or quote needs refreshing before you can accept the agreements. AutoClarity will send the next step.",
@@ -360,6 +367,11 @@
       html += "</div>";
       html += '<p class="field-hint slot-none">None of these work? <button type="button" class="linklike" id="requestNewTimes">Ask AutoClarity for different times</button></p>';
       html += "</section>";
+    } else if (offerStale) {
+      html += '<section class="portal-card"><h2>This offer has expired</h2>' +
+        '<div class="notice warn">Quotes are held for a limited time. This one passed its valid-until date, so it can\u2019t be booked as it stands. Nothing has been charged, and asking for a fresh one does not put you back at the start.</div>' +
+        '<button class="btn btn-primary" id="requestNewTimes" style="margin-top:12px;">Ask AutoClarity for a refreshed quote</button>' +
+        '<p class="form-status" id="requestTimesStatus" role="status" aria-live="polite"></p></section>';
     } else if (awaitingTimes && v.quote) {
       html += '<section class="portal-card"><h2>Choose your appointment</h2>' +
         '<div class="notice info">Appointment times for this request haven’t been published yet. AutoClarity sends them by email as soon as they’re set — usually the same day. Your price above is already confirmed and will not change.</div>' +
@@ -550,10 +562,13 @@
         if (status) status.textContent = "Sending…";
         // Deliberately the ordinary message channel: it reaches the owner in
         // the same place as everything else, and leaves a visible record.
-        action({ action: "message", message: "None of the offered times work for me (or no times are showing yet) — could you send other appointment options?" }, function (r) {
+        var ask = view && view.quote && view.quote.expired
+          ? "My quote has expired before I could book. Could you send a refreshed quote and appointment times?"
+          : "None of the offered times work for me (or no times are showing yet) — could you send other appointment options?";
+        action({ action: "message", message: ask }, function (r) {
           requestTimes.disabled = false;
           if (r.ok) {
-            notice("good", "Message sent — AutoClarity will email you new appointment times.");
+            notice("good", "Message sent — AutoClarity will email you a refreshed offer with appointment times.");
             load();
           } else if (status) {
             status.textContent = (r.body.error && r.body.error.message) || "Couldn’t send — please email support.";

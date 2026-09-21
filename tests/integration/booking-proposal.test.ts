@@ -100,6 +100,15 @@ function corollaIntake(overrides: Json = {}): Json {
   };
 }
 
+function sqlLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+async function executeLocalD1(sql: string): Promise<void> {
+  const response = await fetch('http://127.0.0.1:8798/test/d1', { method: 'POST', body: sql });
+  if (!response.ok) throw new Error(`Local D1 test injection failed: ${await response.text()}`);
+}
+
 async function submitAndFind(payload: Json): Promise<string> {
   // Intake is rate limited per IP by design; give each fixture its own client
   // address so the limiter measures what it is meant to measure.
@@ -360,6 +369,85 @@ describe('booking proposal — one owner action, one customer decision', () => {
     expect(detail.body.proposalDraft.manualReview).toBe(true);
     expect(detail.body.proposalDraft.reviewCeiling).toBe('exotic_collector');
     expect(detail.body.proposalDraft.manualReasons.join(' ')).toContain('turbo kit, coilovers, roll cage');
+  });
+
+  it('un-strands a request whose held time was released at the agreement step', async () => {
+    // Observed in production: once a hold lapses and its slot goes back to
+    // 'offered', nothing moved the request out of awaiting_agreement, so the
+    // customer was parked forever on a page with nothing to press. Reproduce
+    // that exact shape and prove the portal repairs it on read.
+    const requestId = await submitAndFind(corollaIntake());
+    const sent = await adminPost(requestId, {
+      action: 'send_booking_proposal',
+      tier: 'standard',
+      slots: afternoonOptions(11),
+      proposalKey: `stranded-proposal-${seq}`,
+    });
+    expect(sent.status, JSON.stringify(sent.body)).toBe(200);
+
+    const link = await adminPost(requestId, { action: 'reissue_link' });
+    const token = new URL(link.body.url).searchParams.get('t')!;
+    const portal = { authorization: `Bearer ${token}` };
+
+    const view = await get('/api/portal', portal);
+    const chosen = view.body.slots.find((s: Json) => s.status === 'offered');
+    expect((await post('/api/portal/action', { action: 'select_slot', slotId: chosen.id }, portal)).status).toBe(200);
+    expect((await get('/api/portal', portal)).body.status).toBe('awaiting_agreement');
+
+    // Release the hold without moving the request — the stranded shape.
+    await executeLocalD1(
+      `UPDATE appointment_slots SET status = 'offered', hold_expires_at = NULL `
+      + `WHERE request_id = ${sqlLiteral(requestId)} AND status = 'held';`,
+    );
+
+    const repaired = await get('/api/portal', portal);
+    expect(repaired.body.status).toBe('awaiting_time_selection');
+    expect(repaired.body.slots.filter((s: Json) => s.status === 'offered').length).toBeGreaterThan(0);
+    // And the customer can actually book again from there.
+    const again = repaired.body.slots.find((s: Json) => s.status === 'offered');
+    expect((await post('/api/portal/action', { action: 'select_slot', slotId: again.id }, portal)).status).toBe(200);
+    expect((await get('/api/portal', portal)).body.status).toBe('awaiting_agreement');
+  });
+
+  it('never un-strands a request whose payment already settled', async () => {
+    const requestId = await submitAndFind(corollaIntake());
+    const sent = await adminPost(requestId, {
+      action: 'send_booking_proposal',
+      tier: 'standard',
+      slots: afternoonOptions(13),
+      proposalKey: `settled-proposal-${seq}`,
+    });
+    expect(sent.status, JSON.stringify(sent.body)).toBe(200);
+    const link = await adminPost(requestId, { action: 'reissue_link' });
+    const token = new URL(link.body.url).searchParams.get('t')!;
+    const portal = { authorization: `Bearer ${token}` };
+    const view = await get('/api/portal', portal);
+    const chosen = view.body.slots.find((s: Json) => s.status === 'offered');
+    await post('/api/portal/action', { action: 'select_slot', slotId: chosen.id }, portal);
+
+    // Settled money parks the request in the dedicated reconciliation paths, so
+    // the repair must leave it exactly where it is. The booking row is created
+    // alongside the payment because migration 0008 refuses a payment whose
+    // quote and booking identity do not line up — build it the way checkout
+    // would, not by bypassing the guard.
+    const now = new Date().toISOString();
+    await executeLocalD1(
+      `INSERT INTO bookings (id, request_id, quote_id, slot_id, status, created_at, updated_at) `
+      + `SELECT 'bkg_settled_${seq}', ${sqlLiteral(requestId)}, q.id, `
+      + `(SELECT s.id FROM appointment_slots s WHERE s.request_id = ${sqlLiteral(requestId)} AND s.status = 'held' LIMIT 1), `
+      + `'pending_payment', ${sqlLiteral(now)}, ${sqlLiteral(now)} `
+      + `FROM quotes q WHERE q.request_id = ${sqlLiteral(requestId)} AND q.status = 'sent' LIMIT 1;`
+      + `INSERT INTO payments (id, request_id, quote_id, booking_id, amount_cents, currency, status, created_at, updated_at) `
+      + `SELECT 'pay_settled_${seq}', ${sqlLiteral(requestId)}, q.id, 'bkg_settled_${seq}', q.total_cents, q.currency, 'succeeded', `
+      + `${sqlLiteral(now)}, ${sqlLiteral(now)} `
+      + `FROM quotes q WHERE q.request_id = ${sqlLiteral(requestId)} AND q.status = 'sent' LIMIT 1;`
+      + `UPDATE appointment_slots SET status = 'offered', hold_expires_at = NULL `
+      + `WHERE request_id = ${sqlLiteral(requestId)} AND status = 'held';`,
+    );
+
+    const afterSettled = await get('/api/portal', portal);
+    expect(afterSettled.body.status).toBe('awaiting_agreement');
+    expect(afterSettled.body.payment.status).toBe('succeeded');
   });
 
   it('rejects a modification answer with no description', async () => {

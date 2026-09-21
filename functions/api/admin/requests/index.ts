@@ -42,6 +42,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
              WHERE s.request_id = r.id AND s.status = 'held' LIMIT 1) AS held_starts_at,
            (SELECT COUNT(*) FROM appointment_slots s
              WHERE s.request_id = r.id AND s.status = 'offered') AS offered_slot_count,
+           (SELECT COUNT(*) FROM appointment_slots s
+             WHERE s.request_id = r.id AND s.status = 'held') AS held_slot_count,
            (SELECT p.status FROM payments p
              WHERE p.request_id = r.id ORDER BY p.created_at DESC LIMIT 1) AS payment_status,
            (SELECT p.amount_cents FROM payments p

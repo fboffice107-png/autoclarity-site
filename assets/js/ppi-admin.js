@@ -205,6 +205,18 @@
       stage.kind = "alert";
       stage.who = "You";
     }
+    // An offer the customer can no longer act on is YOUR move, not theirs.
+    // Saying "waiting for customer" here is what let a stale quote sit until
+    // the customer gave up and cancelled.
+    if (!row.paid_amount_cents && ["quote_sent", "awaiting_time_selection", "awaiting_agreement", "awaiting_payment"].indexOf(row.status) !== -1) {
+      var expired = row.current_quote_expires_at && new Date(row.current_quote_expires_at).getTime() < Date.now();
+      var noTimeLeft = Number(row.offered_slot_count || 0) === 0 && Number(row.held_slot_count || 0) === 0;
+      if (expired || (noTimeLeft && row.current_total_cents)) {
+        stage.label = expired ? "Offer expired — re-send to continue" : "Offer has no times left — re-send";
+        stage.kind = "alert";
+        stage.who = "You";
+      }
+    }
     if (row.proposal_notification_status === "failed") {
       stage.label = stage.label + " · email not delivered";
       stage.kind = "alert";

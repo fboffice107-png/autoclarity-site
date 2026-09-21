@@ -39,6 +39,15 @@ describe('admin — the request answers "who acts next"', () => {
     ]) expect(section).toContain(`${status}:`);
   });
 
+  it('treats an offer the customer cannot act on as the owner\u2019s move', () => {
+    // Saying "waiting for customer" on a lapsed offer is what let a real
+    // quote sit until the customer gave up and cancelled it.
+    expect(adminScript).toContain('Offer expired — re-send to continue');
+    expect(adminScript).toContain('Offer has no times left — re-send');
+    expect(adminScript).toContain('current_quote_expires_at');
+    expect(adminScript).toContain('held_slot_count');
+  });
+
   it('shouts about the two states that cost the owner money', () => {
     // A price with no times is what stranded a real customer.
     expect(adminScript).toContain('Proposal sent without times — customer cannot book');
@@ -142,6 +151,13 @@ describe('customer portal — one journey, no dead end', () => {
     expect(portalScript).toContain('<input type="checkbox" id="agree_');
     expect(portalScript).not.toMatch(/id="agree_[^"]*"\s+checked/u);
     expect(portalScript).toContain('<details class="portal-card portal-secondary"><summary>Need to cancel or reschedule?</summary>');
+  });
+
+  it('gives an expired offer a way forward instead of a dead page', () => {
+    expect(portalScript).toContain('var offerStale = step === 1 && Boolean(v.quote && v.quote.expired) && !paidReselection');
+    expect(portalScript).toContain('<h2>This offer has expired</h2>');
+    expect(portalScript).toContain('Ask AutoClarity for a refreshed quote');
+    expect(portalScript).toContain('Nothing has been charged');
   });
 
   it('tells the customer what happens after payment', () => {

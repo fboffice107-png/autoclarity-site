@@ -98,6 +98,41 @@ export async function releaseExpiredHolds(db: D1Database): Promise<void> {
          WHERE status = 'held' AND hold_expires_at < ?`,
       )
       .bind(now, now),
+
+    // Second repair: a request sitting at the agreement or payment step with
+    // NO held slot at all. The statements above only fire while an expired
+    // hold still exists, so a request whose slot was released by any other
+    // path — an admin release, an earlier sweep, a crash between statements —
+    // stayed in that status forever. The customer then saw a price with no
+    // way to act on it and no explanation, which is exactly the dead end this
+    // release exists to remove. Requests with settled money are excluded:
+    // those follow the dedicated paid-reselection and dispute paths.
+    db
+      .prepare(
+        `INSERT INTO status_history (id, request_id, from_status, to_status, actor, reason, created_at)
+         SELECT 'sh_' || lower(hex(randomblob(16))), r.id, r.status, 'awaiting_time_selection',
+                'system:hold-repair', 'No held appointment remained for this step', ?
+         FROM ppi_requests r
+         WHERE r.status IN ('awaiting_agreement','awaiting_payment')
+           AND r.deleted_at IS NULL
+           AND NOT EXISTS (SELECT 1 FROM appointment_slots s WHERE s.request_id = r.id AND s.status = 'held')
+           AND NOT EXISTS (
+             SELECT 1 FROM payments p WHERE p.request_id = r.id
+               AND p.status IN ('succeeded','partially_refunded','refunded','disputed')
+           )`,
+      )
+      .bind(now),
+    db
+      .prepare(
+        `UPDATE ppi_requests SET status = 'awaiting_time_selection', updated_at = ?
+         WHERE status IN ('awaiting_agreement','awaiting_payment') AND deleted_at IS NULL
+           AND NOT EXISTS (SELECT 1 FROM appointment_slots s WHERE s.request_id = ppi_requests.id AND s.status = 'held')
+           AND NOT EXISTS (
+             SELECT 1 FROM payments p WHERE p.request_id = ppi_requests.id
+               AND p.status IN ('succeeded','partially_refunded','refunded','disputed')
+           )`,
+      )
+      .bind(now),
   ]);
 }
 

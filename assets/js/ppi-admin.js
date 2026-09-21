@@ -220,6 +220,16 @@
   };
   function tierLabel(key) { return TIER_SHORT[key] || "Package not set"; }
 
+
+  /* Does this request carry a reason that needs a decision, as opposed to a
+     note about how its tier was reached? Only the former is worth flagging. */
+  function hasReviewReason(storedJson) {
+    if (!storedJson || storedJson === "[]") return false;
+    try {
+      return JSON.parse(storedJson).some(function (r) { return String(r).indexOf("tier: ") !== 0; });
+    } catch (e) { return false; }
+  }
+
   function stagePill(stage) {
     return '<span class="stage-pill stage-' + esc(stage.kind || "none") + '">' + esc(stage.label) + "</span>";
   }
@@ -441,7 +451,7 @@
         var rows = r.body.requests || [];
         var t = '<section class="admin-job-list" aria-label="Inspection requests">';
         rows.forEach(function (row) {
-          var manual = row.manual_review_reasons && row.manual_review_reasons !== "[]";
+          var manual = hasReviewReason(row.manual_review_reasons);
           var stage = stageOf(row);
           var pkg = row.current_tier || row.customer_selected_tier || row.suggested_tier;
           var priceText = row.current_total_cents
@@ -762,8 +772,13 @@
       '<nav class="report-actions" aria-label="Job sections"><a class="btn btn-ghost btn-sm" href="#inspectionReport">Inspection report</a><a class="btn btn-ghost btn-sm" href="#jobMessages">Messages</a><a class="btn btn-ghost btn-sm" href="#jobScheduling">Scheduling</a><a class="btn btn-ghost btn-sm" href="#jobPayments">Payments / refunds</a></nav></section>';
 
     if (req.manual_review_reasons && req.manual_review_reasons !== "[]") {
-      var reasons = [];
-      try { reasons = JSON.parse(req.manual_review_reasons); } catch (e) {}
+      var stored = [];
+      try { stored = JSON.parse(req.manual_review_reasons); } catch (e) {}
+      // The stored list mixes how the tier was reached with what actually
+      // needs a decision. Only the latter is worth a banner — a BMW being a
+      // BMW is not something to review, and the proposal card below already
+      // explains the classification.
+      var reasons = stored.filter(function (r) { return String(r).indexOf("tier: ") !== 0; });
       if (reasons.length) html += '<div class="notice warn"><strong>Needs a look:</strong> ' + esc(reasons.join(" · ")) + "</div>";
     }
 

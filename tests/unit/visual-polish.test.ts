@@ -73,16 +73,19 @@ describe('premium visual and interaction safeguards', () => {
     // fingerprint so a returning visitor cannot run cached JS against new
     // markup; everything untouched keeps its old one so cached copies stay
     // valid. Bump only what actually changed.
-    const BOOKING_ASSETS = [
-      'assets/css/ppi.css',
-      'assets/js/ppi-form.js',
-      'assets/js/ppi-portal.js',
-      'assets/js/ppi-admin.js',
-    ];
+    // An asset's fingerprint moves whenever its bytes move. The two scripts
+    // changed again after the first release shipped, so they are at r2 while
+    // the assets that did not change stay at r1.
+    const BOOKING_ASSETS = {
+      'assets/css/ppi.css': 'ac-book-20260921-r1',
+      'assets/js/ppi-form.js': 'ac-book-20260921-r1',
+      'assets/js/ppi-portal.js': 'ac-book-20260921-r2',
+      'assets/js/ppi-admin.js': 'ac-book-20260921-r2',
+    };
     for (const page of [ppiPage, adminPage, portalPage]) {
-      for (const asset of BOOKING_ASSETS) {
+      for (const [asset, fingerprint] of Object.entries(BOOKING_ASSETS)) {
         if (!page.includes(asset)) continue;
-        expect(page).toContain(`${asset}?v=ac-book-20260921-r1`);
+        expect(page).toContain(`${asset}?v=${fingerprint}`);
         expect(page).not.toContain(`${asset}?v=ac-ai-20260911-r1`);
       }
     }
@@ -95,7 +98,7 @@ describe('premium visual and interaction safeguards', () => {
     }
     // Every reference still carries a known, current fingerprint — no source
     // may invent a third scheme or leave an asset unversioned.
-    const KNOWN = new Set(['ac-ai-20260911-r1', 'ac-book-20260921-r1']);
+    const KNOWN = new Set(['ac-ai-20260911-r1', 'ac-book-20260921-r1', 'ac-book-20260921-r2']);
     for (const source of sources) {
       const fingerprints = source.match(/ac-(?:prod|ai|book)-\d{8}-r\d+/gu) ?? [];
       expect(fingerprints.length).toBeGreaterThan(0);

@@ -10,21 +10,46 @@ you'll sign in through Cloudflare Access with your email instead.
    source cohorts, and interaction counters. ⚠ marks manual-review requests
    (exotic, classic, salvage, heavy mods, non-running); ⚡ marks same-day
    priority.
-2. Open a request → everything the customer submitted, their uploads, travel
-   estimate and the suggested tier **with the reasons** (internal only).
-3. If something's missing → Status → `needs_info` with a note (emails them a
+2. The **Requests** list answers "who acts next" on every card: customer,
+   vehicle, location, package, current total, appointment and payment, with a
+   plain-language stage — *Needs your review*, *Waiting for customer to choose
+   a time*, *Time selected — awaiting payment*, *Paid — appointment confirmed*.
+   Two labels are deliberately loud: **Proposal sent without times — customer
+   cannot book** and **Paid — scheduling needs attention**.
+3. Open a request → **At a glance** repeats the same facts, then everything the
+   customer submitted, their uploads, travel estimate, the suggested package
+   **with the reasons** (internal only) and the customer's own package choice.
+4. If something's missing → Status → `needs_info` with a note (emails them a
    fresh portal link). Seller not confirmed → `seller_access_pending`.
-4. **Quote**: pick the tier (suggestion shown), optionally override base price,
-   travel, add-ons, discount; add a customer-facing note; Create draft →
-   review → **Send to customer**. Sending emails them the quote + portal link.
-   Quotes are versioned — a new version supersedes the old one automatically,
-   and any change after acceptance requires a new version by design.
-5. **Scheduling**: offer 2–3 windows (9:00 / 12:30 / 4:00 templates). The
-   system rejects conflicts including your travel + report-writing buffers.
-   The customer picks one → it's held for 60 minutes while they sign and pay.
-6. Payment confirms automatically via Stripe webhook: slot confirmed, other
-   windows released, confirmation emails sent, status → Confirmed. You'll get
-   an owner notification.
+5. **Review & send booking proposal** — the ordinary path, and one action.
+   The package is prefilled (the customer's choice if they made one, otherwise
+   the suggestion), the itemized total is calculated by the server, and Quick
+   fill drops in the 9:00 / 12:30 / 4:00 Las Vegas templates. Press
+   **Review & Send Booking Proposal — $TOTAL**.
+
+   That single press writes one coherent proposal — quote, offered windows and
+   the customer message, in one transaction — and sends **one** email with
+   **one** link. A proposal with no usable times is refused outright and saves
+   nothing, because a price with no times leaves the customer unable to book.
+
+   Under **Advanced pricing**: base override, custom travel, add-ons, discount,
+   offer expiry and an internal note that never reaches the customer. Typed
+   work is kept if you navigate away before sending.
+
+   After sending, the card keeps showing the saved price, the offered times,
+   the timestamp and the honest delivery state — *saved*, *queued*, *sent* or
+   *failed*. **Retry sending this proposal** reuses the same proposal and can
+   never create a second one or a second email.
+
+   Quotes stay versioned; a new proposal supersedes the old offer, releases its
+   unclaimed windows, and any change after acceptance requires a new version by
+   design. The older per-step tools (manual quote builder, manual time offers)
+   are still there under the secondary panels.
+6. The customer opens the one link and does everything on one page: choose a
+   time → review the exact total → accept the agreements → pay. Payment
+   confirms automatically via Stripe webhook: slot confirmed, other windows
+   released, confirmation emails sent, status → Confirmed. You'll get an owner
+   notification.
 7. Day-of: move status to `inspection_in_progress` → `report_in_progress`.
    `completed` is rejected until this same request points to an immutable
    published report version. On successful completion, the secure portal shows
@@ -47,8 +72,10 @@ All money values are **cents**. Common edits:
   each tier's lower `launchPriceCents` as needed. The legacy Standard-only
   `pricing.promo` path also requires a real future `endsAt`; either active path
   is reflected on the public page and in the server-owned quote suggestion.
-- Travel: `travel.bands` (`maxMiles`/`feeCents`), origin lat/lng (keep it the
-  public central-Vegas point, never your home).
+- Travel: `travel.bands` (`maxMiles`/`feeCents`). The origin is the AutoClarity
+  service base (ZIP 89147 centroid, `travel.originLat/originLng`). It stays
+  server-side — customers only ever see the derived mileage and band, never the
+  coordinates — and it is a ZIP centroid rather than the exact street address.
 - Schedule: `scheduling.slotTemplates`, `daysOfOperation` (0=Sun…6=Sat),
   `blackoutDates: ["2026-12-25"]`, `minLeadHours`, `holdMinutes`.
 - Quote expiry: `quotes.expiryHours` (48 by default).

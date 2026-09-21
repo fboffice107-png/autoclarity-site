@@ -59,10 +59,18 @@ export interface PpiConfig {
     items: Array<{ name: string; text: string; vehicle?: string }>;
   };
   travel: {
-    // Public service-area origin: central Las Vegas (Clark County government
-    // area) — deliberately NOT a private address.
+    // Server-side service origin. Distances are measured from AutoClarity's
+    // actual operating base (ZIP 89147 centroid) so the mobile-service charge
+    // reflects the real drive, rather than a downtown placeholder that
+    // over-charged the west valley and under-charged the east.
+    //
+    // PRIVACY: this is the ZIP centroid, not the street address, and it is
+    // never included in /api/ppi/runtime-config or any customer-facing
+    // payload — only the derived mileage and band are shown.
     originLat: number;
     originLng: number;
+    /** Admin-facing label for where distances are measured from. */
+    originLabel: string;
     bands: Array<{ maxMiles: number; feeCents: number }>;
     customBeyondMiles: number;
   };
@@ -174,8 +182,10 @@ export const DEFAULT_CONFIG: PpiConfig = {
     items: [], // owner adds real reviews here; none fabricated
   },
   travel: {
-    originLat: 36.1147,
-    originLng: -115.1728,
+    // ZIP 89147 centroid — AutoClarity's operating base in west Las Vegas.
+    originLat: 36.113,
+    originLng: -115.28,
+    originLabel: 'AutoClarity service base — Las Vegas 89147',
     bands: [
       { maxMiles: 15, feeCents: 0 },
       { maxMiles: 25, feeCents: 2500 },
@@ -296,6 +306,7 @@ function validateEffectiveConfig(config: PpiConfig): void {
 
   assertConfig(Number.isFinite(config.travel.originLat) && config.travel.originLat >= -90 && config.travel.originLat <= 90, 'config.travel.originLat is invalid.');
   assertConfig(Number.isFinite(config.travel.originLng) && config.travel.originLng >= -180 && config.travel.originLng <= 180, 'config.travel.originLng is invalid.');
+  assertConfig(config.travel.originLabel.trim().length >= 1 && config.travel.originLabel.length <= 120, 'config.travel.originLabel is invalid.');
   assertConfig(config.travel.bands.length >= 1 && config.travel.bands.length <= 10, 'config.travel.bands must contain 1 to 10 bands.');
   let priorMiles = 0;
   for (const [index, band] of config.travel.bands.entries()) {

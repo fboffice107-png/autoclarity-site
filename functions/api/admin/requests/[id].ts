@@ -8,6 +8,19 @@ import { getConfig } from '../../../lib/config.ts';
 import { applyStatus, isStatus, canTransition, STATUS_LABELS, type Status } from '../../../lib/status.ts';
 import { completeWithPublishedReport, type PublishedReportVersion } from '../../../lib/published-report.ts';
 import { basePriceForTier, computeQuoteTotals, quoteExpiry, travelFeeForMiles, type QuoteLineInput, type Tier } from '../../../lib/pricing.ts';
+import { isTier, suggestTier, tierMismatch } from '../../../lib/vehicle-class.ts';
+import { buildPriceBreakdown, type PriceBreakdown } from '../../../lib/quote-math.ts';
+import {
+  defaultProposalMessage,
+  findProposalByKey,
+  latestProposal,
+  newProposalId,
+  recordProposalNotification,
+  travelSentence,
+  validateSlotTimes,
+  type BookingProposalRow,
+  type SlotCandidate,
+} from '../../../lib/booking-proposal.ts';
 import { issueMagicLink, portalUrl } from '../../../lib/magic.ts';
 import { retryStoredEmail, sendTemplate, type EmailResult, type EmailStatus, type EmailTemplateKey, type StoredEmailMessage } from '../../../lib/email.ts';
 import { persistNotificationIssue, resolveNotificationActionIssues } from '../../../lib/notification-issues.ts';
@@ -200,6 +213,113 @@ async function notificationLinkFailureResponse(
   );
 }
 
+
+// --------------------------------------------------------- proposal helpers
+
+/** One place that renders the proposal email, used by send and by retry. */
+async function deliverProposalEmail(
+  env: Env,
+  db: D1Database,
+  input: {
+    requestId: string;
+    proposalId: string;
+    ref: string;
+    email: string;
+    config: Awaited<ReturnType<typeof getConfig>>;
+    base: string;
+    breakdown?: PriceBreakdown;
+    priceLines?: string[];
+    totals: { totalCents: number };
+    slots?: SlotCandidate[];
+    slotStarts?: string[];
+    expiresAt: string;
+    customerMessage: string;
+  },
+): Promise<EmailResult> {
+  const { config } = input;
+  let token: string;
+  try {
+    // rotate = false: every link AutoClarity has already given this customer
+    // keeps working, so an older email is never silently broken.
+    ({ token } = await issueMagicLink(db, input.requestId, config, false));
+  } catch (e) {
+    await recordProposalNotification(db, input.proposalId, 'failed', null, `secure link unavailable: ${String(e).slice(0, 200)}`);
+    return { id: null, status: 'failed', failure: 'template_failed' };
+  }
+
+  const priceLines = input.priceLines
+    ?? (input.breakdown?.lines ?? []).map((line) => `  ${line.label}: ${line.display}`);
+  const slotStarts = input.slotStarts ?? (input.slots ?? []).map((s) => s.startsAt);
+
+  const emailResult = await sendTemplate(env, db, input.requestId, 'booking_proposal', input.email, {
+    ref: input.ref,
+    portalUrl: portalUrl(input.base, token),
+    supportEmail: config.supportEmail,
+    extra: {
+      message: input.customerMessage,
+      priceLines: priceLines.join('\n'),
+      total: formatCents(input.totals.totalCents),
+      slots: slotStarts.map((s) => `  • ${fmtSlot(s, config.scheduling.timezone)}`).join('\n'),
+      expires: fmtSlot(input.expiresAt, config.scheduling.timezone),
+    },
+  }, undefined, `booking_proposal:${input.proposalId}`);
+
+  // Only the provider's acceptance earns the word "sent".
+  const status = emailResult.status === 'sent'
+    ? 'sent'
+    : emailResult.status === 'recorded'
+      ? 'queued'
+      : 'failed';
+  await recordProposalNotification(
+    db,
+    input.proposalId,
+    status,
+    emailResult.id,
+    status === 'failed' ? (emailResult.failure ?? 'delivery_failed') : null,
+  );
+  return emailResult;
+}
+
+/** Proposal shape returned to the dashboard, including its offered windows. */
+async function describeProposal(
+  db: D1Database,
+  proposal: BookingProposalRow,
+  config: Awaited<ReturnType<typeof getConfig>>,
+): Promise<Record<string, unknown>> {
+  let slotIds: string[] = [];
+  try {
+    const parsed: unknown = JSON.parse(proposal.slot_ids_json);
+    if (Array.isArray(parsed)) slotIds = parsed.map((v) => String(v));
+  } catch {
+    slotIds = [];
+  }
+  const slots = slotIds.length
+    ? await db
+        .prepare(
+          `SELECT id, starts_at, status FROM appointment_slots
+           WHERE request_id = ? AND id IN (${slotIds.map(() => '?').join(',')}) ORDER BY starts_at`,
+        )
+        .bind(proposal.request_id, ...slotIds)
+        .all<{ id: string; starts_at: string; status: string }>()
+    : { results: [] as Array<{ id: string; starts_at: string; status: string }> };
+  return {
+    id: proposal.id,
+    quoteId: proposal.quote_id,
+    totalCents: proposal.total_cents,
+    customerMessage: proposal.customer_message,
+    notificationStatus: proposal.notification_status,
+    notificationError: proposal.notification_error,
+    createdAt: proposal.created_at,
+    sentAt: proposal.sent_at,
+    slots: (slots.results ?? []).map((s) => ({
+      id: s.id,
+      startsAt: s.starts_at,
+      status: s.status,
+      label: fmtSlot(s.starts_at, config.scheduling.timezone),
+    })),
+  };
+}
+
 export const onRequestGet: PagesFunction<Env> = async (context) => {
   const auth = await requireAdmin(context.request, context.env);
   if (!auth.ok) return auth.response;
@@ -211,7 +331,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     .prepare(
       `SELECT r.*, c.full_name, c.email, c.phone, c.preferred_contact, c.marketing_consent,
               v.year, v.make, v.model, v.trim AS vehicle_trim, v.mileage, v.vin, v.vin_decoded_json,
-              v.asking_price_cents, v.expected_price_cents, v.listing_url, v.mod_status,
+              v.asking_price_cents, v.expected_price_cents, v.listing_url, v.mod_status, v.mod_details,
               v.warning_lights, v.known_issues, v.title_status, v.starts_drives
        FROM ppi_requests r
        JOIN customers c ON c.id = r.customer_id
@@ -263,9 +383,63 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   ]);
 
   const status = String(req['status']);
+  const config = await getConfig(db);
+  const proposal = await latestProposal(db, id);
+
+  // The suggestion is recomputed on read rather than trusted from intake, so
+  // a rules change shows up immediately instead of pinning an old answer to
+  // requests that were saved before it.
+  const suggestion = suggestTier({
+    year: (req['year'] as number | null) ?? null,
+    make: String(req['make'] ?? ''),
+    model: String(req['model'] ?? ''),
+    trim: String(req['vehicle_trim'] ?? ''),
+    modStatus: (String(req['mod_status'] ?? 'stock') as 'stock' | 'light' | 'heavy'),
+    modDetails: (req['mod_details'] as string | null) ?? '',
+    titleStatus: (String(req['title_status'] ?? 'unknown') as 'clean' | 'salvage_rebuilt' | 'unknown'),
+    startsDrives: (String(req['starts_drives'] ?? 'unknown') as 'yes' | 'no' | 'unknown'),
+  });
+  const customerTier = req['customer_selected_tier'];
+  const proposalTier = isTier(customerTier) ? customerTier : suggestion.tier;
+  const draftBreakdown = buildPriceBreakdown({
+    tier: proposalTier,
+    config,
+    travelMiles: (req['travel_miles'] as number | null) ?? null,
+    travelBasis: req['travel_miles'] === null || req['travel_miles'] === undefined ? 'unknown' : 'zip_centroid',
+  });
+
   return json({
     request: req,
     statusLabel: isStatus(status) ? STATUS_LABELS[status] : status,
+    // Everything the dashboard needs to render a prefilled proposal card
+    // without re-deriving any price of its own.
+    proposalDraft: {
+      tier: proposalTier,
+      suggestedTier: suggestion.tier,
+      customerSelectedTier: isTier(customerTier) ? customerTier : null,
+      tierMismatch: isTier(customerTier) ? tierMismatch(suggestion.tier, customerTier) : null,
+      customerReason: suggestion.customerReason,
+      adminReasons: suggestion.reasons,
+      manualReview: suggestion.manualReview,
+      manualReasons: suggestion.manualReasons,
+      reviewCeiling: suggestion.reviewCeiling,
+      lines: draftBreakdown.lines,
+      totalCents: draftBreakdown.totalCents,
+      travel: draftBreakdown.travel,
+      travelOriginLabel: config.travel.originLabel,
+      reviewNotes: draftBreakdown.reviewNotes,
+      quoteExpiryHours: config.quotes.expiryHours,
+      slotTemplates: config.scheduling.slotTemplates,
+      timezone: config.scheduling.timezone,
+      minLeadHours: config.scheduling.minLeadHours,
+      maxAdvanceDays: config.scheduling.maxAdvanceDays,
+      tierOptions: (['standard', 'euro_luxury_performance', 'exotic_collector'] as const).map((key) => ({
+        key,
+        label: config.pricing.tiers[key].label,
+        priceCents: basePriceForTier(key, config).priceCents,
+      })),
+    },
+    proposal: proposal ? await describeProposal(db, proposal, config) : null,
     allowedTransitions: isStatus(status)
       ? (Object.keys(STATUS_LABELS) as Status[]).filter((s) => canTransition(status, s) && genericStatusAllowed(status, s))
       : [],
@@ -309,6 +483,9 @@ interface AdminActionBody {
   messageId?: string;
   confirmFresh?: boolean;
   refundOperationId?: string;
+  proposalKey?: string;
+  proposalId?: string;
+  vehicleLabel?: string;
 }
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
@@ -680,6 +857,302 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return json({ ok: true, quoteId, version, totalCents: totals.totalCents, expiresAt });
     }
 
+    // ------------------------------------------------------- price_preview
+    //
+    // A dry run of the SAME calculation the send action will use, so the
+    // number on the button is produced by the code that will charge it — the
+    // dashboard never adds up line items itself.
+    case 'price_preview': {
+      const tier = String(body.tier ?? '');
+      if (!isTier(tier)) return errorJson('validation', 'Choose a valid package.', 422);
+      const breakdown = buildPriceBreakdown({
+        tier,
+        config,
+        baseCentsOverride: Number.isSafeInteger(body.basePriceCents) ? (body.basePriceCents as number) : null,
+        travelMiles: req.travel_miles,
+        travelBasis: req.travel_miles === null ? 'unknown' : 'zip_centroid',
+        travelCentsOverride: Number.isSafeInteger(body.travelCents) ? (body.travelCents as number) : null,
+        addons: (body.addons ?? []).map((a) => ({ label: clampStr(a.label, 120), amountCents: Number(a.amountCents) })),
+        discountCents: Number(body.discountCents) || 0,
+        discountLabel: clampStr(body.discountLabel, 120),
+      });
+      return json({
+        ok: true,
+        lines: breakdown.lines,
+        totalCents: breakdown.totalCents,
+        travel: breakdown.travel,
+        reviewNotes: breakdown.reviewNotes,
+      });
+    }
+
+    // --------------------------------------------- send_booking_proposal
+    //
+    // The ordinary path, and the reason this file exists in its current shape:
+    // review the price, pick times, press one button. It writes ONE coherent
+    // proposal (quote + offered windows + customer message) and sends ONE
+    // notification carrying ONE branded link.
+    case 'send_booking_proposal': {
+      if (!flags.bookingEnabled) return errorJson('booking_disabled', 'Booking is disabled in this environment.', 409);
+
+      const idempotencyKey = clampStr(body.proposalKey, 100);
+      if (!/^[A-Za-z0-9_-]{8,100}$/.test(idempotencyKey)) {
+        return errorJson('validation', 'A proposal key is required. Reload the request and try again.', 422);
+      }
+
+      // Pressing the button twice, a retried fetch, or a duplicated tab all
+      // land here. The first one already did the work; say so and stop.
+      const existingProposal = await findProposalByKey(db, id, idempotencyKey);
+      if (existingProposal) {
+        return json({
+          ok: true,
+          duplicate: true,
+          proposal: await describeProposal(db, existingProposal, config),
+          note: 'This proposal was already sent. Nothing was duplicated.',
+        });
+      }
+
+      const priorPayment = await db
+        .prepare(
+          `SELECT id FROM payments
+           WHERE request_id = ? AND status IN ('succeeded','partially_refunded','refunded','disputed') LIMIT 1`,
+        )
+        .bind(id)
+        .first<{ id: string }>();
+      if (priorPayment) {
+        return errorJson(
+          'payment_already_received',
+          'This request already has a recorded payment. Use paid time reselection instead; no replacement proposal was created.',
+          409,
+        );
+      }
+
+      const quotableStatuses: Status[] = [
+        'submitted', 'needs_info', 'seller_access_pending', 'ready_for_review',
+        'quote_prepared', 'quote_sent', 'awaiting_time_selection',
+      ];
+      if (!quotableStatuses.includes(status)) {
+        return errorJson('wrong_state', 'A booking proposal cannot be sent for this request in its current status.', 409);
+      }
+
+      const tier = String(body.tier ?? '');
+      if (!isTier(tier)) return errorJson('validation', 'Choose a valid package.', 422);
+
+      const breakdown = buildPriceBreakdown({
+        tier,
+        config,
+        baseCentsOverride: Number.isSafeInteger(body.basePriceCents) ? (body.basePriceCents as number) : null,
+        travelMiles: req.travel_miles,
+        travelBasis: req.travel_miles === null ? 'unknown' : 'zip_centroid',
+        travelCentsOverride: Number.isSafeInteger(body.travelCents) ? (body.travelCents as number) : null,
+        addons: (body.addons ?? []).map((a) => ({ label: clampStr(a.label, 120), amountCents: Number(a.amountCents) })),
+        discountCents: Number(body.discountCents) || 0,
+        discountLabel: clampStr(body.discountLabel, 120),
+      });
+
+      if (breakdown.totalCents === null || breakdown.quoteLines.length === 0) {
+        return errorJson(
+          'travel_quote_required',
+          'This location needs an explicit travel amount before a total can be offered. Set it under Advanced pricing (enter 0 only when travel is intentionally included).',
+          422,
+        );
+      }
+
+      let totals;
+      try {
+        totals = computeQuoteTotals(breakdown.quoteLines);
+      } catch {
+        return errorJson('validation', 'Those amounts do not produce one positive, exact total in whole cents.', 422);
+      }
+
+      // Times are validated BEFORE anything is written. A proposal without
+      // times is the exact dead end this action exists to prevent, so an
+      // empty result saves nothing at all.
+      const slotInput = Array.isArray(body.slots) ? body.slots : [];
+      const slotCheck = await validateSlotTimes(db, id, slotInput, config);
+      if (slotCheck.valid.length === 0) {
+        return errorJson(
+          'no_usable_times',
+          'None of those times can be offered, so nothing was sent. Pick different times and try again.',
+          422,
+          { skipped: slotCheck.skipped },
+        );
+      }
+      if (slotCheck.valid.length > 3) slotCheck.valid = slotCheck.valid.slice(0, 3);
+
+      // Take ownership of the request first; this compare-and-swap is what
+      // stops two browser tabs from both building a proposal.
+      if (status !== 'quote_prepared') {
+        const walked = canTransition(status, 'quote_prepared')
+          ? await applyStatus(db, id, status, 'quote_prepared', actor, 'Preparing booking proposal')
+          : canTransition(status, 'ready_for_review')
+            && (await applyStatus(db, id, status, 'ready_for_review', actor, 'Moving to review for quoting'))
+            && (await applyStatus(db, id, 'ready_for_review', 'quote_prepared', actor, 'Preparing booking proposal'));
+        if (!walked) {
+          return errorJson('conflict', 'This request changed a moment ago — reload it and send the proposal again.', 409);
+        }
+      }
+
+      const now = nowIso();
+      const quoteId = newId('qot');
+      const proposalId = newProposalId();
+      const expiresHours = Number.isInteger(body.expiresHours) && (body.expiresHours as number) > 0
+        ? (body.expiresHours as number)
+        : config.quotes.expiryHours;
+      const expiresAt = new Date(Date.now() + expiresHours * 3600_000).toISOString();
+      const versionRow = await db
+        .prepare(`SELECT COALESCE(MAX(version), 0) AS v FROM quotes WHERE request_id = ?`)
+        .bind(id)
+        .first<{ v: number }>();
+      const version = (versionRow?.v ?? 0) + 1;
+      const slotIds = slotCheck.valid.map(() => newId('slt'));
+      const customerMessage = clampStr(body.customerNote, 2000)
+        || defaultProposalMessage({
+          customerFirstName: req.full_name.split(' ')[0] ?? '',
+          vehicle: clampStr(body.vehicleLabel, 120) || 'your vehicle',
+          totalLabel: formatCents(totals.totalCents),
+          travelSentence: travelSentence(breakdown.travel.feeCents, breakdown.travel.miles),
+        });
+
+      // One transaction: supersede any older offer, write the quote already in
+      // 'sent' state, its lines, the offered windows, and the proposal record.
+      // D1 batches are transactional, so the customer can never see a price
+      // with no times or times with no price.
+      try {
+        await db.batch([
+          db.prepare(`UPDATE quotes SET status = 'superseded', updated_at = ? WHERE request_id = ? AND status IN ('draft','sent')`).bind(now, id),
+          db.prepare(
+            `UPDATE appointment_slots SET status = 'released', hold_expires_at = NULL, updated_at = ?
+             WHERE request_id = ? AND status = 'offered'`,
+          ).bind(now, id),
+          // 0008 requires a quote to be born as a draft, receive its line
+          // items, and only then cross the commit point — the commit is what
+          // re-checks that every component adds up. All three steps live in
+          // this one transaction, so the customer never sees a half-built offer.
+          db.prepare(
+            `INSERT INTO quotes (id, request_id, version, status, tier, currency, subtotal_cents, travel_cents, addons_cents, discount_cents, total_cents,
+                                 expires_at, admin_note_internal, customer_note, approved_by, created_at, updated_at)
+             VALUES (?, ?, ?, 'draft', ?, 'usd', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ).bind(
+            quoteId, id, version, tier,
+            totals.subtotalCents, totals.travelCents, totals.addonsCents, totals.discountCents, totals.totalCents,
+            expiresAt, clampStr(body.adminNote, 2000) || null, customerMessage, actor, now, now,
+          ),
+          ...breakdown.quoteLines.map((l, i) =>
+            db.prepare(`INSERT INTO quote_line_items (id, quote_id, kind, label, amount_cents, sort) VALUES (?, ?, ?, ?, ?, ?)`)
+              .bind(newId('qli'), quoteId, l.kind, l.label, l.amountCents, i),
+          ),
+          db.prepare(`UPDATE quotes SET status = 'sent', updated_at = ? WHERE id = ? AND status = 'draft'`).bind(now, quoteId),
+          ...slotCheck.valid.map((slot, i) =>
+            db.prepare(
+              `INSERT INTO appointment_slots
+                 (id, request_id, starts_at, ends_at, blocked_starts_at, blocked_ends_at, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, 'offered', ?, ?)`,
+            ).bind(slotIds[i], id, slot.startsAt, slot.endsAt, slot.blockedStartsAt, slot.blockedEndsAt, now, now),
+          ),
+          db.prepare(
+            `INSERT INTO booking_proposals
+               (id, request_id, quote_id, slot_ids_json, total_cents, customer_message,
+                notification_status, idempotency_key, created_by, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'saved', ?, ?, ?, ?)`,
+          ).bind(proposalId, id, quoteId, JSON.stringify(slotIds), totals.totalCents, customerMessage, idempotencyKey, actor, now, now),
+        ]);
+      } catch (e) {
+        const detail = String(e);
+        const conflict = /overlap|UNIQUE/i.test(detail);
+        return errorJson(
+          conflict ? 'conflict' : 'proposal_write_failed',
+          conflict
+            ? 'One of those times was taken while you were reviewing, or this proposal was already sent. Nothing was sent — reload and try again.'
+            : 'The proposal could not be saved. Nothing was sent to the customer.',
+          409,
+          { skipped: slotCheck.skipped },
+        );
+      }
+
+      const movedToSent = await applyStatus(db, id, 'quote_prepared', 'quote_sent', actor, `Booking proposal v${version} sent`, quoteId);
+      if (movedToSent) {
+        await applyStatus(db, id, 'quote_sent', 'awaiting_time_selection', actor, 'Appointment options offered', proposalId);
+      }
+
+      await db
+        .prepare(`INSERT INTO analytics_events (id, event, step, source, created_at) VALUES (?, 'ppi_quote_sent', 'booking_proposal', ?, ?)`)
+        .bind(newId('ev'), req.attribution_source || 'ppi_unknown', now)
+        .run();
+      await auditLog(db, actor, 'send_booking_proposal', 'ppi_request', id, {
+        proposalId, quoteId, version, totalCents: totals.totalCents, tier, slots: slotIds.length, skipped: slotCheck.skipped,
+      });
+
+      // The proposal is saved and durable from here. Whatever the email does
+      // next is recorded against it truthfully rather than assumed.
+      const emailResult = await deliverProposalEmail(env, db, {
+        requestId: id, proposalId, ref: req.ref, email: req.email, config, base,
+        breakdown, totals, slots: slotCheck.valid, expiresAt, customerMessage,
+      });
+
+      return json({
+        ok: true,
+        proposalId,
+        quoteId,
+        version,
+        totalCents: totals.totalCents,
+        offeredSlots: slotCheck.valid.length,
+        skipped: slotCheck.skipped,
+        notification: {
+          messageId: emailResult.id,
+          emailStatus: emailResult.status,
+          deliveryConfirmed: emailResult.status === 'sent',
+        },
+      }, emailResult.status === 'failed' ? 207 : 200);
+    }
+
+    // ------------------------------------------ retry_proposal_notification
+    //
+    // Safe retry: reuses the SAME stored proposal and the SAME outbox dedupe
+    // key, so it can never create a second proposal, a second quote, a second
+    // set of times, or a second email.
+    case 'retry_proposal_notification': {
+      const proposalId = clampStr(body.proposalId, 60);
+      const proposal = await db
+        .prepare(`SELECT * FROM booking_proposals WHERE id = ? AND request_id = ?`)
+        .bind(proposalId, id)
+        .first<BookingProposalRow>();
+      if (!proposal) return errorJson('not_found', 'That booking proposal was not found for this request.', 404);
+      if (proposal.notification_status === 'sent') {
+        return json({ ok: true, alreadySent: true, note: 'This proposal was already delivered. Nothing was re-sent.' });
+      }
+
+      const quote = await db
+        .prepare(`SELECT id, total_cents, expires_at, status FROM quotes WHERE id = ? AND request_id = ?`)
+        .bind(proposal.quote_id, id)
+        .first<{ id: string; total_cents: number; expires_at: string; status: string }>();
+      if (!quote || quote.status === 'superseded') {
+        return errorJson('stale_proposal', 'A newer proposal has replaced this one. Send the current proposal instead.', 409);
+      }
+
+      const lines = await db
+        .prepare(`SELECT kind, label, amount_cents FROM quote_line_items WHERE quote_id = ? ORDER BY sort`)
+        .bind(proposal.quote_id)
+        .all<{ kind: string; label: string; amount_cents: number }>();
+      const slots = await db
+        .prepare(`SELECT starts_at FROM appointment_slots WHERE request_id = ? AND status IN ('offered','held','confirmed') ORDER BY starts_at`)
+        .bind(id)
+        .all<{ starts_at: string }>();
+
+      const emailResult = await deliverProposalEmail(env, db, {
+        requestId: id, proposalId: proposal.id, ref: req.ref, email: req.email, config, base,
+        priceLines: (lines.results ?? []).map((l) => `  ${l.label}: ${l.kind === 'discount' ? '−' : ''}${formatCents(Math.abs(l.amount_cents))}`),
+        totals: { totalCents: quote.total_cents },
+        slotStarts: (slots.results ?? []).map((s) => s.starts_at),
+        expiresAt: quote.expires_at,
+        customerMessage: proposal.customer_message ?? '',
+      });
+      await auditLog(db, actor, 'retry_proposal_notification', 'ppi_request', id, { proposalId: proposal.id, emailStatus: emailResult.status });
+      return json({
+        ok: true,
+        notification: { messageId: emailResult.id, emailStatus: emailResult.status, deliveryConfirmed: emailResult.status === 'sent' },
+      }, emailResult.status === 'failed' ? 207 : 200);
+    }
+
     // ------------------------------------------------------------- send_quote
     case 'send_quote': {
       const priorPayment = await db
@@ -758,15 +1231,17 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         const end = new Date(start.getTime() + config.scheduling.durationMin * 60_000);
         const blockedStart = new Date(start.getTime() - config.scheduling.travelBufferMin * 60_000).toISOString();
         const blockedEnd = new Date(end.getTime() + config.scheduling.reportBufferMin * 60_000).toISOString();
-        // Friendly preflight; migration 0004's trigger is the concurrency-safe
-        // authority and includes offered options, not only held bookings.
+        // Friendly preflight; the 0014 triggers are the concurrency-safe
+        // authority. Options already offered on THIS request are alternatives
+        // for the same inspection, so they are not treated as conflicts.
         const clash = await db
           .prepare(
             `SELECT id FROM appointment_slots WHERE status IN ('offered','held','confirmed')
+             AND NOT (request_id = ? AND status = 'offered')
              AND COALESCE(blocked_starts_at, starts_at) < ?
              AND COALESCE(blocked_ends_at, ends_at) > ? LIMIT 1`,
           )
-          .bind(blockedEnd, blockedStart)
+          .bind(id, blockedEnd, blockedStart)
           .first<{ id: string }>();
         if (clash) {
           skipped.push(`${startRaw} (conflicts with an existing appointment incl. buffers)`);

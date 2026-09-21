@@ -121,6 +121,8 @@ export interface IntakePayload {
   expectedPrice: string;
   listingUrl: string;
   modStatus: 'stock' | 'light' | 'heavy';
+  /** What was actually modified — required whenever modStatus is not 'stock'. */
+  modDetails: string;
   warningLights: string;
   knownIssues: string;
   titleStatus: 'clean' | 'salvage_rebuilt' | 'unknown';
@@ -151,6 +153,8 @@ export interface IntakePayload {
   timeWindow: 'morning' | 'afternoon' | 'flexible';
   sameDayPriority: boolean;
   customerNotes: string;
+  /** Package the customer chose for themselves; '' means "use the suggestion". */
+  selectedTier: '' | 'standard' | 'euro_luxury_performance' | 'exotic_collector';
 }
 
 export function parseIntake(raw: Record<string, unknown>): { payload: IntakePayload; errors: FieldErrors } {
@@ -176,6 +180,7 @@ export function parseIntake(raw: Record<string, unknown>): { payload: IntakePayl
     expectedPrice: s('expectedPrice', 20),
     listingUrl: s('listingUrl', 2000),
     modStatus: oneOf(raw['modStatus'], ['stock', 'light', 'heavy'] as const, 'stock'),
+    modDetails: s('modDetails', 600),
     warningLights: s('warningLights', 500),
     knownIssues: s('knownIssues', 2000),
     titleStatus: oneOf(raw['titleStatus'], ['clean', 'salvage_rebuilt', 'unknown'] as const, 'unknown'),
@@ -206,6 +211,11 @@ export function parseIntake(raw: Record<string, unknown>): { payload: IntakePayl
     timeWindow: oneOf(raw['timeWindow'], ['morning', 'afternoon', 'flexible'] as const, 'flexible'),
     sameDayPriority: b('sameDayPriority'),
     customerNotes: s('customerNotes', 2000),
+    selectedTier: oneOf(
+      raw['selectedTier'],
+      ['', 'standard', 'euro_luxury_performance', 'exotic_collector'] as const,
+      '',
+    ),
   };
 
   if (payload.fullName.length < 2) errors['fullName'] = 'Please enter your full name.';
@@ -223,6 +233,11 @@ export function parseIntake(raw: Record<string, unknown>): { payload: IntakePayl
   if (payload.locState && payload.locState.length !== 2) errors['locState'] = 'Use the 2-letter state code.';
   if (!payload.ackAccessDependent) {
     errors['ackAccessDependent'] = 'Please acknowledge that inspection access depends on the seller and location.';
+  }
+  // A modification label with no content is what produced "Lightly modified"
+  // rows nobody could act on. Ask once, here, while the customer is present.
+  if (payload.modStatus !== 'stock' && payload.modDetails.trim().length < 3) {
+    errors['modDetails'] = 'Tell us briefly what was modified (for example: wheels, exhaust, suspension).';
   }
   if (b('permScan')) {
     errors['permScan'] = 'Diagnostic-scan permission is not part of the currently available inspection request.';

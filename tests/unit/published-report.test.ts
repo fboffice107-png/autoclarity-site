@@ -373,7 +373,9 @@ describe('published report portal rendering', () => {
     expect(portalScript).toContain('completed: v.report');
     expect(portalScript).toContain('renderPublishedReport(v.report)');
     expect(portalScript).toContain('AutoClarityReportView.render(report)');
-    expect(portalScript).toContain('AutoClarity will review the vehicle, location, access, and requested timing, then follow up by email with next steps.');
+    // Same guarantee, current wording: a truthful next step with no invented
+    // response-time promise.
+    expect(portalScript).toContain('AutoClarity reviews your vehicle, location and timing, then emails your price and available times.');
     expect(portalScript).not.toContain('typically responds within 24 hours');
     expect(portalScript).not.toContain('Your inspection is complete. Your results are in the messages below.');
     expect(portalScript).not.toContain('/api/portal/calendar?t=');

@@ -18,6 +18,11 @@
   var uploadBlobUrls = [];
   function leaveDetail() {
     if (reportEditor && !reportEditor.canLeave()) return false;
+    // An unsent proposal draft is kept, not discarded — say so rather than
+    // letting typed work disappear on a back click.
+    if (currentRequestId && document.getElementById("bookingProposal") && readDraft()) {
+      requestListNotice = "Your unsent booking proposal draft was kept. Reopen the request to finish it.";
+    }
     if (reportEditor) reportEditor.dispose();
     reportEditor = null;
     uploadBlobUrls.forEach(function (url) { URL.revokeObjectURL(url); });
@@ -156,6 +161,91 @@
   function reportedRate(value, denominator) {
     if (Number(denominator || 0) < 20 || value == null) return "— (<20 sample)";
     return Number(value).toLocaleString("en-US", { maximumFractionDigits: 1 }) + "%";
+  }
+
+  /* ============ Stage: what this request actually needs ============
+     Derived only from saved state. Every label answers "who acts next",
+     because that is the question being asked when the list is opened. */
+  var STAGE_BY_STATUS = {
+    submitted: { label: "Needs your review", kind: "act", who: "You" },
+    needs_info: { label: "Needs your review — you asked the customer a question", kind: "wait", who: "Customer" },
+    seller_access_pending: { label: "Waiting on seller access", kind: "wait", who: "Seller" },
+    ready_for_review: { label: "Needs your review", kind: "act", who: "You" },
+    quote_prepared: { label: "Draft saved — not sent yet", kind: "act", who: "You" },
+    quote_sent: { label: "Waiting for customer to choose a time", kind: "wait", who: "Customer" },
+    awaiting_time_selection: { label: "Waiting for customer to choose a time", kind: "wait", who: "Customer" },
+    awaiting_agreement: { label: "Time selected — awaiting agreements", kind: "wait", who: "Customer" },
+    awaiting_payment: { label: "Time selected — awaiting payment", kind: "wait", who: "Customer" },
+    confirmed: { label: "Paid — appointment confirmed", kind: "good", who: "You, at the appointment" },
+    inspection_in_progress: { label: "Inspection in progress", kind: "good", who: "You" },
+    report_in_progress: { label: "Report in progress", kind: "act", who: "You" },
+    completed: { label: "Completed", kind: "good", who: "Nobody — done" },
+    customer_cancelled: { label: "Cancelled by customer", kind: "off", who: "Nobody" },
+    admin_cancelled: { label: "Cancelled by you", kind: "off", who: "Nobody" },
+    expired: { label: "Expired", kind: "off", who: "Nobody" },
+    refunded: { label: "Refunded", kind: "off", who: "Nobody" },
+    refund_reconciliation_needed: { label: "Refund needs reconciling", kind: "alert", who: "You" },
+    disputed: { label: "Payment disputed", kind: "alert", who: "You" }
+  };
+
+  /* Two saved states deserve a louder label than their status alone gives:
+     a proposal that was never delivered, and a payment whose time is gone. */
+  function stageOf(row) {
+    var base = STAGE_BY_STATUS[row.status] || { label: String(row.status || "").replace(/_/g, " "), kind: "", who: "—" };
+    var stage = { label: base.label, kind: base.kind, who: base.who };
+    if ((row.status === "quote_sent" || row.status === "awaiting_time_selection")
+      && Number(row.offered_slot_count || 0) === 0
+      && !row.paid_amount_cents) {
+      stage.label = "Proposal sent without times — customer cannot book";
+      stage.kind = "alert";
+      stage.who = "You";
+    }
+    if (row.status === "awaiting_time_selection" && row.paid_amount_cents) {
+      stage.label = "Paid — scheduling needs attention";
+      stage.kind = "alert";
+      stage.who = "You";
+    }
+    if (row.proposal_notification_status === "failed") {
+      stage.label = stage.label + " · email not delivered";
+      stage.kind = "alert";
+      stage.who = "You";
+    }
+    return stage;
+  }
+
+  var TIER_SHORT = {
+    standard: "Standard $199",
+    euro_luxury_performance: "Luxury & Performance $299",
+    exotic_collector: "Exotic / Collector $399"
+  };
+  function tierLabel(key) { return TIER_SHORT[key] || "Package not set"; }
+
+  function stagePill(stage) {
+    return '<span class="stage-pill stage-' + esc(stage.kind || "none") + '">' + esc(stage.label) + "</span>";
+  }
+
+  /* Weekday + date + explicit AM/PM, Las Vegas time, on the admin side too. */
+  function whenLong(iso) {
+    if (!iso) return "";
+    return new Date(iso).toLocaleString("en-US", {
+      timeZone: "America/Los_Angeles",
+      weekday: "short", month: "short", day: "numeric",
+      hour: "numeric", minute: "2-digit", hour12: true
+    });
+  }
+
+  function appointmentSummary(row) {
+    if (row.confirmed_starts_at) return "Confirmed · " + whenLong(row.confirmed_starts_at);
+    if (row.held_starts_at) return "Held (unpaid) · " + whenLong(row.held_starts_at);
+    var n = Number(row.offered_slot_count || 0);
+    if (n > 0) return n + " time" + (n === 1 ? "" : "s") + " offered";
+    return "No times offered";
+  }
+
+  function paymentSummary(row) {
+    if (row.paid_amount_cents) return money(row.paid_amount_cents) + " paid";
+    if (row.payment_status) return String(row.payment_status).replace(/_/g, " ");
+    return "Not paid";
   }
 
   /* ================= Overview ================= */
@@ -352,10 +442,25 @@
         var t = '<section class="admin-job-list" aria-label="Inspection requests">';
         rows.forEach(function (row) {
           var manual = row.manual_review_reasons && row.manual_review_reasons !== "[]";
-          t += '<button type="button" class="portal-card admin-job-card" data-req="' + esc(row.id) + '"><strong>' + esc(row.ref) + ' · ' + esc([row.year, row.make, row.model].filter(Boolean).join(" ")) + '</strong>' +
-            '<span class="msg-meta">' + esc(String(row.status).replace(/_/g, " ")) + (manual ? " · Manual review" : "") + (row.same_day_priority ? " · Same-day priority" : "") + '</span>' +
-            '<span class="msg-meta">' + esc(row.full_name) + ' · ' + esc([row.loc_city, row.loc_zip].filter(Boolean).join(" ")) + ' · ' + esc(row.suggested_tier || "Tier not set") + '</span>' +
-            '<span class="msg-meta">Created ' + esc(when(row.created_at)) + '</span></button>';
+          var stage = stageOf(row);
+          var pkg = row.current_tier || row.customer_selected_tier || row.suggested_tier;
+          var priceText = row.current_total_cents
+            ? money(row.current_total_cents) + " offered"
+            : tierLabel(pkg) + " (not quoted yet)";
+          t += '<button type="button" class="portal-card admin-job-card stage-edge-' + esc(stage.kind || "none") + '" data-req="' + esc(row.id) + '">' +
+            '<span class="job-card-top"><strong>' + esc([row.year, row.make, row.model].filter(Boolean).join(" ") || "Vehicle not set") + '</strong>' +
+            stagePill(stage) + '</span>' +
+            '<span class="job-card-grid">' +
+              '<span><span class="job-k">Customer</span>' + esc(row.full_name) + '</span>' +
+              '<span><span class="job-k">Where</span>' + esc([row.loc_city, row.loc_zip].filter(Boolean).join(" ") || "—") + '</span>' +
+              '<span><span class="job-k">Price</span>' + esc(priceText) + '</span>' +
+              '<span><span class="job-k">Appointment</span>' + esc(appointmentSummary(row)) + '</span>' +
+              '<span><span class="job-k">Payment</span>' + esc(paymentSummary(row)) + '</span>' +
+              '<span><span class="job-k">Next move</span>' + esc(stage.who) + '</span>' +
+            '</span>' +
+            '<span class="msg-meta">' + esc(row.ref) + ' · created ' + esc(when(row.created_at)) +
+              (manual ? ' · needs a look' : "") + (row.same_day_priority ? ' · same-day priority' : "") +
+              (Number(row.tier_review_needed) === 1 ? ' · package to confirm' : "") + '</span></button>';
         });
         t += (rows.length === 0 ? '<p style="color:var(--text-3);padding:12px 0 0;">No requests.</p>' : "") + "</section>";
         document.getElementById("requestsTable").innerHTML = t;
@@ -364,6 +469,210 @@
         });
       }).catch(function () {});
     }
+  }
+
+  /* ============ Booking proposal card ============
+     One card, one primary button. The price shown here is calculated by the
+     server (price_preview) using the same code that writes the quote, so the
+     number on the button is the number that gets charged. */
+
+  var PROPOSAL_DRAFT_PREFIX = "ppi-proposal-draft:";
+
+  function draftKey() { return PROPOSAL_DRAFT_PREFIX + currentRequestId; }
+
+  function readDraft() {
+    try { return JSON.parse(sessionStorage.getItem(draftKey()) || "null") || null; }
+    catch (e) { return null; }
+  }
+  function writeDraft(value) {
+    try { sessionStorage.setItem(draftKey(), JSON.stringify(value)); } catch (e) {}
+  }
+  function clearDraft() {
+    try { sessionStorage.removeItem(draftKey()); } catch (e) {}
+  }
+
+  /* datetime-local wants the operator's wall clock. The business runs on Las
+     Vegas time, so quick-fill builds the instant from an America/Los_Angeles
+     date and time and hands back a local-input string for that same instant. */
+  function vegasOffsetMinutes(atUtcMs) {
+    var probe = new Date(atUtcMs);
+    var parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Los_Angeles", hour12: false,
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit"
+    }).formatToParts(probe).reduce(function (acc, part) { acc[part.type] = part.value; return acc; }, {});
+    var asUtc = Date.UTC(
+      Number(parts.year), Number(parts.month) - 1, Number(parts.day),
+      Number(parts.hour) % 24, Number(parts.minute), Number(parts.second)
+    );
+    return (asUtc - probe.getTime()) / 60000;
+  }
+
+  /** ISO instant for a Las Vegas wall-clock date/time, DST-correct. */
+  function vegasInstant(dateStr, hhmm) {
+    var d = dateStr.split("-").map(Number);
+    var t = hhmm.split(":").map(Number);
+    var naive = Date.UTC(d[0], d[1] - 1, d[2], t[0], t[1], 0);
+    // Two passes settle the offset across a DST boundary.
+    var guess = naive - vegasOffsetMinutes(naive) * 60000;
+    return new Date(naive - vegasOffsetMinutes(guess) * 60000).toISOString();
+  }
+
+  /** "YYYY-MM-DDTHH:MM" in the operator's own local time, for the input. */
+  function toLocalInput(iso) {
+    var d = new Date(iso);
+    var pad = function (n) { return String(n).padStart(2, "0"); };
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+      "T" + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+
+  /** The next operating date in Las Vegas that clears the minimum lead time. */
+  function nextOfferDate(minLeadHours) {
+    var target = new Date(Date.now() + (Number(minLeadHours) || 18) * 3600000 + 3600000);
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(target);
+  }
+
+  function proposalCard(d) {
+    var draftCfg = d.proposalDraft || {};
+    var saved = readDraft() || {};
+    var tier = saved.tier || draftCfg.tier || "standard";
+    var proposal = d.proposal;
+
+    var html = '<section class="portal-card proposal-card" id="bookingProposal"><h2>Review &amp; send booking proposal</h2>' +
+      '<p class="field-hint">One action: confirm the package, pick times, send. The customer gets a single link that takes them from choosing a time to paying.</p>';
+
+    // ---- what was already sent, and whether it actually went out ----
+    if (proposal) {
+      var noteKind = proposal.notificationStatus === "sent" ? "good"
+        : proposal.notificationStatus === "failed" ? "warn" : "info";
+      var noteText = proposal.notificationStatus === "sent"
+        ? "Delivered to the customer " + when(proposal.sentAt)
+        : proposal.notificationStatus === "queued"
+          ? "Saved and queued — the provider has not confirmed delivery yet"
+          : proposal.notificationStatus === "failed"
+            ? "Saved, but the email was NOT delivered" + (proposal.notificationError ? " (" + proposal.notificationError + ")" : "")
+            : "Saved — not sent";
+      html += '<div class="notice ' + noteKind + '" id="proposalStatusNote"><strong>Last proposal · ' +
+        esc(money(proposal.totalCents)) + '</strong><br />' + esc(noteText) + '<br />' +
+        esc("Times offered: " + (proposal.slots.length ? proposal.slots.map(function (s) { return s.label; }).join(" · ") : "none")) +
+        '<br /><span class="msg-meta">Saved ' + esc(when(proposal.createdAt)) + '</span></div>';
+      if (proposal.notificationStatus !== "sent") {
+        html += '<button class="btn btn-ghost btn-sm" data-retry-proposal="' + esc(proposal.id) + '">Retry sending this proposal</button> ' +
+          '<span class="field-hint">Reuses the same proposal — it cannot create a second one.</span>';
+      }
+    }
+
+    // ---- package ----
+    html += '<h3>Package</h3>';
+    if (draftCfg.customerSelectedTier) {
+      html += '<p class="field-hint">Customer chose <strong>' + esc(tierLabel(draftCfg.customerSelectedTier)) + '</strong>.</p>';
+    }
+    if (draftCfg.tierMismatch) {
+      html += '<div class="notice warn">' + esc(draftCfg.tierMismatch.note) + "</div>";
+    }
+    html += '<p class="field-hint">Suggested: <strong>' + esc(tierLabel(draftCfg.suggestedTier)) + '</strong> — ' + esc(draftCfg.customerReason || "") + "</p>";
+    html += '<div class="tier-choice" role="radiogroup" aria-label="Inspection package">';
+    (draftCfg.tierOptions || []).forEach(function (opt) {
+      html += '<label class="tier-option' + (opt.key === tier ? " selected" : "") + '">' +
+        '<input type="radio" name="pTier" value="' + esc(opt.key) + '"' + (opt.key === tier ? " checked" : "") + ' />' +
+        '<span class="tier-option-name">' + esc(opt.label) + "</span>" +
+        '<span class="tier-option-price">' + esc(money(opt.priceCents)) + "</span>" +
+        (opt.key === draftCfg.suggestedTier ? '<span class="tier-option-flag">Suggested</span>' : "") +
+        "</label>";
+    });
+    html += "</div>";
+
+    if ((draftCfg.manualReasons || []).length) {
+      html += '<div class="notice warn"><strong>Worth a look before you send</strong><ul>' +
+        draftCfg.manualReasons.map(function (r) { return "<li>" + esc(r) + "</li>"; }).join("") + "</ul></div>";
+    }
+
+    // ---- itemized price ----
+    html += '<h3>Price</h3><div id="proposalPrice">' + priceTable(draftCfg.lines, draftCfg.totalCents) + "</div>" +
+      '<p class="field-hint" id="proposalTravelNote">' + esc((draftCfg.travel && draftCfg.travel.basisLabel) || "") +
+      " Measured from " + esc(draftCfg.travelOriginLabel || "the AutoClarity service base") + ".</p>" +
+      '<div id="proposalReviewNotes">' + reviewNoteHtml(draftCfg.reviewNotes) + "</div>";
+
+    // ---- advanced pricing ----
+    html += '<details class="advanced-pricing"' + (saved.advancedOpen ? " open" : "") + '><summary>Advanced pricing</summary>' +
+      '<div class="admin-toolbar">' +
+      '<label class="field field-inline"><span>Base $ override</span><input id="pBase" inputmode="decimal" placeholder="tier price" value="' + esc(saved.base || "") + '" /></label>' +
+      '<label class="field field-inline"><span>Travel $ override</span><input id="pTravel" inputmode="decimal" placeholder="banded" value="' + esc(saved.travel || "") + '" /></label>' +
+      '<label class="field field-inline"><span>Add-on label</span><input id="pAddonLabel" value="' + esc(saved.addonLabel || "") + '" /></label>' +
+      '<label class="field field-inline"><span>Add-on $</span><input id="pAddon" inputmode="decimal" value="' + esc(saved.addon || "") + '" /></label>' +
+      '<label class="field field-inline"><span>Discount $</span><input id="pDiscount" inputmode="decimal" value="' + esc(saved.discount || "") + '" /></label>' +
+      '<label class="field field-inline"><span>Discount label</span><input id="pDiscountLabel" value="' + esc(saved.discountLabel || "") + '" /></label>' +
+      '<label class="field field-inline"><span>Offer valid (hours)</span><input id="pExpires" inputmode="numeric" placeholder="' + esc(draftCfg.quoteExpiryHours || 48) + '" value="' + esc(saved.expires || "") + '" /></label>' +
+      "</div>" +
+      '<div class="field"><label for="pInternal">Internal note — never shown to the customer</label>' +
+      '<input id="pInternal" value="' + esc(saved.internal || "") + '" /></div></details>';
+
+    // ---- times ----
+    var nextDate = nextOfferDate(draftCfg.minLeadHours);
+    html += '<h3>Appointment options <span class="opt">(alternatives for one inspection)</span></h3>' +
+      '<p class="field-hint">Las Vegas time. Offer up to three — the customer picks one and the rest are released. Earliest bookable date is ' +
+      esc(nextDate) + " (" + esc(draftCfg.minLeadHours || 18) + "h notice).</p>" +
+      '<div class="slot-picker">';
+    [0, 1, 2].forEach(function (i) {
+      html += '<label class="field field-inline"><span>Option ' + (i + 1) + '</span>' +
+        '<input type="datetime-local" id="pSlot' + i + '" value="' + esc((saved.slots || [])[i] || "") + '" /></label>';
+    });
+    html += "</div>" +
+      '<div class="slot-quickfill"><span class="field-hint">Quick fill (' + esc(nextDate) + "):</span> " +
+      (draftCfg.slotTemplates || []).map(function (t) {
+        return '<button type="button" class="btn btn-ghost btn-sm" data-quickfill="' + esc(t) + '" data-quickdate="' + esc(nextDate) + '">' + esc(pretty12(t)) + "</button>";
+      }).join(" ") +
+      ' <button type="button" class="btn btn-ghost btn-sm" data-quickfill-all="1" data-quickdate="' + esc(nextDate) + '">All three</button></div>' +
+      '<p class="form-status" id="slotHint" role="status" aria-live="polite"></p>';
+
+    // ---- message preview ----
+    html += '<h3>Message to the customer</h3>' +
+      '<div class="field"><label for="pMessage" class="sr-only">Customer-facing message</label>' +
+      '<textarea id="pMessage" rows="4" maxlength="2000" placeholder="Leave blank to send the standard message with the price and times filled in.">' +
+      esc(saved.message || "") + "</textarea></div>";
+
+    html += '<button class="btn btn-primary btn-lg" id="sendProposal" style="width:100%;margin-top:6px;">' +
+      'Review &amp; Send Booking Proposal' + (draftCfg.totalCents ? " — " + esc(money(draftCfg.totalCents)) : "") + "</button>" +
+      '<p class="form-status" id="proposalStatus" role="status" aria-live="polite"></p></section>';
+    return html;
+  }
+
+  function pretty12(hhmm) {
+    var p = hhmm.split(":").map(Number);
+    var h = p[0] % 12 || 12;
+    return h + ":" + String(p[1]).padStart(2, "0") + " " + (p[0] < 12 ? "AM" : "PM");
+  }
+
+  function priceTable(lines, totalCents) {
+    var html = '<table class="line-items">';
+    (lines || []).forEach(function (l) {
+      html += "<tr><td>" + esc(l.label) + "</td><td>" + esc(l.display) + "</td></tr>";
+    });
+    html += '<tr class="total"><td>Total</td><td>' + esc(totalCents ? money(totalCents) : "Needs a travel amount") + "</td></tr></table>";
+    return html;
+  }
+
+  function reviewNoteHtml(notes) {
+    if (!notes || !notes.length) return "";
+    return '<div class="notice warn"><ul>' + notes.map(function (n) { return "<li>" + esc(n) + "</li>"; }).join("") + "</ul></div>";
+  }
+
+
+  /* A content hash of the composed proposal. Re-pressing Send for the exact
+     same package, price and times reuses the key (so nothing is duplicated);
+     changing anything produces a new key (so a corrected proposal can go out). */
+  function proposalKeyFor(form, slots) {
+    var basis = [
+      currentRequestId, form.tier, form.base, form.travel, form.addonLabel, form.addon,
+      form.discount, form.discountLabel, form.expires, form.message, slots.join("|")
+    ].join("~");
+    var h1 = 0x811c9dc5;
+    var h2 = 0x01000193;
+    for (var i = 0; i < basis.length; i++) {
+      h1 = ((h1 ^ basis.charCodeAt(i)) >>> 0) * 0x01000193 >>> 0;
+      h2 = ((h2 + basis.charCodeAt(i) * (i + 7)) >>> 0);
+    }
+    return "p" + h1.toString(36) + h2.toString(36) + basis.length.toString(36);
   }
 
   /* ================= Request detail ================= */
@@ -409,23 +718,60 @@
     var req = d.request;
     var html = '<div class="report-actions"><button class="btn btn-ghost btn-sm" id="backToList">← Back</button><button class="btn btn-ghost btn-sm" id="refreshJob">Refresh job status &amp; messages</button></div>';
 
-    html += '<div class="portal-topbar" style="margin-top:14px;"><h1 style="font-size:24px;">' + esc(req.ref) + "</h1>" +
-      '<span class="status-pill" id="requestStatusPill">' + esc(d.statusLabel) + "</span></div>";
 
     var confirmedSlot = (d.slots || []).filter(function (slot) { return slot.status === "confirmed"; })[0];
+    var heldSlot = (d.slots || []).filter(function (slot) { return slot.status === "held"; })[0];
+    var offeredSlots = (d.slots || []).filter(function (slot) { return slot.status === "offered"; });
     var paid = (d.payments || []).filter(function (payment) { return ["succeeded", "partially_refunded"].indexOf(payment.status) !== -1; });
-    html += '<section class="portal-card job-at-a-glance" aria-label="Job at a glance"><h2>Job at a glance</h2><dl class="kv">' +
-      '<dt>Appointment</dt><dd>' + esc(confirmedSlot ? when(confirmedSlot.starts_at) : 'No confirmed appointment') + '</dd>' +
-      '<dt>Payment record</dt><dd>' + esc(paid.length ? paid.map(function (p) { return money(p.amount_cents) + ' · ' + p.status.replace(/_/g, ' '); }).join('; ') : 'No successful payment recorded') + '</dd>' +
+    var activeQuoteRow = (d.quotes || []).filter(function (q) { return q.status === "sent" || q.status === "accepted"; })[0];
+
+    // The same stage vocabulary as the list, computed from the same fields.
+    var stage = stageOf({
+      status: req.status,
+      offered_slot_count: offeredSlots.length,
+      paid_amount_cents: paid.length ? paid[0].amount_cents : null,
+      proposal_notification_status: d.proposal ? d.proposal.notificationStatus : null
+    });
+    // The title bar says the stage, not the internal status name. The exact
+    // saved status stays visible in Status and History below.
+    html += '<div class="portal-topbar" style="margin-top:14px;"><h1 style="font-size:24px;">' + esc(req.ref) + "</h1>" +
+      '<span id="requestStatusPill">' + stagePill(stage) + "</span></div>";
+
+    html += '<section class="portal-card job-at-a-glance stage-edge-' + esc(stage.kind || "none") + '" aria-label="Job at a glance"><h2>At a glance</h2><dl class="kv">' +
+      '<dt>Customer</dt><dd>' + esc(req.full_name) + ' · ' + esc(req.email) + ' · ' + esc(req.phone) + '</dd>' +
+      '<dt>Vehicle</dt><dd>' + esc([req.year, req.make, req.model, req.vehicle_trim].filter(Boolean).join(" ") || "—") + '</dd>' +
+      '<dt>Inspection location</dt><dd>' + esc([req.loc_street, req.loc_unit, req.loc_city, req.loc_state, req.loc_zip].filter(Boolean).join(", ") || "—") +
+        (req.travel_miles == null
+          ? ' · distance unknown'
+          : Number(req.travel_miles) < 1
+            ? ' · in your own service area'
+            : ' · about ' + esc(req.travel_miles) + ' mi out') + '</dd>' +
+      '<dt>Package</dt><dd>' + esc(tierLabel(activeQuoteRow ? activeQuoteRow.tier : (req.customer_selected_tier || req.suggested_tier))) +
+        (req.customer_selected_tier ? ' · customer chose ' + esc(tierLabel(req.customer_selected_tier)) : "") + '</dd>' +
+      '<dt>Price</dt><dd>' + esc(activeQuoteRow ? money(activeQuoteRow.total_cents) + " offered" : "Not quoted yet") + '</dd>' +
+      '<dt>Appointment</dt><dd>' + esc(
+        confirmedSlot ? "Confirmed · " + whenLong(confirmedSlot.starts_at)
+          : heldSlot ? "Held (unpaid) · " + whenLong(heldSlot.starts_at)
+          : offeredSlots.length ? offeredSlots.length + " option(s) offered: " + offeredSlots.map(function (s) { return whenLong(s.starts_at); }).join(" · ")
+          : "No times offered"
+      ) + '</dd>' +
+      '<dt>Payment</dt><dd>' + esc(paid.length ? paid.map(function (p) { return money(p.amount_cents) + ' · ' + p.status.replace(/_/g, ' '); }).join('; ') : 'No successful payment recorded') + '</dd>' +
+      '<dt>Who acts next</dt><dd><strong>' + esc(stage.who) + '</strong> — ' + esc(stage.label) + '</dd>' +
       '<dt>Agreement evidence</dt><dd>' + esc((d.acceptances || []).length) + ' acceptance record(s) — exact versions below</dd>' +
-      '<dt>Inspection state</dt><dd id="jobInspectionState">' + esc(d.statusLabel) + '</dd><dt>Report state</dt><dd id="jobReportState">Loading…</dd></dl>' +
-      '<nav class="report-actions" aria-label="Job sections"><a class="btn btn-primary btn-sm" href="#inspectionReport">Open inspection report</a><a class="btn btn-ghost btn-sm" href="#jobMessages">Messages</a><a class="btn btn-ghost btn-sm" href="#jobScheduling">Scheduling</a><a class="btn btn-ghost btn-sm" href="#jobPayments">Payments / refunds</a></nav></section>';
+      '<dt>Report state</dt><dd id="jobReportState">Loading…</dd></dl>' +
+      '<nav class="report-actions" aria-label="Job sections"><a class="btn btn-ghost btn-sm" href="#inspectionReport">Inspection report</a><a class="btn btn-ghost btn-sm" href="#jobMessages">Messages</a><a class="btn btn-ghost btn-sm" href="#jobScheduling">Scheduling</a><a class="btn btn-ghost btn-sm" href="#jobPayments">Payments / refunds</a></nav></section>';
 
     if (req.manual_review_reasons && req.manual_review_reasons !== "[]") {
       var reasons = [];
       try { reasons = JSON.parse(req.manual_review_reasons); } catch (e) {}
-      if (reasons.length) html += '<div class="notice warn">Manual review: ' + esc(reasons.join(" · ")) + "</div>";
+      if (reasons.length) html += '<div class="notice warn"><strong>Needs a look:</strong> ' + esc(reasons.join(" · ")) + "</div>";
     }
+
+    // The primary action, before anything else, whenever this request is
+    // still pre-booking. After confirmation the inspection work leads instead.
+    var preBooking = ["submitted", "needs_info", "seller_access_pending", "ready_for_review",
+      "quote_prepared", "quote_sent", "awaiting_time_selection"].indexOf(req.status) !== -1;
+    if (preBooking && !paid.length) html += proposalCard(d);
 
     // ----- customer & vehicle -----
     html += '<section class="portal-card"><h2>Customer &amp; vehicle</h2><dl class="kv">' +
@@ -467,8 +813,8 @@
       '<input id="statusNote" aria-label="Optional status note emailed to customer" placeholder="Optional note emailed to customer" style="flex:1;min-width:200px;" />' +
       '<button class="btn btn-primary" id="statusGo">Apply</button></div></section>';
 
-    // ----- quote editor -----
-    html += '<section class="portal-card"><h2>Quote</h2>';
+    // ----- quote history + manual quote builder (secondary) -----
+    html += '<details class="portal-card portal-secondary"><summary>Quotes &amp; manual quote builder</summary>';
     var activeQuote = (d.quotes || [])[0];
     if ((d.quotes || []).length) {
       html += '<table class="admin-table"><thead><tr><th>v</th><th>Status</th><th>Tier</th><th>Total</th><th>Expires</th><th></th></tr></thead><tbody>';
@@ -495,10 +841,10 @@
       "</div>" +
       '<div class="field"><input id="qNote" placeholder="Customer-facing note (optional)" /></div>' +
       '<div class="field"><input id="qInternal" placeholder="Internal justification (never shown to customer)" /></div>' +
-      '<button class="btn btn-ghost" id="qCreate">Create draft quote</button></section>';
+      '<button class="btn btn-ghost" id="qCreate">Create draft quote</button></details>';
 
     // ----- scheduling -----
-    html += '<section class="portal-card" id="jobScheduling"><h2>Scheduling</h2>';
+    html += '<details class="portal-card portal-secondary" id="jobScheduling"><summary>Scheduling detail &amp; manual time offers</summary>';
     if ((d.slots || []).length) {
       html += '<table class="admin-table"><thead><tr><th>Start</th><th>Status</th><th></th></tr></thead><tbody>';
       d.slots.forEach(function (s) {
@@ -512,7 +858,7 @@
     html += '<h3>Offer windows (your local time)</h3><div class="admin-toolbar">' +
       '<input type="datetime-local" id="slot1" /><input type="datetime-local" id="slot2" /><input type="datetime-local" id="slot3" />' +
       '<button class="btn btn-ghost" id="slotsGo">Propose</button></div>' +
-      '<p class="field-hint">Suggested templates: 9:00 AM, 12:30 PM, 4:00 PM. Conflicts (incl. travel/report buffers) are rejected automatically.</p></section>';
+      '<p class="field-hint">Las Vegas time. Suggested templates: 9:00 AM, 12:30 PM, 4:00 PM. Options offered on this same request are alternatives and may share buffers; anything clashing with another job is rejected automatically.</p></details>';
 
     // ----- payments -----
     html += '<section class="portal-card" id="jobPayments"><h2>Payments</h2>';
@@ -674,7 +1020,8 @@
           api("/api/admin/requests/" + encodeURIComponent(expectedId)).then(function (r) {
             if (!r.ok || expectedId !== currentRequestId) return;
             detailCache = r.body;
-            ["requestStatusPill", "jobInspectionState"].forEach(function (id) { var label = document.getElementById(id); if (label) label.textContent = r.body.statusLabel; });
+            var pill = document.getElementById("requestStatusPill");
+            if (pill && r.body.request) pill.innerHTML = stagePill(stageOf(r.body.request));
             var dropdown = document.getElementById("statusTo");
             if (dropdown) dropdown.innerHTML = '<option value="">Move to…</option>' + (r.body.allowedTransitions || []).map(function (s) { return '<option value="' + esc(s) + '">' + esc(s.replace(/_/g, " ")) + '</option>'; }).join('');
           }).catch(function () {});
@@ -716,6 +1063,179 @@
         act({ action: "delete_upload", uploadId: btn.getAttribute("data-del-upload") });
       });
     });
+
+    // ---------- booking proposal ----------
+    var proposalSection = document.getElementById("bookingProposal");
+    if (proposalSection) {
+      var sendBtn = document.getElementById("sendProposal");
+      var statusEl = document.getElementById("proposalStatus");
+      var previewTimer = null;
+      var draftCfg = (detailCache && detailCache.proposalDraft) || {};
+
+      function currentForm() {
+        var slots = [0, 1, 2].map(function (i) {
+          var el = document.getElementById("pSlot" + i);
+          return el ? el.value : "";
+        });
+        var selected = proposalSection.querySelector('input[name="pTier"]:checked');
+        return {
+          tier: selected ? selected.value : draftCfg.tier,
+          base: document.getElementById("pBase").value,
+          travel: document.getElementById("pTravel").value,
+          addonLabel: document.getElementById("pAddonLabel").value,
+          addon: document.getElementById("pAddon").value,
+          discount: document.getElementById("pDiscount").value,
+          discountLabel: document.getElementById("pDiscountLabel").value,
+          expires: document.getElementById("pExpires").value,
+          internal: document.getElementById("pInternal").value,
+          message: document.getElementById("pMessage").value,
+          slots: slots,
+          advancedOpen: proposalSection.querySelector(".advanced-pricing").open
+        };
+      }
+
+      // Anything typed survives a refresh or a trip to the request list.
+      function persist() { writeDraft(currentForm()); }
+
+      function pricePayload(form) {
+        var addons = [];
+        var addonCents = dollarsToCents(form.addon);
+        if (addonCents) addons.push({ label: form.addonLabel || "Add-on", amountCents: addonCents });
+        var travelCents = dollarsToCents(form.travel, true);
+        return {
+          tier: form.tier,
+          basePriceCents: dollarsToCents(form.base) || undefined,
+          travelCents: travelCents !== null ? travelCents : undefined,
+          addons: addons,
+          discountCents: dollarsToCents(form.discount) || undefined,
+          discountLabel: form.discountLabel || undefined
+        };
+      }
+
+      function refreshPrice() {
+        var form = currentForm();
+        persist();
+        var payload = pricePayload(form);
+        payload.action = "price_preview";
+        api("/api/admin/requests/" + encodeURIComponent(currentRequestId), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload)
+        }).then(function (r) {
+          if (!r.ok) return;
+          document.getElementById("proposalPrice").innerHTML = priceTable(r.body.lines, r.body.totalCents);
+          document.getElementById("proposalReviewNotes").innerHTML = reviewNoteHtml(r.body.reviewNotes);
+          var note = document.getElementById("proposalTravelNote");
+          if (note && r.body.travel) {
+            note.textContent = r.body.travel.basisLabel + " Measured from " + (draftCfg.travelOriginLabel || "the AutoClarity service base") + ".";
+          }
+          sendBtn.innerHTML = "Review &amp; Send Booking Proposal" + (r.body.totalCents ? " — " + esc(money(r.body.totalCents)) : "");
+          sendBtn.setAttribute("data-total", r.body.totalCents || "");
+        }).catch(function () {});
+      }
+
+      proposalSection.addEventListener("input", function () {
+        clearTimeout(previewTimer);
+        previewTimer = setTimeout(refreshPrice, 250);
+      });
+      proposalSection.addEventListener("change", function (event) {
+        if (event.target && event.target.name === "pTier") {
+          proposalSection.querySelectorAll(".tier-option").forEach(function (label) {
+            label.classList.toggle("selected", label.querySelector("input").checked);
+          });
+        }
+        clearTimeout(previewTimer);
+        previewTimer = setTimeout(refreshPrice, 0);
+      });
+
+      proposalSection.querySelectorAll("[data-quickfill]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var iso = vegasInstant(btn.getAttribute("data-quickdate"), btn.getAttribute("data-quickfill"));
+          var target = [0, 1, 2].map(function (i) { return document.getElementById("pSlot" + i); })
+            .filter(function (el) { return el && !el.value; })[0];
+          if (!target) { document.getElementById("slotHint").textContent = "All three options are filled — clear one first."; return; }
+          target.value = toLocalInput(iso);
+          document.getElementById("slotHint").textContent = "";
+          persist();
+        });
+      });
+      var fillAll = proposalSection.querySelector("[data-quickfill-all]");
+      if (fillAll) fillAll.addEventListener("click", function () {
+        var date = fillAll.getAttribute("data-quickdate");
+        (draftCfg.slotTemplates || []).slice(0, 3).forEach(function (t, i) {
+          var el = document.getElementById("pSlot" + i);
+          if (el) el.value = toLocalInput(vegasInstant(date, t));
+        });
+        document.getElementById("slotHint").textContent = "";
+        persist();
+      });
+
+      sendBtn.addEventListener("click", function () {
+        var form = currentForm();
+        var slots = form.slots.filter(Boolean).map(function (v) { return new Date(v).toISOString(); });
+        if (!slots.length) {
+          statusEl.textContent = "Add at least one appointment option — a proposal without times leaves the customer unable to book.";
+          document.getElementById("pSlot0").focus();
+          return;
+        }
+        var total = sendBtn.getAttribute("data-total") || draftCfg.totalCents;
+        if (!total) {
+          statusEl.textContent = "This location needs an explicit travel amount under Advanced pricing before a total can be sent.";
+          return;
+        }
+        var payload = pricePayload(form);
+        payload.action = "send_booking_proposal";
+        payload.slots = slots;
+        payload.customerNote = form.message || undefined;
+        payload.adminNote = form.internal || undefined;
+        payload.expiresHours = Number(form.expires) || undefined;
+        payload.vehicleLabel = [detailCache.request.year, detailCache.request.make, detailCache.request.model].filter(Boolean).join(" ");
+        // One key per composed proposal. A double click, a retried fetch and a
+        // duplicated tab all reuse it, so only one proposal can be created.
+        payload.proposalKey = proposalKeyFor(form, slots);
+
+        sendBtn.disabled = true;
+        statusEl.textContent = "Sending…";
+        act(payload, function (r) {
+          sendBtn.disabled = false;
+          if (r.ok) {
+            clearDraft();
+            var n = r.body.notification || {};
+            statusEl.textContent = r.body.duplicate
+              ? "Already sent — nothing was duplicated."
+              : n.deliveryConfirmed
+                ? "Sent. The customer has the booking link."
+                : "Saved and queued. Delivery is not confirmed yet — check the status above.";
+            if (r.body.skipped && r.body.skipped.length) {
+              alert("These times were not offered:\n" + r.body.skipped.join("\n"));
+            }
+            return true;
+          }
+          var err = r.body && r.body.error;
+          statusEl.textContent = (err && err.message) || "The proposal was not sent.";
+          if (err && err.details && err.details.skipped && err.details.skipped.length) {
+            statusEl.textContent += " " + err.details.skipped.join(" ");
+          }
+          return true;
+        });
+      });
+
+      content.querySelectorAll("[data-retry-proposal]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          btn.disabled = true;
+          act({ action: "retry_proposal_notification", proposalId: btn.getAttribute("data-retry-proposal") }, function (r) {
+            btn.disabled = false;
+            if (!r.ok) { statusEl.textContent = (r.body.error && r.body.error.message) || "Retry failed."; return true; }
+            statusEl.textContent = r.body.alreadySent
+              ? "Already delivered — nothing was re-sent."
+              : (r.body.notification && r.body.notification.deliveryConfirmed)
+                ? "Delivered."
+                : "Queued again; delivery still unconfirmed.";
+            return true;
+          });
+        });
+      });
+    }
 
     document.getElementById("statusGo").addEventListener("click", function () {
       var to = document.getElementById("statusTo").value;

@@ -47,9 +47,16 @@ admin. No frontend framework was introduced.
   `applyStatus`; evidence-gated changes use dedicated atomic helpers. Both
   enforce the transition table with an expected-state guard and write
   `status_history`.
-- `pricing.ts` — tier suggestion (complexity-based, never price-based), travel
-  banding from ZIP centroids (`zips.ts`, no external geocoder), quote totals,
-  cancellation policy calculator.
+- `pricing.ts` — tier base prices, travel banding from ZIP centroids
+  (`zips.ts`, no external geocoder), quote totals, cancellation policy
+  calculator. Re-exports the classifier so existing importers keep working.
+- `vehicle-class.ts` — package classification: explicit model/trim rules beat
+  make-level defaults (a Jetta is Standard, a Golf R is not), and token-aware
+  matching keeps appearance packages like a Trailblazer "RS" out of the
+  performance tier. Nothing here raises a price without a stated reason.
+- `quote-math.ts` — the single price calculation every surface renders from.
+- `booking-proposal.ts` — slot preflight and the proposal record behind the
+  dashboard's saved/queued/sent/failed state and its safe retry.
 - `magic.ts` — 256-bit tokens, SHA-256 hashes only at rest, TTL, rotation.
 - `stripe.ts` — Checkout Session creation, refunds, HMAC webhook verification,
   `stripe_events` replay guard. `stripeKey()` refuses live keys outside
@@ -66,10 +73,26 @@ admin. No frontend framework was introduced.
 
 ## The money path (the part that must never lie)
 
-1. Admin sends a versioned quote → customer picks an offered slot.
+0. One price calculation. `quote-math.ts` builds every total anyone sees — the
+   public intake estimate, the admin proposal card, the customer's offer and
+   the Stripe charge all call `buildPriceBreakdown`. `vehicle-class.ts`
+   suggests a package but never prices one, and never raises a tier on its own:
+   age, modifications, salvage titles and non-runners produce a written review
+   note for the owner instead of a silent increase.
+1. Admin sends ONE booking proposal (`send_booking_proposal`): the quote, the
+   offered windows and the customer message are written in a single D1
+   transaction, followed by a single notification carrying a single link. An
+   idempotency key makes a double click, a retried fetch or a duplicated tab
+   produce one proposal and one email. A proposal with no usable times is
+   refused and saves nothing → customer picks an offered slot.
 2. Slot hold is atomic. The original exact-start partial index is supplemented
-   by database triggers that reject any overlap between offered, held, or
-   confirmed windows after travel and report buffers are applied.
+   by database triggers that reject overlap between windows after travel and
+   report buffers are applied. Migration 0014 narrows those triggers so several
+   `offered` rows on the SAME request may share a window — they are
+   alternatives for one inspection, not reservations — while every
+   cross-request guarantee is unchanged. Before that, the three shipped
+   template times (09:00 / 12:30 / 16:00, inside a 3h45m blocked window) could
+   never be offered together.
 3. Agreements accepted (per-document rows, doc hash + typed name).
 4. `checkout` re-validates everything (quote unexpired, hold alive, agreements
    complete, payments enabled), creates a durable D1 attempt claim, then calls

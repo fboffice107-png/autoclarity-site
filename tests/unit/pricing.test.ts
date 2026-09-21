@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   suggestTier,
+  tierMismatch,
   travelFeeForMiles,
   estimateTravel,
   computeQuoteTotals,
@@ -59,16 +60,37 @@ describe('suggestTier', () => {
     expect(s.manualReview).toBe(true);
   });
 
-  it('bumps heavily modified standard vehicles up a tier with manual review', () => {
-    const s = suggestTier(vehicle({ make: 'Honda', model: 'Civic', modStatus: 'heavy' }), NOW);
-    expect(s.tier).toBe('exotic_collector');
+  // Modifications and age used to jump the tier by themselves, which meant a
+  // modified Civic and a 2001 Corolla both silently became $399 quotes with no
+  // stated reason. They now produce a written review note and a review ceiling
+  // instead; the owner decides, and the customer is told why.
+  it('flags heavy modifications for review WITHOUT raising the price by itself', () => {
+    const s = suggestTier(vehicle({ make: 'Honda', model: 'Civic', modStatus: 'heavy', modDetails: 'turbo kit, coilovers' }), NOW);
+    expect(s.tier).toBe('standard');
     expect(s.manualReview).toBe(true);
+    expect(s.reviewCeiling).toBe('exotic_collector');
+    expect(s.manualReasons.join(' ')).toContain('turbo kit, coilovers');
+    expect(s.customerNotes.join(' ')).toContain('before you pay');
   });
 
-  it('treats 25+ year old vehicles as collector', () => {
-    const s = suggestTier(vehicle({ year: 1999, make: 'Mazda', model: 'Miata' }), NOW);
-    expect(s.tier).toBe('exotic_collector');
+  it('shows what was actually modified for a lightly modified vehicle', () => {
+    const s = suggestTier(vehicle({ modStatus: 'light', modDetails: 'aftermarket wheels' }), NOW);
+    expect(s.tier).toBe('standard');
+    expect(s.reasons.join(' ')).toContain('aftermarket wheels');
+    expect(s.customerNotes.join(' ')).toContain('aftermarket wheels');
+  });
+
+  it('asks what was modified when the detail is missing', () => {
+    const s = suggestTier(vehicle({ modStatus: 'light', modDetails: '' }), NOW);
     expect(s.manualReview).toBe(true);
+    expect(s.manualReasons.join(' ')).toContain('no modification details');
+  });
+
+  it('flags an old vehicle for collector review without charging collector prices', () => {
+    const s = suggestTier(vehicle({ year: 1990, make: 'Toyota', model: 'Corolla' }), NOW);
+    expect(s.tier).toBe('standard');
+    expect(s.manualReview).toBe(true);
+    expect(s.reviewCeiling).toBe('exotic_collector');
   });
 
   it('flags salvage titles and non-runners for manual review without hiding tier', () => {
@@ -282,5 +304,98 @@ describe('cancellation policy calculator', () => {
     expect(cancellationOutcome(appt(72), configured, NOW).label).toContain('72 hours or more');
     expect(cancellationOutcome(appt(48), configured, NOW).label).toContain('At least 36 hours');
     expect(cancellationOutcome(appt(12), configured, NOW).label).toContain('Less than 36 hours');
+  });
+});
+
+// The owner's stated categories, written as tests so a future rules edit has to
+// argue with them: a normal Corolla is Standard, a Corvette or a typical
+// Mercedes/BMW/Audi is Luxury & Performance, a Bentley/Ferrari/Lamborghini/
+// McLaren is Exotic — and manufacturer alone is never sufficient.
+describe('owner business categories', () => {
+  const cases: Array<[Partial<VehicleFacts>, string]> = [
+    [{ make: 'Toyota', model: 'Corolla', trim: 'LE' }, 'standard'],
+    [{ make: 'Chevrolet', model: 'Malibu', trim: 'RS' }, 'standard'],
+    [{ make: 'Dodge', model: 'Grand Caravan', trim: 'SXT' }, 'standard'],
+    [{ make: 'Kia', model: 'Sorento', trim: 'EX' }, 'standard'],
+    [{ make: 'Hyundai', model: 'Elantra', trim: 'SEL' }, 'standard'],
+    [{ make: 'Chevrolet', model: 'Corvette', trim: 'Stingray' }, 'euro_luxury_performance'],
+    [{ make: 'Mercedes-Benz', model: 'C300', trim: '4MATIC' }, 'euro_luxury_performance'],
+    [{ make: 'BMW', model: '330i', trim: 'M Sport' }, 'euro_luxury_performance'],
+    [{ make: 'Audi', model: 'A4', trim: 'Premium Plus' }, 'euro_luxury_performance'],
+    [{ make: 'Bentley', model: 'Continental GT', trim: 'V8' }, 'exotic_collector'],
+    [{ make: 'Ferrari', model: '488', trim: 'GTB' }, 'exotic_collector'],
+    [{ make: 'Lamborghini', model: 'Urus', trim: '' }, 'exotic_collector'],
+    [{ make: 'McLaren', model: '720S', trim: '' }, 'exotic_collector'],
+  ];
+  for (const [facts, expected] of cases) {
+    it(`${facts.make} ${facts.model} ${facts.trim ?? ''} → ${expected}`.trim(), () => {
+      expect(suggestTier(vehicle(facts), NOW).tier).toBe(expected);
+    });
+  }
+});
+
+describe('model-specific exceptions (manufacturer alone is insufficient)', () => {
+  it('keeps a mainstream Volkswagen in Standard but raises the GTI and R', () => {
+    expect(suggestTier(vehicle({ make: 'Volkswagen', model: 'Jetta', trim: 'S' }), NOW).tier).toBe('standard');
+    expect(suggestTier(vehicle({ make: 'Volkswagen', model: 'Tiguan', trim: 'SE' }), NOW).tier).toBe('standard');
+    expect(suggestTier(vehicle({ make: 'Volkswagen', model: 'Golf', trim: 'GTI Autobahn' }), NOW).tier).toBe('euro_luxury_performance');
+  });
+
+  it('separates a base Camaro/Charger/Mustang from its performance trims', () => {
+    expect(suggestTier(vehicle({ make: 'Chevrolet', model: 'Camaro', trim: '1LT' }), NOW).tier).toBe('standard');
+    expect(suggestTier(vehicle({ make: 'Chevrolet', model: 'Camaro', trim: 'SS' }), NOW).tier).toBe('euro_luxury_performance');
+    expect(suggestTier(vehicle({ make: 'Dodge', model: 'Charger', trim: 'SXT' }), NOW).tier).toBe('standard');
+    expect(suggestTier(vehicle({ make: 'Dodge', model: 'Charger', trim: 'Scat Pack' }), NOW).tier).toBe('euro_luxury_performance');
+    expect(suggestTier(vehicle({ make: 'Ford', model: 'Mustang', trim: 'EcoBoost' }), NOW).tier).toBe('standard');
+    expect(suggestTier(vehicle({ make: 'Ford', model: 'Mustang', trim: 'GT Premium' }), NOW).tier).toBe('euro_luxury_performance');
+  });
+
+  it('does not treat an appearance package as a performance drivetrain', () => {
+    // "RS" on a Trailblazer is trim styling; it used to cost the customer $100.
+    expect(suggestTier(vehicle({ make: 'Chevrolet', model: 'Trailblazer', trim: 'RS' }), NOW).tier).toBe('standard');
+    expect(suggestTier(vehicle({ make: 'Chevrolet', model: 'Equinox', trim: 'RS' }), NOW).tier).toBe('standard');
+    // But RS on an Audi is a genuinely different car.
+    expect(suggestTier(vehicle({ make: 'Audi', model: 'RS5', trim: '' }), NOW).tier).toBe('euro_luxury_performance');
+  });
+
+  it('routes the halo models of mainstream makes to exotic', () => {
+    expect(suggestTier(vehicle({ make: 'Ford', model: 'GT', trim: '' }), NOW).tier).toBe('exotic_collector');
+    expect(suggestTier(vehicle({ make: 'Acura', model: 'NSX', trim: '' }), NOW).tier).toBe('exotic_collector');
+  });
+
+  it('keeps entry near-luxury on a mainstream platform in Standard', () => {
+    expect(suggestTier(vehicle({ make: 'Lexus', model: 'ES', trim: '350' }), NOW).tier).toBe('standard');
+    expect(suggestTier(vehicle({ make: 'Lexus', model: 'ES', trim: '350 F Sport' }), NOW).tier).toBe('euro_luxury_performance');
+    expect(suggestTier(vehicle({ make: 'Lexus', model: 'LX', trim: '600' }), NOW).tier).toBe('euro_luxury_performance');
+  });
+
+  it('accepts the make spellings customers actually type', () => {
+    expect(suggestTier(vehicle({ make: 'chevy', model: 'Corvette' }), NOW).tier).toBe('euro_luxury_performance');
+    expect(suggestTier(vehicle({ make: 'Mercedes', model: 'GLC300' }), NOW).tier).toBe('euro_luxury_performance');
+    expect(suggestTier(vehicle({ make: 'VW', model: 'Jetta' }), NOW).tier).toBe('standard');
+  });
+
+  it('always gives the customer a sentence they can read', () => {
+    const s = suggestTier(vehicle({ make: 'Toyota', model: 'Corolla' }), NOW);
+    expect(s.customerReason.length).toBeGreaterThan(10);
+    expect(s.customerReason).not.toContain('_');
+  });
+});
+
+describe('customer package selection', () => {
+  it('reports no mismatch when the customer keeps the suggestion', () => {
+    expect(tierMismatch('standard', 'standard')).toBeNull();
+  });
+  it('flags a lower pick for review rather than overriding it', () => {
+    const m = tierMismatch('euro_luxury_performance', 'standard');
+    expect(m?.direction).toBe('lower');
+    expect(m?.note).toContain('Check the vehicle');
+    // Internal tier keys must never surface in owner-facing text.
+    expect(m?.note).not.toContain('euro_luxury_performance');
+  });
+  it('flags a higher pick so nobody is overcharged by accident', () => {
+    const m = tierMismatch('standard', 'exotic_collector');
+    expect(m?.direction).toBe('higher');
+    expect(m?.note).toContain('genuinely needed');
   });
 });

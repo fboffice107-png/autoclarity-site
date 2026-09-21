@@ -704,6 +704,12 @@
                   <option value="heavy">Heavily modified</option>
                 </select>
               </div>
+              <div class="field" id="modDetailsField" hidden>
+                <label for="modDetails">What was modified?</label>
+                <input id="modDetails" name="modDetails" type="text" maxlength="600" placeholder="e.g. aftermarket wheels, exhaust, lowering springs" />
+                <p class="field-hint">A short list is enough. This is shown on your request so &ldquo;modified&rdquo; never means something unexplained.</p>
+                <p class="field-error" data-error-for="modDetails" role="alert"></p>
+              </div>
             </fieldset>
 
             <!-- STEP 2: Where is the vehicle -->
@@ -877,6 +883,23 @@
             <!-- STEP 4: Review and submit -->
             <fieldset class="form-step" data-step="4" hidden>
               <legend>Review &amp; submit</legend>
+
+              <!-- Package and price, before anything is submitted. The
+                   suggestion is preselected and explained; the customer can
+                   change it without knowing anything about cars. -->
+              <section class="intake-package" aria-labelledby="packageHeading">
+                <h3 id="packageHeading">Your package</h3>
+                <p class="field-hint" id="packageReason">Checking your vehicle…</p>
+                <div class="tier-choice" id="packageChoice" role="radiogroup" aria-labelledby="packageHeading"></div>
+                <!-- The chosen package travels with the request. It is recorded
+                     as the customer's choice and reviewed, never charged blind. -->
+                <input type="hidden" id="selectedTier" name="selectedTier" value="" />
+                <div id="packageNotes"></div>
+                <h3 style="margin-top:18px;">Estimated price</h3>
+                <div id="packageEstimate" aria-live="polite"></div>
+                <p class="field-hint" id="packageDisclaimer"></p>
+              </section>
+
               <div class="review-card" id="reviewCard" aria-live="polite"></div>
               <p class="review-tier" id="reviewTier"></p>
               <div class="field field-check">

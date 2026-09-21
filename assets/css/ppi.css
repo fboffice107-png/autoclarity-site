@@ -894,3 +894,189 @@ fieldset.form-step legend {
 .review-card { margin: 0; background: var(--glass); border: 1px solid var(--line-soft); border-radius: var(--r-md); padding: 20px; }
 .review-card blockquote { margin: 0 0 12px; color: var(--text); font-size: 15px; line-height: 1.6; }
 .review-card figcaption { color: var(--text-3); font-size: 13.5px; font-weight: 600; }
+
+/* ===========================================================================
+   Booking flow — customer stepper, clearer slot choices, owner proposal card.
+   Reuses the existing tokens, cards and pill vocabulary; nothing new visually,
+   just a firmer hierarchy around the one thing each side has to do next.
+   =========================================================================== */
+
+/* ---- customer: three-step progress ---- */
+.booking-steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+  counter-reset: none;
+}
+.booking-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 6px;
+  border-radius: 12px;
+  border: 1px solid var(--line-soft);
+  background: var(--glass);
+  text-align: center;
+}
+.booking-step-num {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: 14px;
+  background: rgba(148, 176, 255, 0.12);
+  color: var(--text-3);
+  border: 1px solid var(--line);
+}
+.booking-step-label { font-size: 13px; font-weight: 650; color: var(--text-3); line-height: 1.3; }
+.booking-step.current { border-color: rgba(47, 107, 255, 0.5); background: rgba(47, 107, 255, 0.1); }
+.booking-step.current .booking-step-num { background: var(--blue-bright); color: #06122e; border-color: transparent; }
+.booking-step.current .booking-step-label { color: var(--text); }
+.booking-step.done .booking-step-num { background: rgba(61, 214, 140, 0.18); color: var(--green); border-color: rgba(61, 214, 140, 0.4); }
+.booking-step.done .booking-step-label { color: var(--text-2); }
+
+/* ---- customer: appointment choices read as dates, not timestamps ---- */
+.slot-btn .slot-day { display: block; font-size: 17px; font-weight: 750; }
+.slot-btn .slot-time { display: block; font-size: 22px; font-weight: 800; letter-spacing: -0.01em; margin-top: 2px; }
+.slot-btn .slot-tz { font-size: 12.5px; font-weight: 600; color: var(--text-3); letter-spacing: 0; }
+.slot-btn:focus-visible { outline: 2px solid var(--blue-bright); outline-offset: 2px; }
+.slot-none { margin-top: 12px; }
+
+.portal-price { border-color: rgba(47, 107, 255, 0.28); }
+.portal-quote-note { margin-top: 12px; color: var(--text-2); font-size: 14.5px; }
+.portal-held .held-when { font-size: 18px; color: var(--text); }
+.portal-confirmed { border-color: rgba(61, 214, 140, 0.35); }
+.portal-fineprint { margin-top: 14px; }
+.portal-fineprint summary { cursor: pointer; color: var(--text-3); font-size: 13.5px; }
+.portal-fineprint p { margin-top: 8px; color: var(--text-3); font-size: 13.5px; }
+
+.linklike {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--blue-bright);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.linklike:focus-visible { outline: 2px solid var(--blue-bright); outline-offset: 2px; }
+
+/* Secondary panels stay available without competing for attention. */
+details.portal-secondary > summary {
+  cursor: pointer;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-2);
+  list-style: revert;
+}
+details.portal-secondary[open] > summary { margin-bottom: 14px; }
+
+/* ---- shared: stage pill vocabulary ---- */
+.stage-pill {
+  display: inline-block;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 13.5px;
+  font-weight: 700;
+  line-height: 1.3;
+  background: rgba(148, 176, 255, 0.1);
+  color: var(--text-2);
+  border: 1px solid var(--line);
+}
+.stage-pill.stage-act { background: rgba(47, 107, 255, 0.16); color: var(--blue-soft); border-color: rgba(47, 107, 255, 0.4); }
+.stage-pill.stage-wait { background: rgba(148, 176, 255, 0.08); color: var(--text-3); }
+.stage-pill.stage-good { background: rgba(61, 214, 140, 0.14); color: var(--green); border-color: rgba(61, 214, 140, 0.35); }
+.stage-pill.stage-alert { background: rgba(255, 180, 84, 0.16); color: var(--amber); border-color: rgba(255, 180, 84, 0.45); }
+.stage-pill.stage-off { background: rgba(148, 176, 255, 0.05); color: var(--text-3); }
+
+.stage-edge-act { border-left: 3px solid var(--blue-bright); }
+.stage-edge-alert { border-left: 3px solid var(--amber); }
+.stage-edge-good { border-left: 3px solid var(--green); }
+
+/* ---- admin: request list cards answer the question without opening ---- */
+.job-card-top { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+.job-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px 16px;
+  margin: 12px 0 4px;
+  font-size: 14px;
+  color: var(--text-2);
+}
+.job-card-grid > span { display: block; }
+.job-k {
+  display: block;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+/* ---- admin: the proposal card ---- */
+.proposal-card { border-color: rgba(47, 107, 255, 0.35); }
+.tier-choice { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin: 10px 0 4px; }
+.tier-option {
+  position: relative;
+  display: block;
+  padding: 14px 14px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--glass);
+  cursor: pointer;
+}
+.tier-option.selected { border-color: var(--blue-bright); background: rgba(47, 107, 255, 0.1); }
+.tier-option:focus-within { outline: 2px solid var(--blue-bright); outline-offset: 2px; }
+.tier-option input { position: absolute; opacity: 0; pointer-events: none; }
+.tier-option-name { display: block; font-weight: 700; font-size: 14.5px; }
+.tier-option-price { display: block; font-size: 20px; font-weight: 800; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.tier-option-flag {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--green);
+}
+.advanced-pricing { margin: 16px 0; border-top: 1px solid var(--line-soft); padding-top: 12px; }
+.advanced-pricing > summary { cursor: pointer; font-weight: 700; color: var(--text-2); font-size: 14.5px; }
+.field-inline { display: flex; flex-direction: column; gap: 4px; min-width: 150px; }
+.field-inline > span { font-size: 12px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; }
+.slot-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 10px 0; }
+.slot-quickfill { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+
+@media (max-width: 520px) {
+  .booking-steps { gap: 6px; }
+  .booking-step { padding: 10px 4px; }
+  .booking-step-label { font-size: 11.5px; }
+  .slot-btn .slot-time { font-size: 20px; }
+  .tier-choice { grid-template-columns: 1fr; }
+}
+
+/* ---- intake: package choice and estimate ---- */
+.intake-package {
+  border: 1px solid rgba(47, 107, 255, 0.3);
+  border-radius: var(--r-md, 16px);
+  background: rgba(47, 107, 255, 0.05);
+  padding: clamp(16px, 3vw, 24px);
+  margin-bottom: 20px;
+}
+.intake-package h3 { font-size: 17px; margin-bottom: 6px; }
+.intake-package .tier-option-blurb {
+  display: block;
+  margin-top: 6px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-3);
+  font-weight: 500;
+}
+.intake-package .notice ul { margin: 0; padding-left: 18px; }
+.intake-package .line-items { margin-top: 6px; }

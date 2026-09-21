@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest';
 const BASE = 'http://127.0.0.1:8799';
 const ADMIN_KEY = 'test-admin-key-0123456789abcdef';
 const WEBHOOK_SECRET = 'whsec_integration_test_secret';
+// A fixed `created` for the event that is deliberately delivered twice.
+const EVT_INT_1_CREATED = 1_800_000_000;
 
 type Json = Record<string, any>;
 
@@ -1263,6 +1265,8 @@ describe('stripe webhook — the source of truth', () => {
 
     const r = await sendWebhook({
       id: 'evt_int_1',
+      // Pinned so the replay assertion below can re-send byte-identical bytes.
+      created: EVT_INT_1_CREATED,
       type: 'checkout.session.completed',
       data: { object: { id: sessionId, payment_status: 'paid', payment_intent: 'pi_mock_1' } },
     });
@@ -1332,9 +1336,11 @@ describe('stripe webhook — the source of truth', () => {
   it('acknowledges but never reprocesses replayed events', async () => {
     const r = await sendWebhook({
       id: 'evt_int_1',
+      created: EVT_INT_1_CREATED,
       type: 'checkout.session.completed',
       data: { object: { id: sessionId, payment_status: 'paid', payment_intent: 'pi_mock_1' } },
     });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
     expect(r.body.replay).toBe(true);
     const detail = await get(`/api/admin/requests/${euroId}`, admin);
     expect(detail.body.payments).toHaveLength(2);

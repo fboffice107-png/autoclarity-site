@@ -9,6 +9,7 @@ import { getConfig } from '../../lib/config.ts';
 import { parseIntake, normalizeUrl } from '../../lib/validate.ts';
 import { validateVin } from '../../lib/vin.ts';
 import { suggestTier, estimateTravel } from '../../lib/pricing.ts';
+import { isTier, tierMismatch, type Tier } from '../../lib/vehicle-class.ts';
 import { verifyTurnstile } from '../../lib/turnstile.ts';
 import { rateLimit } from '../../lib/ratelimit.ts';
 import { issueMagicLink, portalUrl } from '../../lib/magic.ts';
@@ -171,10 +172,22 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     model: payload.model,
     trim: payload.trim,
     modStatus: payload.modStatus,
+    modDetails: payload.modDetails,
     titleStatus: payload.titleStatus,
     startsDrives: payload.startsDrives,
   });
   const travel = estimateTravel(payload.locZip, config);
+
+  // The customer's own choice is recorded as-is. It is never used to price
+  // anything by itself — the owner reviews it — but disagreeing with the
+  // engine is a fact worth keeping, and a mismatch is surfaced for review.
+  const selectedTier: Tier | null = isTier(payload.selectedTier) ? payload.selectedTier : null;
+  const selectionMismatch = selectedTier ? tierMismatch(tierSuggestion.tier, selectedTier) : null;
+  const reviewReasons = [
+    ...tierSuggestion.reasons.map((r) => `tier: ${r}`),
+    ...tierSuggestion.manualReasons,
+    ...(selectionMismatch ? [selectionMismatch.note] : []),
+  ];
 
   try {
     await env.DB.batch([
@@ -197,8 +210,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       env.DB
       .prepare(
         `INSERT INTO vehicles (id, year, make, model, trim, mileage, vin, asking_price_cents, expected_price_cents, listing_url,
-                               mod_status, warning_lights, known_issues, title_status, starts_drives, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                               mod_status, mod_details, warning_lights, known_issues, title_status, starts_drives, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         vehicleId,
@@ -212,6 +225,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         toCents(payload.expectedPrice),
         payload.listingUrl ? normalizeUrl(payload.listingUrl) : null,
         payload.modStatus,
+        payload.modDetails || null,
         payload.warningLights || null,
         payload.knownIssues || null,
         payload.titleStatus,
@@ -228,9 +242,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
            perm_inspection, perm_scan, perm_road_test, perm_photos, perm_underbody, ack_access_dependent,
            decision_timeline, preferred_dates, time_window, same_day_priority, customer_notes,
            travel_miles, travel_estimate_basis, suggested_tier, manual_review_reasons,
+           customer_selected_tier, tier_selection_source, tier_review_needed,
            attribution_source,
            created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, 'submitted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, 'submitted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         requestId,
@@ -264,7 +279,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         travel.miles,
         travel.basis,
         tierSuggestion.tier,
-        JSON.stringify([...tierSuggestion.reasons.map((r) => `tier: ${r}`), ...tierSuggestion.manualReasons]),
+        JSON.stringify(reviewReasons),
+        selectedTier,
+        selectedTier ? (selectionMismatch ? 'customer' : 'suggested') : null,
+        selectionMismatch || tierSuggestion.manualReview ? 1 : 0,
         payload.attributionSource,
         now,
         now,

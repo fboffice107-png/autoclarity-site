@@ -344,7 +344,15 @@ describe('PPI frontend conversion safeguards', () => {
     expect(page).toContain('<tbody id="travelRows">');
     expect(script).toContain('function applyTravel(cfg)');
     expect(script).not.toContain('function preliminaryTier()');
-    expect(script).toContain('AutoClarity confirms the vehicle tier');
+    // The tier is no longer deferred out of sight: the customer sees the
+    // suggested package, its price and the travel estimate before submitting,
+    // and the estimate is explicitly not an offer.
+    expect(script).not.toContain('AutoClarity confirms the vehicle tier');
+    expect(script).toContain('function refreshPackage()');
+    expect(script).toContain('API.estimate');
+    expect(page).toContain('id="packageChoice"');
+    expect(page).toContain('id="packageEstimate"');
+    expect(script).toContain('Submitting is free and charges nothing.');
     expect(portalScript).not.toMatch(/hear back the same day|never later than|preview environment/iu);
     expect(portalScript).toContain('v.paymentsEnabled');
     expect(portalScript).toContain('function renderAgreementMarkdown(source)');

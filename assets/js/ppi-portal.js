@@ -170,6 +170,84 @@
     refund_reconciliation_needed: "bad", disputed: "bad"
   };
 
+  // The customer never needs to know the word "awaiting_time_selection". These
+  // are the same saved states, said in a sentence, with the one thing to do
+  // next named explicitly.
+  var CUSTOMER_STAGE = {
+    submitted: "AutoClarity is reviewing your request",
+    needs_info: "AutoClarity needs one more detail from you",
+    seller_access_pending: "Waiting on the seller to confirm access",
+    ready_for_review: "AutoClarity is preparing your price and times",
+    quote_prepared: "AutoClarity is preparing your price and times",
+    quote_sent: "Choose your appointment",
+    awaiting_time_selection: "Choose your appointment",
+    awaiting_agreement: "Review and accept the agreements",
+    awaiting_payment: "Pay to confirm your appointment",
+    confirmed: "Your appointment is confirmed",
+    inspection_in_progress: "Your inspection is underway",
+    report_in_progress: "Your report is being written",
+    completed: "Your inspection is complete",
+    customer_cancelled: "This request was cancelled",
+    admin_cancelled: "This request was cancelled by AutoClarity",
+    expired: "This request expired",
+    refunded: "This request was refunded",
+    refund_reconciliation_needed: "AutoClarity is reconciling your refund",
+    disputed: "This payment is under dispute review"
+  };
+
+  var BOOKING_STEPS = ["Choose a time", "Review & accept", "Pay & confirm"];
+
+  /* Which of the three booking steps the customer is on, from saved state.
+     0 means the booking journey has not started or is already finished. */
+  function bookingStep(v) {
+    if (v.status === "quote_sent" || v.status === "awaiting_time_selection") return 1;
+    if (v.status === "awaiting_agreement") return 2;
+    if (v.status === "awaiting_payment") return 3;
+    return 0;
+  }
+
+  function renderStepper(current) {
+    var html = '<ol class="booking-steps" aria-label="Booking steps">';
+    BOOKING_STEPS.forEach(function (label, i) {
+      var n = i + 1;
+      var state = n < current ? "done" : n === current ? "current" : "todo";
+      html += '<li class="booking-step ' + state + '"' + (state === "current" ? ' aria-current="step"' : "") + '>' +
+        '<span class="booking-step-num" aria-hidden="true">' + (state === "done" ? "✓" : n) + "</span>" +
+        '<span class="booking-step-label">' + esc(label) + "</span>" +
+        (state === "done" ? '<span class="sr-only"> (done)</span>' : "") + "</li>";
+    });
+    return html + "</ol>";
+  }
+
+  /* Weekday, date and an unmistakable AM/PM, in Las Vegas time, on both
+     sides of the conversation. */
+  function fmtSlotLong(iso) {
+    var d = new Date(iso);
+    var day = d.toLocaleString("en-US", { timeZone: "America/Los_Angeles", weekday: "long", month: "long", day: "numeric" });
+    var time = d.toLocaleString("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit", hour12: true });
+    return { day: day, time: time };
+  }
+
+  function renderQuoteTable(quote) {
+    var html = '<table class="line-items">';
+    var hasTravel = false;
+    quote.lines.forEach(function (l) {
+      if (l.kind === "travel") hasTravel = true;
+      // A zero-amount charge line is information, not an empty cell.
+      var amount = l.kind !== "discount" && l.amountCents === 0
+        ? "Included"
+        : (l.kind === "discount" ? "−" : "") + money(Math.abs(l.amountCents));
+      html += "<tr><td>" + esc(l.label) + "</td><td>" + esc(amount) + "</td></tr>";
+    });
+    // No travel line means no travel charge. Say so, rather than leaving the
+    // customer to wonder whether a mobile-service fee is coming later.
+    if (!hasTravel) {
+      html += '<tr><td>Mobile-service charge</td><td>Included</td></tr>';
+    }
+    html += '<tr class="total"><td>Total</td><td>' + money(quote.totalCents) + "</td></tr></table>";
+    return html;
+  }
+
   function render() {
     elLoading.hidden = true;
     elError.hidden = true;
@@ -186,10 +264,74 @@
     var currentQuoteAndHold = Boolean(v.quote && !v.quote.expired && hasHeldSlot);
     var canAcceptCurrentAgreements = needsCurrentAgreements && currentQuoteAndHold;
 
+    var offered = v.slots.filter(function (s) { return s.status === "offered"; });
+    var held = v.slots.filter(function (s) { return s.status === "held"; })[0];
+    var confirmedSlot = v.slots.filter(function (s) { return s.status === "confirmed"; })[0];
+    var step = bookingStep(v);
+    // A price with no times to pick is the dead end this page used to show.
+    // It is now named out loud instead of leaving the customer guessing.
+    var awaitingTimes = step === 1 && offered.length === 0;
+
     html += '<div class="portal-topbar">' +
       "<h1>Request " + esc(v.ref) + "</h1>" +
-      '<span class="status-pill ' + (STATUS_KIND[v.status] || "") + '">' + esc(v.statusLabel) + "</span>" +
+      '<span class="status-pill ' + (STATUS_KIND[v.status] || "") + '">' + esc(CUSTOMER_STAGE[v.status] || v.statusLabel) + "</span>" +
       "</div>";
+
+    // ---------- what happens next, in one line ----------
+    var nextLine = {
+      submitted: "Nothing to do right now — AutoClarity reviews your vehicle, location and timing, then emails your price and available times.",
+      needs_info: "Check the messages below and reply there.",
+      seller_access_pending: "You'll be notified the moment the seller confirms access.",
+      ready_for_review: "Nothing to do right now — your exact price and appointment times are on the way by email.",
+      quote_prepared: "Nothing to do right now — your exact price and appointment times are on the way by email.",
+      quote_sent: awaitingTimes
+        ? "Your price is confirmed below. AutoClarity is finalising which appointment times to offer you and will email them shortly — you don't need to do anything yet."
+        : "Pick the appointment that suits you. Nothing is charged until you accept the agreements and pay.",
+      awaiting_time_selection: paidReselection
+        ? "Your payment is already recorded. Choose a replacement time below — you will not be charged again."
+        : awaitingTimes
+          ? "Your price is confirmed below. AutoClarity is finalising which appointment times to offer you and will email them shortly."
+          : "Pick the appointment that suits you. Nothing is charged until you accept the agreements and pay.",
+      awaiting_agreement: canAcceptCurrentAgreements
+        ? "Your time is held. Read and accept the agreements below to continue to payment."
+        : "Your held time or quote needs refreshing before you can accept the agreements. AutoClarity will send the next step.",
+      awaiting_payment: canAcceptCurrentAgreements
+        ? "Before payment, accept the current agreements for this exact price and time."
+        : (!needsCurrentAgreements && currentQuoteAndHold && v.paymentsEnabled
+          ? "Last step — pay the exact total shown. Successful payment confirms your appointment."
+          : "Payment isn't available until your quote, held time and agreements are all current. AutoClarity will send the next step."),
+      confirmed: "You're booked. The technician meets the vehicle at the scheduled time.",
+      inspection_in_progress: "Your inspection is underway.",
+      report_in_progress: v.report ? "Your published report is available below while AutoClarity finalises this request." : "The inspection is done — your written results are being prepared.",
+      completed: v.report ? "Your inspection is complete and your report is below." : "Your inspection is marked complete, but no published report is in this portal. Contact AutoClarity for help.",
+      customer_cancelled: "This request was cancelled.",
+      admin_cancelled: "This request was cancelled by AutoClarity.",
+      expired: "This request expired. Submit a new one whenever you're ready.",
+      refunded: "This request was refunded.",
+      refund_reconciliation_needed: "Stripe changed the status of a completed refund. Your appointment stays closed while AutoClarity reconciles the record; you do not need to pay again.",
+      disputed: "This payment is under dispute review. Your original appointment stays closed even if the provider later resolves it; AutoClarity will contact you before any new scheduling step."
+    }[v.status];
+
+    if (step > 0) html += renderStepper(step);
+    if (nextLine) {
+      html += '<div class="notice ' + (awaitingTimes ? "info" : step > 0 ? "good" : "info") + '"><strong>Next: </strong>' + esc(nextLine) + "</div>";
+    }
+
+    // ---------- price, high on the page and always itemized ----------
+    if (v.quote) {
+      html += '<section class="portal-card portal-price"><h2>Your price</h2>';
+      if (v.quote.expired && v.status !== "confirmed" && v.status !== "completed") {
+        html += paidReselection
+          ? '<div class="notice info">Your payment is already recorded. The old quote date does not block choosing a replacement time, and you will not be charged again.</div>'
+          : '<div class="notice warn">This quote expired ' + esc(fmtWhen(v.quote.expiresAt)) + ". AutoClarity will refresh it — no action needed.</div>";
+      }
+      html += renderQuoteTable(v.quote);
+      if (v.quote.customerNote) html += '<p class="portal-quote-note">' + esc(v.quote.customerNote) + "</p>";
+      if (!v.quote.expired && !paidReselection && (v.status === "quote_sent" || v.status === "awaiting_time_selection" || v.status === "awaiting_agreement" || v.status === "awaiting_payment")) {
+        html += '<p class="field-hint">This is the exact amount you will be charged. Held until ' + esc(fmtWhen(v.quote.expiresAt)) + ".</p>";
+      }
+      html += "</section>";
+    }
 
     // ---------- summary ----------
     html += '<section class="portal-card"><h2>Vehicle &amp; location</h2><dl class="kv">' +
@@ -198,88 +340,46 @@
       "<dt>Inspection area</dt><dd>" + esc([v.location.street, v.location.city, v.location.state, v.location.zip].filter(Boolean).join(", ")) + "</dd>" +
       "</dl></section>";
 
-    // ---------- status-specific guidance ----------
-    var guidance = {
-      submitted: "AutoClarity will review the vehicle, location, access, and requested timing, then follow up by email with next steps.",
-      needs_info: "AutoClarity needs a little more information — check the messages below and reply there.",
-      seller_access_pending: "Waiting on the seller to confirm access to the vehicle. You’ll be notified the moment it’s cleared.",
-      ready_for_review: "Your request is in review — your exact quote is on its way.",
-      quote_prepared: "Your quote is being finalized.",
-      quote_sent: "Your exact price is ready below. Choose an appointment window to continue.",
-      awaiting_time_selection: "Choose one of the offered appointment windows below.",
-      awaiting_agreement: canAcceptCurrentAgreements
-        ? "Almost there — review and accept the service agreements below."
-        : "The quote or held appointment needs to be refreshed before agreement acceptance. AutoClarity will provide the next available step.",
-      awaiting_payment: canAcceptCurrentAgreements
-        ? "Before payment, review and accept the current service agreements for this exact quote and appointment."
-        : (!needsCurrentAgreements && currentQuoteAndHold && v.paymentsEnabled
-          ? "Last step: pay the exact approved quote through Stripe. Successful payment confirms your appointment."
-          : "Payment is not available until the current quote, appointment hold and agreements are ready. AutoClarity will provide the next step."),
-      confirmed: "You’re booked. The technician will meet the vehicle at the scheduled time.",
-      inspection_in_progress: "Your inspection is underway.",
-      report_in_progress: v.report
-        ? "Your published written report is available below while AutoClarity finalizes this request."
-        : "The inspection is done — your written results are being prepared.",
-      completed: v.report
-        ? "Your inspection is complete. Your published written report is available below."
-        : "Your inspection is marked complete, but no published report is available in this secure portal. Contact AutoClarity support for help.",
-      customer_cancelled: "This request was cancelled.",
-      admin_cancelled: "This request was cancelled by AutoClarity.",
-      expired: "This request expired. Submit a new one whenever you’re ready.",
-      refunded: "This request was refunded.",
-      refund_reconciliation_needed: "Stripe changed the status of a previously completed refund. Your appointment remains closed while AutoClarity reconciles the payment record; you do not need to pay again.",
-      disputed: "This payment is under dispute review. Your original appointment remains closed even if the payment provider later resolves the dispute; AutoClarity will contact you before any new scheduling step."
-    };
-    if (guidance[v.status]) {
-      html += '<div class="notice info">' + esc(guidance[v.status]) + "</div>";
-    }
-
     // ---------- exact published report snapshot ----------
     if (v.report) html += renderPublishedReport(v.report);
 
-    // ---------- quote ----------
-    if (v.quote) {
-      html += '<section class="portal-card"><h2>Your quote</h2>';
-      if (v.quote.expired && v.status !== "confirmed" && v.status !== "completed") {
-        html += paidReselection
-          ? '<div class="notice info">Your payment is already recorded. The old quote date does not block choosing a replacement time, and you will not be charged again.</div>'
-          : '<div class="notice warn">This quote expired ' + esc(fmtWhen(v.quote.expiresAt)) + ". AutoClarity will refresh it — no action needed.</div>";
-      }
-      html += '<table class="line-items">';
-      v.quote.lines.forEach(function (l) {
-        html += "<tr><td>" + esc(l.label) + "</td><td>" + (l.kind === "discount" ? "−" : "") + money(Math.abs(l.amountCents)) + "</td></tr>";
-      });
-      html += '<tr class="total"><td>Total</td><td>' + money(v.quote.totalCents) + "</td></tr></table>";
-      if (v.quote.customerNote) html += '<p style="margin-top:12px;color:var(--text-2);font-size:14.5px;">' + esc(v.quote.customerNote) + "</p>";
-      if (!v.quote.expired && !paidReselection && (v.status === "quote_sent" || v.status === "awaiting_time_selection")) {
-        html += '<p class="field-hint">Quote valid until ' + esc(fmtWhen(v.quote.expiresAt)) + ".</p>";
-      }
-      html += "</section>";
-    }
-
-    // ---------- slots ----------
-    var offered = v.slots.filter(function (s) { return s.status === "offered"; });
-    var held = v.slots.filter(function (s) { return s.status === "held"; })[0];
-    var confirmedSlot = v.slots.filter(function (s) { return s.status === "confirmed"; })[0];
-
-    if ((v.status === "quote_sent" || v.status === "awaiting_time_selection") && offered.length > 0 && v.quote && (!v.quote.expired || paidReselection)) {
-      html += '<section class="portal-card"><h2>Choose your appointment</h2><div class="slot-list">';
+    // ---------- step 1: choose a time ----------
+    if (step === 1 && offered.length > 0 && v.quote && (!v.quote.expired || paidReselection)) {
+      html += '<section class="portal-card"><h2>Choose your appointment</h2>' +
+        '<p class="field-hint">' + esc(paidReselection
+          ? "Pick a replacement time. There is no additional charge."
+          : "These are alternatives for one inspection — pick the one that works. Selecting holds it for you while you finish booking.") + "</p>" +
+        '<div class="slot-list">';
       offered.forEach(function (s) {
-        html += '<button type="button" class="slot-btn" data-slot="' + esc(s.id) + '">' + esc(fmtWhen(s.startsAt)) +
-          '<span class="slot-sub">' + (paidReselection ? "Choose this replacement time — no additional charge" : "Selecting holds this time for you while you finish booking") + "</span></button>";
+        var when = fmtSlotLong(s.startsAt);
+        html += '<button type="button" class="slot-btn" data-slot="' + esc(s.id) + '">' +
+          '<span class="slot-day">' + esc(when.day) + "</span>" +
+          '<span class="slot-time">' + esc(when.time) + ' <span class="slot-tz">Las Vegas time</span></span>' +
+          '<span class="slot-sub">' + esc(paidReselection ? "Choose this time" : "Select and continue") + "</span></button>";
       });
-      html += "</div></section>";
+      html += "</div>";
+      html += '<p class="field-hint slot-none">None of these work? <button type="button" class="linklike" id="requestNewTimes">Ask AutoClarity for different times</button></p>';
+      html += "</section>";
+    } else if (awaitingTimes && v.quote) {
+      html += '<section class="portal-card"><h2>Choose your appointment</h2>' +
+        '<div class="notice info">Appointment times for this request haven’t been published yet. AutoClarity sends them by email as soon as they’re set — usually the same day. Your price above is already confirmed and will not change.</div>' +
+        '<button class="btn btn-ghost" id="requestNewTimes" style="margin-top:12px;">Ask AutoClarity for times</button>' +
+        '<p class="form-status" id="requestTimesStatus" role="status" aria-live="polite"></p></section>';
     }
 
     if (held && (v.status === "awaiting_agreement" || v.status === "awaiting_payment")) {
-      html += '<div class="notice good">Held for you: ' + esc(fmtWhen(held.startsAt)) +
-        (held.holdExpiresAt ? " — complete booking by " + esc(fmtWhen(held.holdExpiresAt)) : "") + "</div>";
+      var heldWhen = fmtSlotLong(held.startsAt);
+      html += '<section class="portal-card portal-held"><h2>Your chosen time</h2>' +
+        '<p class="held-when"><strong>' + esc(heldWhen.day) + "</strong> at <strong>" + esc(heldWhen.time) + "</strong> <span class=\"slot-tz\">Las Vegas time</span></p>" +
+        (held.holdExpiresAt ? '<p class="field-hint">Held for you until ' + esc(fmtWhen(held.holdExpiresAt)) + ". It isn’t confirmed until payment succeeds.</p>" : "") +
+        '<p class="field-hint"><button type="button" class="linklike" id="changeTimeBtn">Choose a different time instead</button></p>' +
+        "</section>";
     }
 
-    // ---------- agreements ----------
+    // ---------- step 2: agreements ----------
     if ((v.status === "awaiting_agreement" || v.status === "awaiting_payment") && canAcceptCurrentAgreements) {
       html += '<section class="portal-card"><h2>Service agreements</h2>' +
-        '<p style="color:var(--text-2);font-size:14.5px;margin-bottom:12px;">These are the current agreements for the exact quote and appointment time shown above. Please open and accept each document. One typed signature covers all of them.</p>' +
+        '<p class="field-hint" style="margin-bottom:12px;">These are the current agreements for the exact price and time above. Open and accept each one — a single typed signature covers all of them.</p>' +
         '<form id="agreeForm">';
       v.agreements.required.forEach(function (doc) {
         html += '<details class="agree-doc"><summary>' + esc(doc.title) + ' <span class="opt">(v' + doc.version + ')</span></summary>' +
@@ -289,18 +389,20 @@
       });
       html += '<div class="field" style="margin-top:14px;"><label for="typedName">Type your full legal name to sign</label>' +
         '<input id="typedName" type="text" maxlength="120" autocomplete="name" /></div>' +
-        '<button class="btn btn-primary btn-lg" type="submit" style="width:100%;">Accept and continue</button>' +
+        '<button class="btn btn-primary btn-lg" type="submit" style="width:100%;">Accept and continue to payment</button>' +
         '<p class="form-status" id="agreeStatus" role="status" aria-live="polite"></p></form></section>';
     }
 
-    // ---------- payment ----------
+    // ---------- step 3: payment ----------
     if (v.status === "awaiting_payment" && !needsCurrentAgreements && currentQuoteAndHold && v.paymentsEnabled) {
-      html += '<section class="portal-card"><h2>Payment</h2>' +
-        '<p style="color:var(--text-2);font-size:15px;">Stripe will charge the exact server-approved quote total shown above. Your appointment is confirmed only after payment succeeds.</p>' +
-        '<p class="field-hint">The cancellation, rescheduling, vehicle-transfer, mobile-service, and refund terms you accepted apply to this booking. A transfer to a replacement vehicle has no transfer fee, but AutoClarity re-reviews and re-quotes that vehicle: you pay any increase before the replacement booking is confirmed, receive a refund of any decrease, or carry the same payment forward when the approved totals match.</p>' +
-        '<button class="btn btn-primary btn-lg" id="checkoutBtn" style="width:100%;margin-top:14px;">Pay exact quote securely with Stripe' +
-        (v.quote ? " — " + money(v.quote.totalCents) : "") + "</button>" +
-        '<p class="form-status" id="checkoutStatus" role="status" aria-live="polite"></p></section>';
+      html += '<section class="portal-card"><h2>Pay &amp; confirm</h2>' +
+        '<p class="field-hint">Stripe charges the exact total shown above. Your appointment is confirmed only after payment succeeds.</p>' +
+        '<button class="btn btn-primary btn-lg" id="checkoutBtn" style="width:100%;margin-top:14px;">Pay ' +
+        (v.quote ? money(v.quote.totalCents) : "") + " securely with Stripe</button>" +
+        '<p class="form-status" id="checkoutStatus" role="status" aria-live="polite"></p>' +
+        '<details class="portal-fineprint"><summary>Cancellation, rescheduling and vehicle-transfer terms</summary>' +
+        '<p>The cancellation, rescheduling, vehicle-transfer, mobile-service and refund terms you accepted apply to this booking. A transfer to a replacement vehicle has no transfer fee, but AutoClarity re-reviews and re-quotes that vehicle: you pay any increase before the replacement booking is confirmed, receive a refund of any decrease, or carry the same payment forward when the approved totals match.</p></details>' +
+        "</section>";
     } else if (v.status === "awaiting_payment" && !canAcceptCurrentAgreements) {
       html += '<section class="portal-card"><h2>Payment unavailable</h2>' +
         '<div class="notice warn">Online payment cannot start until the current quote, held appointment, current agreements, and payment service are all ready. Contact AutoClarity to finish scheduling. No charge has been started, and your appointment is not confirmed.</div></section>';
@@ -308,9 +410,14 @@
 
     // ---------- confirmed booking ----------
     if (v.booking && v.booking.status === "confirmed" && confirmedSlot && ["confirmed", "inspection_in_progress", "report_in_progress", "completed"].indexOf(v.status) !== -1) {
-      html += '<section class="portal-card"><h2>Your appointment</h2><dl class="kv">' +
-        "<dt>When</dt><dd>" + esc(fmtWhen(confirmedSlot.startsAt)) + "</dd>" +
-        "<dt>Where</dt><dd>" + esc([v.location.street, v.location.city].filter(Boolean).join(", ")) + "</dd></dl>" +
+      var cWhen = fmtSlotLong(confirmedSlot.startsAt);
+      html += '<section class="portal-card portal-confirmed"><h2>Your appointment</h2><dl class="kv">' +
+        "<dt>When</dt><dd><strong>" + esc(cWhen.day) + "</strong> at <strong>" + esc(cWhen.time) + '</strong> <span class="slot-tz">Las Vegas time</span></dd>' +
+        "<dt>Where</dt><dd>" + esc([v.location.street, v.location.city].filter(Boolean).join(", ")) + "</dd>" +
+        "<dt>Vehicle</dt><dd>" + esc([v.vehicle.year, v.vehicle.make, v.vehicle.model].filter(Boolean).join(" ")) + "</dd>" +
+        (v.payment && v.payment.amountCents ? "<dt>Amount paid</dt><dd>" + money(v.payment.amountCents) + "</dd>" : "") +
+        "</dl>" +
+        '<p class="field-hint">What happens next: AutoClarity arrives at the vehicle at the scheduled time, performs the inspection, then publishes your written report to this page and emails you when it’s ready.</p>' +
         '<p style="margin-top:14px;"><button class="btn btn-ghost" id="calendarBtn" type="button">Add to calendar (.ics)</button></p>' +
         '<p class="form-status" id="calendarStatus" role="status" aria-live="polite"></p></section>';
     }
@@ -339,13 +446,13 @@
       '<button class="btn btn-ghost" type="submit">Send</button>' +
       '<p class="form-status" id="msgStatus" role="status" aria-live="polite"></p></form></section>';
 
-    // ---------- cancel ----------
+    // ---------- cancel (secondary, at the bottom) ----------
     var terminal = ["customer_cancelled", "admin_cancelled", "expired", "refunded", "refund_reconciliation_needed", "completed", "disputed"];
     if (terminal.indexOf(v.status) === -1) {
-      html += '<section class="portal-card"><h2>Need to cancel or reschedule?</h2>' +
+      html += '<details class="portal-card portal-secondary"><summary>Need to cancel or reschedule?</summary>' +
         '<p style="color:var(--text-2);font-size:14.5px;">Before payment, cancelling is instant and free. After payment, requests are reviewed personally under the cancellation policy you accepted — nothing is forfeited automatically. Your approved quote shows any separate mobile-service charge relevant to that review.</p>' +
         '<button class="btn btn-ghost" id="cancelBtn" style="margin-top:12px;">Request cancellation / reschedule</button>' +
-        '<p class="form-status" id="cancelStatus" role="status" aria-live="polite"></p></section>';
+        '<p class="form-status" id="cancelStatus" role="status" aria-live="polite"></p></details>';
     }
 
     if (reportPhotoDispose) reportPhotoDispose();
@@ -431,6 +538,36 @@
           if (r.body.paymentsDisabled) { status.textContent = r.body.message; return; }
           status.textContent = (r.body.error && r.body.error.message) || "Payment couldn’t start — please try again.";
           load();
+        });
+      });
+    }
+
+    var requestTimes = document.getElementById("requestNewTimes");
+    if (requestTimes) {
+      requestTimes.addEventListener("click", function () {
+        var status = document.getElementById("requestTimesStatus");
+        requestTimes.disabled = true;
+        if (status) status.textContent = "Sending…";
+        // Deliberately the ordinary message channel: it reaches the owner in
+        // the same place as everything else, and leaves a visible record.
+        action({ action: "message", message: "None of the offered times work for me (or no times are showing yet) — could you send other appointment options?" }, function (r) {
+          requestTimes.disabled = false;
+          if (r.ok) {
+            notice("good", "Message sent — AutoClarity will email you new appointment times.");
+            load();
+          } else if (status) {
+            status.textContent = (r.body.error && r.body.error.message) || "Couldn’t send — please email support.";
+          }
+        });
+      });
+    }
+
+    var changeTime = document.getElementById("changeTimeBtn");
+    if (changeTime) {
+      changeTime.addEventListener("click", function () {
+        action({ action: "message", message: "I'd like to choose a different appointment time for this inspection." }, function (r) {
+          if (r.ok) { notice("good", "Message sent — AutoClarity will release your hold and send fresh times."); load(); }
+          else notice("warn", (r.body.error && r.body.error.message) || "Couldn’t send — please email support.");
         });
       });
     }

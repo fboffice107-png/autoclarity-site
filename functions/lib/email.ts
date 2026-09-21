@@ -626,6 +626,29 @@ export const EMAIL_TEMPLATES = {
     subject: `AutoClarity — your inspection quote is ready (${ctx.ref})`,
     text: ['Your exact price is ready to review.', '', ctx.extra?.['summary'] ?? '', '', 'Review your quote and pick a time securely here:', ctx.portalUrl ?? '', '', `This quote expires ${ctx.extra?.['expires'] ?? 'as shown on your quote page'}.`, footer(ctx)].join('\n'),
   }),
+  booking_proposal: (ctx: TemplateCtx) => {
+    // Blank lines here are deliberate spacing, so this template builds its
+    // body explicitly instead of filtering empties out of a flat array.
+    const lines: string[] = [ctx.extra?.['message'] ?? 'Your pre-purchase inspection is ready to book.', ''];
+    lines.push('YOUR PRICE');
+    if (ctx.extra?.['priceLines']) lines.push(ctx.extra['priceLines']);
+    lines.push(`Total: ${ctx.extra?.['total'] ?? ''}`, '');
+    lines.push('AVAILABLE TIMES');
+    if (ctx.extra?.['slots']) lines.push(ctx.extra['slots']);
+    lines.push('', 'Choose a time, accept the service agreements and pay — all on one page:');
+    if (ctx.portalUrl) lines.push(ctx.portalUrl);
+    else lines.push(`A secure link could not be included. Contact ${ctx.supportEmail} to book.`);
+    lines.push(
+      '',
+      `This offer is held until ${ctx.extra?.['expires'] ?? 'the date shown on your booking page'}.`,
+      'If none of these times work, reply from your booking page and AutoClarity will send new ones.',
+      footer(ctx),
+    );
+    return {
+      subject: `AutoClarity — your inspection is ready to book (${ctx.ref})`,
+      text: lines.join('\n'),
+    };
+  },
   slots_offered: (ctx: TemplateCtx) => ({
     subject: `AutoClarity — appointment times available (${ctx.ref})`,
     text: ['Appointment windows are ready for you to choose from.', '', ctx.extra?.['slots'] ?? '', '', 'Choose your time here:', ctx.portalUrl ?? '', footer(ctx)].join('\n'),

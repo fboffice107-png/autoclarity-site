@@ -10,6 +10,7 @@
     config: "/api/ppi/runtime-config",
     submit: "/api/ppi/requests",
     vin: "/api/ppi/vin",
+    estimate: "/api/ppi/estimate",
     events: "/api/ppi/events",
     waitlist: "/api/ppi/waitlist",
     upload: "/api/portal/upload"
@@ -555,6 +556,7 @@
       document.getElementById("request").scrollIntoView({ behavior: reducedMotion.matches ? "auto" : "smooth", block: "start" });
     });
 
+    setupModDetails();
     setupVin();
     buildStickyBar(); // Request-only bar; call/text added by applyContact if configured
   }
@@ -570,6 +572,7 @@
     setStatus("");
     if (current === steps.length) {
       buildReview();
+      refreshPackage();
       var slot = intakeShell.querySelector("[data-turnstile]");
       if (staticMode) slot.hidden = true;
       else loadTurnstile(function () { renderTurnstile(slot); });
@@ -618,6 +621,9 @@
       if (vin && /[IOQ]/.test(vin)) fail("vin", "VINs never contain the letters I, O or Q — double-check the character.");
       var url = val("listingUrl");
       if (url && !/^https?:\/\//i.test(url)) fail("listingUrl", "Listing link should start with http(s)://");
+      if (val("modStatus") !== "stock" && val("modDetails").length < 3) {
+        fail("modDetails", "Tell us briefly what was modified (for example: wheels, exhaust, suspension).");
+      }
     }
     if (n === 2) {
       if (!val("locCity")) fail("locCity", "City is required.");
@@ -639,6 +645,22 @@
   function val(name) {
     var el = form.elements[name];
     return el ? String(el.value || "").trim() : "";
+  }
+
+
+  /* "Lightly modified" has to say what was modified — so the field appears the
+     moment it becomes relevant, and disappears when it does not apply. */
+  function setupModDetails() {
+    var select = form.elements.modStatus;
+    var field = document.getElementById("modDetailsField");
+    if (!select || !field) return;
+    function sync() {
+      var relevant = select.value !== "stock";
+      field.hidden = !relevant;
+      if (!relevant && form.elements.modDetails) form.elements.modDetails.value = "";
+    }
+    select.addEventListener("change", sync);
+    sync();
   }
 
   /* ---------- VIN helpers ---------- */
@@ -746,7 +768,7 @@
   }
 
   /* ---------- draft save/resume (user's own device only) ---------- */
-  var FIELDS = ["fullName","email","phone","preferredContact","transactionalConsent","marketingConsent","vin","year","mileage","make","model","trim","askingPrice","expectedPrice","listingUrl","modStatus","warningLights","knownIssues","titleStatus","startsDrives","locStreet","locUnit","locCity","locState","locZip","sellerType","sellerName","sellerPhone","locNotes","liftAvailable","levelSurface","permInspection","permScan","permRoadTest","permPhotos","permUnderbody","ackAccessDependent","decisionTimeline","preferredDates","timeWindow","sameDayPriority","customerNotes"];
+  var FIELDS = ["fullName","email","phone","preferredContact","transactionalConsent","marketingConsent","vin","year","mileage","make","model","trim","askingPrice","expectedPrice","listingUrl","modStatus","modDetails","warningLights","knownIssues","titleStatus","startsDrives","locStreet","locUnit","locCity","locState","locZip","sellerType","sellerName","sellerPhone","locNotes","liftAvailable","levelSurface","permInspection","permScan","permRoadTest","permPhotos","permUnderbody","ackAccessDependent","decisionTimeline","preferredDates","timeWindow","sameDayPriority","customerNotes","selectedTier"];
 
   function createSubmissionKey() {
     try {
@@ -851,6 +873,102 @@
     setDraftControl(false, "");
   }
 
+
+  /* ---------- package + price estimate ----------
+     The customer sees a package and a number before they submit. Both come
+     from /api/ppi/estimate, which runs the same classifier and the same price
+     math as the admin proposal and the Stripe checkout — so this cannot drift
+     from what is actually charged. It is labelled an estimate because the
+     owner still reviews the vehicle before making it an offer. */
+
+  var selectedTier = "";
+  var estimateToken = 0;
+
+  function estimateMoney(cents) {
+    return (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
+  }
+
+  function refreshPackage() {
+    var choice = document.getElementById("packageChoice");
+    if (!choice) return;
+    var token = ++estimateToken;
+    var body = {
+      year: val("year"), make: val("make"), model: val("model"), trim: val("trim"),
+      modStatus: val("modStatus"), modDetails: val("modDetails"),
+      titleStatus: val("titleStatus"), startsDrives: val("startsDrives"),
+      locZip: val("locZip"), selectedTier: selectedTier
+    };
+    requestJson(API.estimate, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body)
+    }, 10000).then(function (r) {
+      if (token !== estimateToken) return; // a newer answer already won
+      if (r.status !== 200 || !r.body || !r.body.ok) { renderPackageFallback(); return; }
+      renderPackage(r.body);
+    }).catch(function () { if (token === estimateToken) renderPackageFallback(); });
+  }
+
+  function renderPackageFallback() {
+    var choice = document.getElementById("packageChoice");
+    if (!choice) return;
+    choice.innerHTML = "";
+    document.getElementById("packageReason").textContent =
+      "We could not check pricing just now. Submitting still works — AutoClarity confirms your exact package and price by email.";
+    document.getElementById("packageEstimate").innerHTML = "";
+    document.getElementById("packageDisclaimer").textContent = "";
+  }
+
+  function renderPackage(data) {
+    if (!selectedTier) selectedTier = data.selectedTier;
+    var hidden = form.elements.selectedTier;
+    if (hidden) hidden.value = selectedTier;
+
+    document.getElementById("packageReason").textContent = data.customerReason || "";
+
+    var choice = document.getElementById("packageChoice");
+    choice.innerHTML = (data.tiers || []).map(function (t) {
+      var picked = t.key === selectedTier;
+      return '<label class="tier-option' + (picked ? " selected" : "") + '">' +
+        '<input type="radio" name="packageTier" value="' + escapeHtml(t.key) + '"' + (picked ? " checked" : "") + ' />' +
+        '<span class="tier-option-name">' + escapeHtml(t.label) + "</span>" +
+        '<span class="tier-option-price">' + escapeHtml(estimateMoney(t.priceCents)) + "</span>" +
+        (t.key === data.suggestedTier ? '<span class="tier-option-flag">Suggested for your vehicle</span>' : "") +
+        '<span class="tier-option-blurb">' + escapeHtml(t.blurb) + "</span></label>";
+    }).join("");
+    choice.querySelectorAll('input[name="packageTier"]').forEach(function (input) {
+      input.addEventListener("change", function () {
+        selectedTier = input.value;
+        saveDraft();
+        refreshPackage();
+      });
+    });
+
+    var notes = [];
+    if (data.mismatch) {
+      notes.push(data.mismatch.direction === "lower"
+        ? "You picked a package below our suggestion. That's fine — AutoClarity checks the vehicle and confirms the final price with you before anything is charged."
+        : "You picked a package above our suggestion. AutoClarity will confirm it is genuinely needed before charging more.");
+    }
+    (data.customerNotes || []).forEach(function (n) { notes.push(n); });
+    document.getElementById("packageNotes").innerHTML = notes.length
+      ? '<div class="notice info"><ul>' + notes.map(function (n) { return "<li>" + escapeHtml(n) + "</li>"; }).join("") + "</ul></div>"
+      : "";
+
+    var rows = (data.lines || []).map(function (l) {
+      return "<tr><td>" + escapeHtml(l.label) + "</td><td>" + escapeHtml(l.display) + "</td></tr>";
+    }).join("");
+    var totalText = data.totalCents
+      ? estimateMoney(data.totalCents)
+      : "AutoClarity will quote travel for this address";
+    document.getElementById("packageEstimate").innerHTML =
+      '<table class="line-items">' + rows +
+      '<tr class="total"><td>Estimated total</td><td>' + escapeHtml(totalText) + "</td></tr></table>" +
+      (data.travel && data.travel.basisLabel ? '<p class="field-hint">' + escapeHtml(data.travel.basisLabel) + "</p>" : "");
+
+    document.getElementById("packageDisclaimer").textContent = data.disclaimer || "";
+  }
+
   /* ---------- review + submit ---------- */
   function buildReview() {
     var card = document.getElementById("reviewCard");
@@ -867,7 +985,7 @@
     }).join("");
     var tierEl = document.getElementById("reviewTier");
     if (tierEl) {
-      tierEl.innerHTML = "Pricing review: <strong>AutoClarity confirms the vehicle tier</strong> after reviewing the vehicle, location and scope. Your approved quote shows the exact price and any travel charge before you accept or pay.";
+      tierEl.innerHTML = "Submitting is free and charges nothing. AutoClarity reviews the vehicle, confirms the package above, and emails you one link with the exact price and available appointment times.";
     }
   }
 
@@ -1080,9 +1198,9 @@
   }
 
   var STEP_OF_FIELD = {
-    fullName: 1, email: 1, phone: 1, year: 1, make: 1, model: 1, vin: 1, listingUrl: 1,
+    fullName: 1, email: 1, phone: 1, year: 1, make: 1, model: 1, vin: 1, listingUrl: 1, modDetails: 1,
     locCity: 2, locZip: 2, locState: 2,
-    transactionalConsent: 4, ackAccessDependent: 4
+    transactionalConsent: 4, ackAccessDependent: 4, selectedTier: 4
   };
   function earliestStepFor(fields) {
     var min = 0;

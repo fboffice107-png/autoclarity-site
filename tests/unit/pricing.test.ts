@@ -19,6 +19,13 @@ describe('production public-fact config gate', () => {
   it('identifies runtime patches that would drift visible and machine-readable facts', () => {
     expect(patchTouchesPublicFacts({ pricing: { launch: { enabled: true } } })).toBe(true);
     expect(patchTouchesPublicFacts({ travel: { customBeyondMiles: 50 } })).toBe(true);
+    expect(patchTouchesPublicFacts({ travel: { bands: [{ maxMiles: 10, feeCents: 0 }] } })).toBe(true);
+    // The service origin is never published, so the owner can set a precise
+    // operating address at runtime instead of committing it to a public repo.
+    expect(patchTouchesPublicFacts({ travel: { originLat: 36.1, originLng: -115.3 } })).toBe(false);
+    expect(patchTouchesPublicFacts({ travel: { originLabel: 'Service base' } })).toBe(false);
+    // ...but mixing a private field with a published one still gates.
+    expect(patchTouchesPublicFacts({ travel: { originLat: 36.1, customBeyondMiles: 50 } })).toBe(true);
     expect(patchTouchesPublicFacts({ supportEmail: 'other@example.com' })).toBe(true);
     expect(patchTouchesPublicFacts({ scheduling: { holdMinutes: 45 } })).toBe(false);
     expect(patchTouchesPublicFacts(null)).toBe(false);

@@ -72,10 +72,28 @@ All money values are **cents**. Common edits:
   each tier's lower `launchPriceCents` as needed. The legacy Standard-only
   `pricing.promo` path also requires a real future `endsAt`; either active path
   is reflected on the public page and in the server-owned quote suggestion.
-- Travel: `travel.bands` (`maxMiles`/`feeCents`). The origin is the AutoClarity
-  service base (ZIP 89147 centroid, `travel.originLat/originLng`). It stays
-  server-side — customers only ever see the derived mileage and band, never the
-  coordinates — and it is a ZIP centroid rather than the exact street address.
+- Travel: `travel.bands` (`maxMiles`/`feeCents`) are published facts and must
+  change in source, not at runtime.
+- **Travel origin — where distances are measured from.** The shipped default is
+  the ZIP 89147 centroid, accurate to a mile or two. Your exact operating
+  address is deliberately NOT in this repository: the repository is public, so
+  committing a street address would publish it permanently.
+
+  To measure from your exact address instead, set it here in the Configuration
+  tab — it is stored in the private database, never in source:
+
+  ```json
+  { "travel": { "originLat": 36.1234, "originLng": -115.2345 } }
+  ```
+
+  Get the two numbers by dropping a pin on your address in any maps app and
+  copying the latitude/longitude it shows. Customers never see these values:
+  `/api/ppi/runtime-config` publishes only the bands, and a quote shows only
+  the derived mileage and which band it fell in. A distance that lands within
+  two miles of a band edge is flagged for you to confirm before you send.
+
+  Origin fields are the one part of `travel` you can edit in production,
+  precisely because they are not published anywhere.
 - Schedule: `scheduling.slotTemplates`, `daysOfOperation` (0=Sun…6=Sat),
   `blackoutDates: ["2026-12-25"]`, `minLeadHours`, `holdMinutes`.
 - Quote expiry: `quotes.expiryHours` (48 by default).

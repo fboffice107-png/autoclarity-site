@@ -64,9 +64,12 @@ export interface PpiConfig {
     // reflects the real drive, rather than a downtown placeholder that
     // over-charged the west valley and under-charged the east.
     //
-    // PRIVACY: this is the ZIP centroid, not the street address, and it is
-    // never included in /api/ppi/runtime-config or any customer-facing
-    // payload — only the derived mileage and band are shown.
+    // PRIVACY: this repository is public, so the default here is a ZIP
+    // centroid and never a street address. The owner can store exact
+    // coordinates through the admin Configuration tab instead, where they
+    // live in the private database. Either way the origin is never included
+    // in /api/ppi/runtime-config, the generated public facts, or any
+    // customer-facing payload — only the derived mileage and band are shown.
     originLat: number;
     originLng: number;
     /** Admin-facing label for where distances are measured from. */
@@ -116,11 +119,28 @@ export class ConfigValidationError extends Error {
 
 const PUBLIC_FACT_CONFIG_KEYS = new Set(['pricing', 'fees', 'travel', 'supportEmail']);
 
+/** Fields of `travel` that never appear in visible HTML, generated public
+ * facts, or any customer-facing payload. The service origin is one of them:
+ * customers only ever see the derived mileage and the band it falls in, so
+ * changing it cannot make published copy stale — and keeping it editable at
+ * runtime is what lets the owner set a precise operating address without
+ * committing it to a public repository. */
+const PRIVATE_TRAVEL_KEYS = new Set(['originLat', 'originLng', 'originLabel']);
+
 /** These values are repeated in visible HTML and generated public facts.
  * Production changes therefore require a coordinated source change/build, not
  * a runtime-only admin override that would make JSON-LD/catalog copy stale. */
 export function patchTouchesPublicFacts(patch: unknown): boolean {
-  return isPlainObject(patch) && Object.keys(patch).some((key) => PUBLIC_FACT_CONFIG_KEYS.has(key));
+  if (!isPlainObject(patch)) return false;
+  return Object.entries(patch).some(([key, value]) => {
+    if (!PUBLIC_FACT_CONFIG_KEYS.has(key)) return false;
+    // `travel` holds both published bands and the private origin. Gate it only
+    // when the patch actually reaches a published field.
+    if (key === 'travel' && isPlainObject(value)) {
+      return Object.keys(value).some((child) => !PRIVATE_TRAVEL_KEYS.has(child));
+    }
+    return true;
+  });
 }
 
 export const DEFAULT_CONFIG: PpiConfig = {

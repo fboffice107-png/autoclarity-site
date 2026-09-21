@@ -69,11 +69,43 @@ describe('premium visual and interaction safeguards', () => {
     for (const page of [adminPage, portalPage]) {
       expect(page).not.toContain('ac-visual-20260913-r1');
     }
-    for (const source of sources) {
-      const fingerprints = source.match(/ac-(?:prod|ai)-\d{8}-r\d+/gu) ?? [];
-      expect(fingerprints.length).toBeGreaterThan(0);
-      expect(new Set(fingerprints)).toEqual(new Set(['ac-ai-20260911-r1']));
+    // The booking-flow release rewrote four public assets. Each gets a new
+    // fingerprint so a returning visitor cannot run cached JS against new
+    // markup; everything untouched keeps its old one so cached copies stay
+    // valid. Bump only what actually changed.
+    const BOOKING_ASSETS = [
+      'assets/css/ppi.css',
+      'assets/js/ppi-form.js',
+      'assets/js/ppi-portal.js',
+      'assets/js/ppi-admin.js',
+    ];
+    for (const page of [ppiPage, adminPage, portalPage]) {
+      for (const asset of BOOKING_ASSETS) {
+        if (!page.includes(asset)) continue;
+        expect(page).toContain(`${asset}?v=ac-book-20260921-r1`);
+        expect(page).not.toContain(`${asset}?v=ac-ai-20260911-r1`);
+      }
     }
+    // Assets this release did not touch must NOT be re-fingerprinted.
+    for (const untouched of ['assets/js/ppi-report-view.js', 'assets/css/ppi-report.css']) {
+      for (const page of [adminPage, portalPage]) {
+        if (!page.includes(untouched)) continue;
+        expect(page).toContain(`${untouched}?v=ac-ai-20260911-r1`);
+      }
+    }
+    // Every reference still carries a known, current fingerprint — no source
+    // may invent a third scheme or leave an asset unversioned.
+    const KNOWN = new Set(['ac-ai-20260911-r1', 'ac-book-20260921-r1']);
+    for (const source of sources) {
+      const fingerprints = source.match(/ac-(?:prod|ai|book)-\d{8}-r\d+/gu) ?? [];
+      expect(fingerprints.length).toBeGreaterThan(0);
+      for (const fingerprint of fingerprints) expect(KNOWN).toContain(fingerprint);
+    }
+    // The backend build fingerprint itself is unchanged: this release ships no
+    // new public facts, so the discovery documents must not claim a new build.
+    const [, headers, middleware] = sources;
+    expect(headers).toContain('X-AutoClarity-Build: ac-ai-20260911-r1');
+    expect(middleware).toContain('ac-ai-20260911-r1');
   });
 
   it('keeps the homepage desktop navigation focused and ordered', () => {

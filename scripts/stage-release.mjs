@@ -58,8 +58,10 @@ function inventory(dir) {
 }
 inventory(publicDir);
 const migrations = [];
-const migrationPaths = sourceFiles.filter(p => /^migrations\/00(?:09|10|11|12)_.*\.sql$/.test(p));
-const expectedMigrations = ['migrations/0009_request_attribution.sql', 'migrations/0010_lead_classification.sql', 'migrations/0011_report_fulfillment_integrity.sql', 'migrations/0012_agreement_acceptance_integrity.sql'];
+// The migrations THIS release adds on top of what production already has
+// (0001-0012 applied). Update both lines together when a release adds one.
+const migrationPaths = sourceFiles.filter(p => /^migrations\/0014_.*\.sql$/.test(p));
+const expectedMigrations = ['migrations/0014_booking_proposal_flow.sql'];
 if (JSON.stringify(migrationPaths) !== JSON.stringify(expectedMigrations)) throw Error('Unexpected final migration set.');
 for (const path of migrationPaths) {
   const bytes = git('show', `${expected}:${path}`);

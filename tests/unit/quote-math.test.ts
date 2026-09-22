@@ -133,3 +133,16 @@ describe('travel origin', () => {
     expect(config.travel.originLabel).toContain('89147');
   });
 });
+
+describe('what the customer is told about travel', () => {
+  it('says travel is included without disclosing how far away they are', async () => {
+    const { travelSentence } = await import('../../functions/lib/booking-proposal.ts');
+    expect(travelSentence(0, 3.6)).toBe('Travel to the vehicle is included.');
+    expect(travelSentence(0, null)).toBe('Travel to the vehicle is included.');
+    // The distance would tell them roughly where the business is based.
+    expect(travelSentence(0, 3.6)).not.toContain('3.6');
+    expect(travelSentence(2500, 18.4)).not.toContain('18.4');
+    expect(travelSentence(2500, 18.4)).toContain('$25.00');
+    expect(travelSentence(null, null)).toContain('quoted individually');
+  });
+});

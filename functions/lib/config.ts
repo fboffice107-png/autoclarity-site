@@ -221,7 +221,10 @@ export const DEFAULT_CONFIG: PpiConfig = {
     reportBufferMin: 60,
     daysOfOperation: [1, 2, 3, 4, 5, 6],
     blackoutDates: [],
-    minLeadHours: 18,
+    // No minimum notice by owner decision: any free hour inside the operating
+    // window is bookable, including later today. A slot already in the past is
+    // still refused everywhere (the checks use `now` as the floor).
+    minLeadHours: 0,
     maxAdvanceDays: 21,
     holdMinutes: 60,
   },

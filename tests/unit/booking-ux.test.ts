@@ -129,8 +129,16 @@ describe('admin — one primary action before booking', () => {
     const start = adminScript.indexOf('function offerableDays(draftCfg)');
     const body = adminScript.slice(start, adminScript.indexOf('function slateInstants', start));
     expect(body).toContain('daysOfOperation');
-    expect(body).toContain('minLeadHours');
+    expect(body).toContain('leadHours(draftCfg)');
     expect(body).toContain('maxAdvanceDays');
+  });
+
+  it('treats a configured zero notice period as real, not as unset', () => {
+    // `cfg.minLeadHours || 18` would silently restore an 18-hour rule the
+    // owner had deliberately removed.
+    expect(adminScript).toContain('function leadHours(draftCfg)');
+    expect(adminScript).toContain('Number.isFinite(v) && v >= 0 ? v : 18');
+    expect(adminScript).not.toMatch(/minLeadHours \|\| 18/u);
   });
 
   it('drops a slate time that stops clearing the notice period before Send', () => {

@@ -548,12 +548,15 @@
       "T" + pad(d.getHours()) + ":" + pad(d.getMinutes());
   }
 
-  /** The next operating date in Las Vegas that clears the minimum lead time. */
-  function nextOfferDate(minLeadHours) {
-    var target = new Date(Date.now() + (Number(minLeadHours) || 18) * 3600000 + 3600000);
-    return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(target);
-  }
 
+
+
+  /* A configured 0 is a real value, not "unset". Written out because
+     a falsy-OR default would silently restore the old 18-hour rule. */
+  function leadHours(draftCfg) {
+    var v = Number(draftCfg && draftCfg.minLeadHours);
+    return Number.isFinite(v) && v >= 0 ? v : 18;
+  }
 
   /* Every hour the business will consider offering. The owner ticks a subset;
      nothing here is offered unless it is ticked. */
@@ -565,7 +568,7 @@
   /* The days a proposal may legally offer: past the minimum notice, inside the
      advance window, and on a day the business operates. */
   function offerableDays(draftCfg) {
-    var lead = Number(draftCfg.minLeadHours || 18);
+    var lead = leadHours(draftCfg);
     var maxAdvance = Number(draftCfg.maxAdvanceDays || 21);
     var operating = draftCfg.daysOfOperation || [1, 2, 3, 4, 5, 6];
     var out = [];
@@ -591,7 +594,7 @@
   /* Every ticked day x every ticked hour, as ISO instants, minus anything that
      no longer clears the lead time by the moment Send is pressed. */
   function slateInstants(section, draftCfg) {
-    var lead = Number(draftCfg.minLeadHours || 18);
+    var lead = leadHours(draftCfg);
     var floor = Date.now() + lead * 3600000 - 60000;
     var days = [].slice.call(section.querySelectorAll("[data-day]")).filter(function (b) { return b.checked; });
     var hours = [].slice.call(section.querySelectorAll("[data-hour]")).filter(function (b) { return b.checked; });
@@ -692,7 +695,8 @@
     html += '<h3>When can he come?</h3>' +
       '<p class="field-hint">Tick the days and the times. He picks one; the rest are released automatically. ' +
       'Las Vegas time, earliest ' + esc(days.length ? days[0].label : "—") +
-      ' (' + esc(draftCfg.minLeadHours || 18) + 'h notice), latest ' + esc(days.length ? days[days.length - 1].label : "—") + '.</p>';
+      (leadHours(draftCfg) > 0 ? ' (' + esc(leadHours(draftCfg)) + 'h notice)' : '') +
+      ', latest ' + esc(days.length ? days[days.length - 1].label : "—") + '.</p>';
 
     html += '<div class="slate"><div class="slate-group"><span class="slate-label">Days</span><div class="slate-chips">';
     days.forEach(function (d) {

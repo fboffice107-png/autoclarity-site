@@ -61,7 +61,9 @@ export async function validateSlotTimes(
     seen.add(startIso);
 
     if (start.getTime() < now + config.scheduling.minLeadHours * 3600_000 - 60_000) {
-      skipped.push(`${label} — in the past or inside the ${config.scheduling.minLeadHours}-hour lead time`);
+      skipped.push(config.scheduling.minLeadHours > 0
+        ? `${label} — in the past or inside the ${config.scheduling.minLeadHours}-hour lead time`
+        : `${label} — that time has already passed`);
       continue;
     }
     if (start.getTime() > now + config.scheduling.maxAdvanceDays * 86_400_000 + 60_000) {
@@ -183,12 +185,10 @@ export function defaultProposalMessage(input: {
 
 export function travelSentence(feeCents: number | null, miles: number | null): string {
   if (feeCents === null) return 'Travel for this location is quoted individually and is shown in your total.';
-  if (feeCents === 0) {
-    if (miles === null || miles < 1) return 'Travel to the vehicle is included.';
-    return `Travel is included — the vehicle is about ${miles} miles from AutoClarity.`;
-  }
+  // Deliberately no distance: "about N miles from AutoClarity" tells the
+  // customer roughly where the business is based, and the only fact they need
+  // is whether they are being charged for travel.
+  if (feeCents === 0) return 'Travel to the vehicle is included.';
   const amount = (feeCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
-  return miles === null
-    ? `A ${amount} mobile-service charge applies and is already in your total.`
-    : `The vehicle is about ${miles} miles out, so a ${amount} mobile-service charge is included in your total.`;
+  return `A ${amount} mobile-service charge for this location is already included in your total.`;
 }

@@ -113,6 +113,15 @@ describe('suggestTier', () => {
   });
 });
 
+describe('scheduling policy', () => {
+  it('imposes no minimum notice — any free hour is bookable', () => {
+    expect(DEFAULT_CONFIG.scheduling.minLeadHours).toBe(0);
+  });
+  it('still bounds how far ahead a time may be offered', () => {
+    expect(DEFAULT_CONFIG.scheduling.maxAdvanceDays).toBeGreaterThan(0);
+  });
+});
+
 describe('travel fees', () => {
   it('applies the configured bands', () => {
     expect(travelFeeForMiles(0, DEFAULT_CONFIG).feeCents).toBe(0);

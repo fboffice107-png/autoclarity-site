@@ -269,18 +269,21 @@ describe('booking proposal — one owner action, one customer decision', () => {
 
   it('refuses to save a proposal whose times are all unusable, and says why', async () => {
     const requestId = await submitAndFind(corollaIntake());
+    // There is no minimum notice any more, so only a time that has actually
+    // passed — or one beyond the advance window — is unusable.
     const past = new Date(Date.now() - 86_400_000).toISOString();
-    const tooSoon = new Date(Date.now() + 3600_000).toISOString();
+    const tooFar = new Date(Date.now() + 400 * 86_400_000).toISOString();
 
     const r = await adminPost(requestId, {
       action: 'send_booking_proposal',
       tier: 'standard',
-      slots: [past, tooSoon],
+      slots: [past, tooFar],
       proposalKey: `unusable-proposal-${seq}`,
     });
     expect(r.status).toBe(422);
     expect(r.body.error.code).toBe('no_usable_times');
-    expect(r.body.error.skipped.join(' ')).toContain('lead time');
+    expect(r.body.error.skipped.join(' ')).toContain('already passed');
+    expect(r.body.error.skipped.join(' ')).toContain('scheduling window');
 
     // Nothing was written: no quote, no times, no email, no status change.
     const after = await get(`/api/admin/requests/${requestId}`, admin);
@@ -458,6 +461,27 @@ describe('booking proposal — one owner action, one customer decision', () => {
     const afterSettled = await get('/api/portal', portal);
     expect(afterSettled.body.status).toBe('awaiting_agreement');
     expect(afterSettled.body.payment.status).toBe('succeeded');
+  });
+
+  it('can offer a time later today now that there is no minimum notice', async () => {
+    const requestId = await submitAndFind(corollaIntake());
+    const soon = new Date(Date.now() + 90 * 60_000).toISOString();
+    const r = await adminPost(requestId, {
+      action: 'send_booking_proposal',
+      tier: 'standard',
+      slots: [soon],
+      proposalKey: `sameday-proposal-${seq}`,
+    });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body.offeredSlots).toBe(1);
+
+    // And the customer can actually take it.
+    const link = await adminPost(requestId, { action: 'reissue_link' });
+    const portal = { authorization: `Bearer ${new URL(link.body.url).searchParams.get('t')}` };
+    const view = await get('/api/portal', portal);
+    const slot = view.body.slots.find((s: Json) => s.status === 'offered');
+    const held = await post('/api/portal/action', { action: 'select_slot', slotId: slot.id }, portal);
+    expect(held.status, JSON.stringify(held.body)).toBe(200);
   });
 
   it('offers a full hourly slate in one action, and the customer picks one', async () => {

@@ -55,6 +55,8 @@ export interface AddonInput {
 export interface PriceInput {
   tier: Tier;
   config: PpiConfig;
+  /** Charge the configured same-day priority fee on this quote. */
+  sameDayPriority?: boolean;
   /** Explicit base override in cents; falls back to the configured tier price. */
   baseCentsOverride?: number | null;
   travelMiles?: number | null;
@@ -175,7 +177,15 @@ export function buildPriceBreakdown(input: PriceInput): PriceBreakdown {
     );
   }
 
-  const addons = (input.addons ?? []).filter(
+  // Same-day priority is a real add-on, so it rides the same line-item path as
+  // any other: itemised for the customer, counted in the total, and stored on
+  // the quote. It was configurable long before this, but nothing ever added it
+  // to a price — the setting did nothing.
+  const sameDayCents = input.sameDayPriority ? config.fees.sameDayPriorityCents : 0;
+  const addons = [
+    ...(sameDayCents > 0 ? [{ label: 'Same-day priority', amountCents: sameDayCents }] : []),
+    ...(input.addons ?? []),
+  ].filter(
     (a) => a.label.trim() && Number.isSafeInteger(a.amountCents) && a.amountCents > 0 && a.amountCents <= 500_000,
   );
   for (const addon of addons) {

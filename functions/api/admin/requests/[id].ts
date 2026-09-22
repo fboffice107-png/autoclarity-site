@@ -19,6 +19,7 @@ import {
   recordProposalNotification,
   travelSentence,
   validateSlotTimes,
+  hasSameDaySlot,
   MAX_OFFERED_SLOTS,
   type BookingProposalRow,
   type SlotCandidate,
@@ -417,9 +418,13 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   });
   const customerTier = req['customer_selected_tier'];
   const proposalTier = isTier(customerTier) ? customerTier : suggestion.tier;
+  // Pre-tick the fee when the customer asked for same-day priority; the owner
+  // still decides, because only they know whether they can actually go today.
+  const sameDayRequested = Number(req['same_day_priority'] ?? 0) === 1;
   const draftBreakdown = buildPriceBreakdown({
     tier: proposalTier,
     config,
+    sameDayPriority: sameDayRequested && config.fees.sameDayPriorityCents > 0,
     travelMiles: (req['travel_miles'] as number | null) ?? null,
     travelBasis: req['travel_miles'] === null || req['travel_miles'] === undefined ? 'unknown' : 'zip_centroid',
   });
@@ -454,6 +459,9 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       travel: draftBreakdown.travel,
       travelOriginLabel: config.travel.originLabel,
       reviewNotes: draftBreakdown.reviewNotes,
+      sameDayRequested,
+      sameDayPriority: sameDayRequested && config.fees.sameDayPriorityCents > 0,
+      sameDayPriorityCents: config.fees.sameDayPriorityCents,
       quoteExpiryHours: config.quotes.expiryHours,
       slotTemplates: config.scheduling.slotTemplates,
       daysOfOperation: config.scheduling.daysOfOperation,
@@ -514,6 +522,10 @@ interface AdminActionBody {
   proposalId?: string;
   vehicleLabel?: string;
   recordKind?: string;
+  sameDayPriority?: boolean;
+  offlineNote?: string;
+  collectedAt?: string;
+  label?: string;
 }
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
@@ -890,6 +902,150 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     // The owner's judgement overrides the automatic classification in both
     // directions: a fixture that turned into a real job, or a real-looking
     // record that was actually a rehearsal.
+    // Money that arrived outside Stripe — cash at the car, Zelle, a transfer
+    // arranged over text. Without this, a real paid job had nowhere to live:
+    // the request sat at "submitted" forever and the revenue was missing from
+    // every figure the owner reads.
+    //
+    // It writes the same shapes a Stripe job writes — a committed quote, a
+    // booking, a payment, the confirmation event — so the dashboard, the
+    // revenue window and the customer's portal all read it as the real job it
+    // was. What it does NOT write is any Stripe identity, any agreement
+    // acceptance, or any report delivery: those are evidence of things that
+    // either happened or did not, and inventing them would put a lie where
+    // support, a refund or a dispute would later look.
+    case 'record_offline_payment': {
+      const now = nowIso();
+      const amountCents = Number(body.amountCents);
+      if (!Number.isSafeInteger(amountCents) || amountCents <= 0 || amountCents > 5_000_000) {
+        return errorJson('validation', 'Enter the amount actually collected, in dollars.', 422);
+      }
+      const suggestedRow = await db
+        .prepare(`SELECT suggested_tier FROM ppi_requests WHERE id = ?`)
+        .bind(id)
+        .first<{ suggested_tier: string | null }>();
+      const tier = String(body.tier ?? suggestedRow?.suggested_tier ?? 'standard');
+      if (!isTier(tier)) return errorJson('validation', 'Choose a valid package.', 422);
+
+      // How it was paid, in the owner's words. Required, because "paid" with no
+      // idea how is exactly the record nobody can reconcile a month later.
+      const method = clampStr(body.offlineNote, 200);
+      if (!method) {
+        return errorJson('validation', 'Say how the money was collected (for example "Zelle" or "cash at the vehicle").', 422);
+      }
+
+      // One payment per request through this path. Re-recording would double
+      // the revenue figures, which is the failure that matters most here.
+      const existingPayment = await db
+        .prepare(`SELECT id FROM payments WHERE request_id = ? LIMIT 1`)
+        .bind(id)
+        .first<{ id: string }>();
+      if (existingPayment) {
+        return errorJson('wrong_state', 'This request already has a payment recorded against it.', 409);
+      }
+      if (status === 'disputed' || status === 'refunded' || status === 'refund_reconciliation_needed') {
+        return errorJson('wrong_state', 'A disputed or refunded request cannot have a payment recorded against it.', 409);
+      }
+
+      // When the money actually arrived. It drives the revenue window, so a
+      // wrong date puts real income in the wrong month.
+      const collectedAt = typeof body.collectedAt === 'string' && !Number.isNaN(Date.parse(body.collectedAt))
+        ? new Date(body.collectedAt).toISOString()
+        : now;
+
+      const label = clampStr(body.label, 120) || `${config.pricing.tiers[tier].label} pre-purchase inspection`;
+      const quoteId = newId('qot');
+      const bookingId = newId('bkg');
+      const paymentId = newId('pay');
+      const versionRow = await db
+        .prepare(`SELECT COALESCE(MAX(version), 0) AS v FROM quotes WHERE request_id = ?`)
+        .bind(id)
+        .first<{ v: number }>();
+      const version = (versionRow?.v ?? 0) + 1;
+
+      // A single base line for the agreed amount. Splitting it into an invented
+      // package price plus an invented travel fee would state a mileage band
+      // that was never measured; one line says only what is known — the price
+      // agreed and collected.
+      try {
+        await db.batch([
+          db.prepare(`UPDATE quotes SET status = 'superseded', updated_at = ? WHERE request_id = ? AND status IN ('draft','sent')`).bind(now, id),
+          db.prepare(
+            `INSERT INTO quotes (id, request_id, version, status, tier, currency, subtotal_cents, travel_cents, addons_cents, discount_cents, total_cents,
+                                 expires_at, admin_note_internal, approved_by, created_at, updated_at)
+             VALUES (?, ?, ?, 'draft', ?, 'usd', ?, 0, 0, 0, ?, ?, ?, ?, ?, ?)`,
+          ).bind(
+            quoteId, id, version, tier, amountCents, amountCents,
+            // This quote is a record of a price already agreed and paid, not an
+            // open offer, so it is never valid past the moment it was settled.
+            collectedAt,
+            `Recorded from a payment collected outside Stripe: ${method}`,
+            actor, collectedAt, now,
+          ),
+          db.prepare(`INSERT INTO quote_line_items (id, quote_id, kind, label, amount_cents, sort) VALUES (?, ?, 'base', ?, ?, 0)`)
+            .bind(newId('qli'), quoteId, label, amountCents),
+          db.prepare(`UPDATE quotes SET status = 'accepted', updated_at = ? WHERE id = ? AND status = 'draft'`).bind(now, quoteId),
+          // No slot: the exact appointment window was never recorded in this
+          // system, and inventing one would put a time on the calendar that
+          // nobody ever agreed to.
+          db.prepare(
+            `INSERT INTO bookings (id, request_id, quote_id, slot_id, status, confirmed_at, created_at, updated_at)
+             VALUES (?, ?, ?, NULL, 'confirmed', ?, ?, ?)`,
+          ).bind(bookingId, id, quoteId, collectedAt, collectedAt, now),
+          db.prepare(
+            `INSERT INTO payments (id, request_id, quote_id, booking_id, stripe_session_id, stripe_payment_intent,
+                                   amount_cents, currency, status, refunded_cents, method, offline_note, created_at, updated_at)
+             VALUES (?, ?, ?, ?, NULL, NULL, ?, 'usd', 'succeeded', 0, 'offline', ?, ?, ?)`,
+          ).bind(paymentId, id, quoteId, bookingId, amountCents, method, collectedAt, now),
+          // The revenue window counts payments that carry this event, so
+          // without it the money would be recorded but never reported.
+          db.prepare(
+            `INSERT OR IGNORE INTO analytics_events (id, event, step, source, created_at)
+             VALUES (?, 'ppi_payment_confirmed', 'workflow', ?, ?)`,
+          ).bind(`ev_payment_${paymentId}`, req.attribution_source || 'ppi_offline', collectedAt),
+        ]);
+      } catch (e) {
+        return errorJson('offline_payment_write_failed', `The payment could not be recorded: ${String(e)}`, 409);
+      }
+
+      // Walk the normal path rather than jumping the state machine, so this
+      // request's history reads like any other job's and every step is audited.
+      const path: Status[] = [
+        'ready_for_review', 'quote_prepared', 'quote_sent',
+        'awaiting_time_selection', 'awaiting_agreement', 'awaiting_payment', 'confirmed',
+      ];
+      let walkFrom: Status = status;
+      const walked: Status[] = [];
+      for (const step of path) {
+        if (walkFrom === step) continue;
+        if (!canTransition(walkFrom, step)) continue;
+        if (await applyStatus(db, id, walkFrom, step, actor, `Recording a job paid outside Stripe (${method})`)) {
+          walked.push(step);
+          walkFrom = step;
+        }
+      }
+
+      await auditLog(db, actor, 'record_offline_payment', 'ppi_request', id, {
+        paymentId, quoteId, bookingId, amountCents, method, collectedAt,
+        statusFrom: status, statusTo: walkFrom, walked,
+      });
+
+      return json({
+        ok: true,
+        paymentId,
+        quoteId,
+        bookingId,
+        amountCents,
+        amountLabel: formatCents(amountCents),
+        collectedAt,
+        status: walkFrom,
+        // Said plainly so it is never mistaken for a delivered inspection.
+        completionNote: walkFrom === 'confirmed'
+          ? 'Recorded as paid and confirmed. Marking it completed needs this request\'s inspection report published and delivered.'
+          : 'Recorded as paid.',
+      });
+    }
+
     case 'set_record_kind': {
       const kind = String(body.recordKind ?? '');
       if (!isRecordKind(kind)) return errorJson('validation', 'Choose either real or test.', 422);
@@ -929,9 +1085,16 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     case 'price_preview': {
       const tier = String(body.tier ?? '');
       if (!isTier(tier)) return errorJson('validation', 'Choose a valid package.', 422);
+      // Preview against the same times the send will use, so the total shown
+      // on the button is the total the customer is charged.
+      const previewSlots = (Array.isArray(body.slots) ? body.slots : [])
+        .map((s) => (typeof s === 'string' ? s : String((s as { startsAt?: unknown })?.startsAt ?? '')))
+        .filter(Boolean);
       const breakdown = buildPriceBreakdown({
         tier,
         config,
+        sameDayPriority:
+          body.sameDayPriority === true && hasSameDaySlot(previewSlots, config.scheduling.timezone),
         baseCentsOverride: Number.isSafeInteger(body.basePriceCents) ? (body.basePriceCents as number) : null,
         travelMiles: req.travel_miles,
         travelBasis: req.travel_miles === null ? 'unknown' : 'zip_centroid',
@@ -1001,9 +1164,33 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       const tier = String(body.tier ?? '');
       if (!isTier(tier)) return errorJson('validation', 'Choose a valid package.', 422);
 
+      // Times are validated BEFORE anything is written. A proposal without
+      // times is the exact dead end this action exists to prevent, so an
+      // empty result saves nothing at all.
+      const slotInput = Array.isArray(body.slots) ? body.slots : [];
+      const slotCheck = await validateSlotTimes(db, id, slotInput, config);
+      if (slotCheck.valid.length === 0) {
+        return errorJson(
+          'no_usable_times',
+          'None of those times can be offered, so nothing was sent. Pick different times and try again.',
+          422,
+          { skipped: slotCheck.skipped },
+        );
+      }
+
+      // The intake page promises the same-day fee applies only when the
+      // appointment really is today, so it is dropped unless one of the times
+      // being offered falls on today's date in Las Vegas.
+      const sameDayOffered = hasSameDaySlot(
+        slotCheck.valid.map((s) => s.startsAt),
+        config.scheduling.timezone,
+      );
+      const sameDayPriority = body.sameDayPriority === true && sameDayOffered;
+
       const breakdown = buildPriceBreakdown({
         tier,
         config,
+        sameDayPriority,
         baseCentsOverride: Number.isSafeInteger(body.basePriceCents) ? (body.basePriceCents as number) : null,
         travelMiles: req.travel_miles,
         travelBasis: req.travel_miles === null ? 'unknown' : 'zip_centroid',
@@ -1026,20 +1213,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         totals = computeQuoteTotals(breakdown.quoteLines);
       } catch {
         return errorJson('validation', 'Those amounts do not produce one positive, exact total in whole cents.', 422);
-      }
-
-      // Times are validated BEFORE anything is written. A proposal without
-      // times is the exact dead end this action exists to prevent, so an
-      // empty result saves nothing at all.
-      const slotInput = Array.isArray(body.slots) ? body.slots : [];
-      const slotCheck = await validateSlotTimes(db, id, slotInput, config);
-      if (slotCheck.valid.length === 0) {
-        return errorJson(
-          'no_usable_times',
-          'None of those times can be offered, so nothing was sent. Pick different times and try again.',
-          422,
-          { skipped: slotCheck.skipped },
-        );
       }
 
       // Take ownership of the request first; this compare-and-swap is what
@@ -1159,6 +1332,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         version,
         totalCents: totals.totalCents,
         offeredSlots: slotCheck.valid.length,
+        sameDayPriority,
+        sameDayFeeDropped: body.sameDayPriority === true && !sameDayOffered,
         skipped: slotCheck.skipped,
         notification: {
           messageId: emailResult.id,

@@ -60,8 +60,8 @@ inventory(publicDir);
 const migrations = [];
 // The migrations THIS release adds on top of what production already has
 // (0001-0012 applied). Update both lines together when a release adds one.
-const migrationPaths = sourceFiles.filter(p => /^migrations\/001[456]_.*\.sql$/.test(p));
-const expectedMigrations = ['migrations/0014_booking_proposal_flow.sql', 'migrations/0015_open_availability.sql', 'migrations/0016_record_kind.sql'];
+const migrationPaths = sourceFiles.filter(p => /^migrations\/001[4567]_.*\.sql$/.test(p));
+const expectedMigrations = ['migrations/0014_booking_proposal_flow.sql', 'migrations/0015_open_availability.sql', 'migrations/0016_record_kind.sql', 'migrations/0017_offline_payments.sql'];
 if (JSON.stringify(migrationPaths) !== JSON.stringify(expectedMigrations)) throw Error('Unexpected final migration set.');
 for (const path of migrationPaths) {
   const bytes = git('show', `${expected}:${path}`);
@@ -69,6 +69,6 @@ for (const path of migrationPaths) {
   writeFileSync(join(output, path), bytes);
   migrations.push({ path, sha256: hash(bytes) });
 }
-const manifest = { commit: expected, tree: git('rev-parse', `${expected}^{tree}`).toString().trim(), build: 'ac-ai-20260911-r1', compilerVersions, publicDirectory: publicDir, files, staticSources: sources, functionSources: sourceFiles.filter(p => p.startsWith('functions/')).map(path => ({ path, sha256: hash(git('show', `${expected}:${path}`)) })), migrations, warning: 'LOCAL ARTIFACT ONLY. No deployment or production migration has occurred.' };
+const manifest = { commit: expected, tree: git('rev-parse', `${expected}^{tree}`).toString().trim(), build: 'ac-fee-20260922-r1', compilerVersions, publicDirectory: publicDir, files, staticSources: sources, functionSources: sourceFiles.filter(p => p.startsWith('functions/')).map(path => ({ path, sha256: hash(git('show', `${expected}:${path}`)) })), migrations, warning: 'LOCAL ARTIFACT ONLY. No deployment or production migration has occurred.' };
 writeFileSync(join(output, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 console.log(JSON.stringify({ commit: expected, publicFiles: files.length, migrations: migrations.length, manifest: join(output, 'manifest.json'), manifestSha256: hash(readFileSync(join(output, 'manifest.json'))) }, null, 2));

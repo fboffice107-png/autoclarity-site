@@ -192,3 +192,24 @@ export function travelSentence(feeCents: number | null, miles: number | null): s
   const amount = (feeCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
   return `A ${amount} mobile-service charge for this location is already included in your total.`;
 }
+
+
+/**
+ * Is any offered appointment actually today, in the business's own timezone?
+ *
+ * The intake page promises the same-day fee is "charged only if AutoClarity
+ * actually schedules you the same day". This is what makes that true: the fee
+ * is dropped unless a slot on today's local calendar date is on offer, so the
+ * promise does not depend on the owner remembering to untick a box.
+ *
+ * en-CA gives a sortable YYYY-MM-DD, and asking for it in the business
+ * timezone handles DST without any date arithmetic of our own.
+ */
+export function hasSameDaySlot(startsAt: string[], timezone: string, now: Date = new Date()): boolean {
+  const localDay = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: timezone });
+  const today = localDay(now);
+  return startsAt.some((iso) => {
+    const when = new Date(iso);
+    return !Number.isNaN(when.getTime()) && localDay(when) === today;
+  });
+}

@@ -64,9 +64,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const travelKnown = /^\d{5}$/u.test(zip);
   const travel = travelKnown ? estimateTravel(zip, config) : null;
 
+  // Same-day priority is a real charge, so the estimate must show it the moment
+  // the box is ticked rather than surprising the customer in the proposal.
+  const sameDayPriority = raw['sameDayPriority'] === true && config.fees.sameDayPriorityCents > 0;
+
   const breakdown = buildPriceBreakdown({
     tier: chosenTier,
     config,
+    sameDayPriority,
     travelMiles: travel?.miles ?? null,
     travelBasis: travel?.basis ?? 'unknown',
   });
@@ -76,6 +81,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     // Said plainly, and repeated in the UI: this is not a price we are bound to.
     kind: 'estimate',
     disclaimer: 'This is an estimate based on what you have entered. AutoClarity confirms the exact price in your booking proposal before you accept or pay.',
+    sameDayPriority,
+    sameDayPriorityCents: config.fees.sameDayPriorityCents,
     suggestedTier: suggestion.tier,
     selectedTier: chosenTier,
     customerReason: suggestion.customerReason,

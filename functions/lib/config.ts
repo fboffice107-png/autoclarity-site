@@ -185,7 +185,10 @@ export const DEFAULT_CONFIG: PpiConfig = {
     },
   },
   fees: {
-    sameDayPriorityCents: 0, // owner sets when same-day priority is offered
+    // Charged only when the customer asked for same-day priority AND the
+    // owner is actually quoting a same-day appointment. Disclosed on the
+    // public pricing page and itemised in every quote.
+    sameDayPriorityCents: 2500,
     liftFacilityCents: 0, // owner sets only when deeper-access arrangements are confirmed
   },
   scan: {

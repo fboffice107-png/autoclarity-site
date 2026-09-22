@@ -647,6 +647,11 @@
     return el ? String(el.value || "").trim() : "";
   }
 
+  function isChecked(name) {
+    var el = form.elements[name];
+    return Boolean(el && el.checked);
+  }
+
 
   /* "Lightly modified" has to say what was modified — so the field appears the
      moment it becomes relevant, and disappears when it does not apply. */
@@ -896,7 +901,8 @@
       year: val("year"), make: val("make"), model: val("model"), trim: val("trim"),
       modStatus: val("modStatus"), modDetails: val("modDetails"),
       titleStatus: val("titleStatus"), startsDrives: val("startsDrives"),
-      locZip: val("locZip"), selectedTier: selectedTier
+      locZip: val("locZip"), selectedTier: selectedTier,
+      sameDayPriority: isChecked("sameDayPriority")
     };
     requestJson(API.estimate, {
       method: "POST",

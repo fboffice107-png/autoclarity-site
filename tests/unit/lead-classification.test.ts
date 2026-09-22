@@ -379,7 +379,7 @@ describe('lead classification validation and protected workflow', () => {
     expect(adminPage).toContain('<a class="tab-btn" href="/ppi/admin/lead-review/">Lead review</a>');
     expect(leadReviewPage).toContain('<meta name="robots" content="noindex, nofollow"');
     expect(leadReviewPage).toContain('/assets/css/site.css?v=ac-ai-20260911-r1');
-    expect(leadReviewPage).toContain('/assets/css/ppi.css?v=ac-kind-20260922-r1');
+    expect(leadReviewPage).toContain('/assets/css/ppi.css?v=ac-fee-20260922-r1');
     expect(leadReviewPage).toContain('/assets/js/ppi-lead-review.js?v=ac-ai-20260911-r1');
     expect(leadReviewPage).not.toContain('ac-ai-20260907-r2');
     expect(leadReviewPage).toContain('Internal label only—this does not contact the customer');

@@ -693,6 +693,25 @@
         draftCfg.manualReasons.map(function (r) { return "<li>" + esc(r) + "</li>"; }).join("") + "</ul></div>";
     }
 
+    // ---- same-day priority ----
+    // Pre-ticked when the customer asked for it on the intake form, because
+    // forgetting to charge it is the failure that actually happens. The server
+    // drops the fee anyway unless one of the offered times is today, which is
+    // what the intake page promises the customer.
+    if (draftCfg.sameDayPriorityCents) {
+      var sameDayOn = saved.sameDay === undefined
+        ? Boolean(draftCfg.sameDayPriority)
+        : Boolean(saved.sameDay);
+      html += '<h3>Same-day priority</h3>' +
+        '<label class="field field-check"><input type="checkbox" id="pSameDay"' + (sameDayOn ? " checked" : "") + ' /> ' +
+        '<span>Add the ' + esc(money(draftCfg.sameDayPriorityCents)) + ' same-day priority fee</span></label>' +
+        '<p class="field-hint">' +
+        (draftCfg.sameDayRequested
+          ? "The customer asked for same-day priority on their request."
+          : "The customer did not ask for same-day priority.") +
+        " Applied only if one of the times you offer below is today — otherwise it is dropped from the total automatically.</p>";
+    }
+
     // ---- itemized price ----
     html += '<h3>Price</h3><div id="proposalPrice">' + priceTable(draftCfg.lines, draftCfg.totalCents) + "</div>" +
       '<p class="field-hint" id="proposalTravelNote">' + esc((draftCfg.travel && draftCfg.travel.basisLabel) || "") +
@@ -1006,13 +1025,39 @@
     if ((d.payments || []).length) {
       html += '<table class="admin-table"><thead><tr><th>Amount</th><th>Status</th><th>Stripe ref</th><th>Date</th><th></th></tr></thead><tbody>';
       d.payments.forEach(function (p) {
+        // A payment collected outside Stripe has no provider reference to show,
+        // so say how it actually arrived instead of printing a bare dash that
+        // reads like missing data.
+        var reference = p.method === "offline"
+          ? "Outside Stripe" + (p.offline_note ? " · " + p.offline_note : "")
+          : (p.stripe_payment_intent || p.stripe_session_id || "—");
         html += "<tr><td>" + money(p.amount_cents) + (p.refunded_cents ? " (−" + money(p.refunded_cents) + ")" : "") + "</td><td>" + esc(p.status) + "</td>" +
-          '<td class="mono">' + esc(p.stripe_payment_intent || p.stripe_session_id || "—") + "</td><td class=\"mono\">" + esc(when(p.created_at)) + "</td><td>" +
-          ((p.status === "succeeded" || p.status === "partially_refunded") ? '<button class="btn btn-ghost btn-sm" data-refund="' + esc(p.id) + '">Refund…</button>' : "") + "</td></tr>";
+          '<td class="mono">' + esc(reference) + "</td><td class=\"mono\">" + esc(when(p.created_at)) + "</td><td>" +
+          ((p.status === "succeeded" || p.status === "partially_refunded") && p.method !== "offline"
+            ? '<button class="btn btn-ghost btn-sm" data-refund="' + esc(p.id) + '">Refund…</button>'
+            : "") + "</td></tr>";
       });
       html += "</tbody></table>";
+      if (d.payments.some(function (p) { return p.method === "offline"; })) {
+        html += '<p class="field-hint">A payment collected outside Stripe cannot be refunded from here — return that money the same way it arrived.</p>';
+      }
     } else {
       html += '<p style="color:var(--text-3);">No payments.</p>';
+    }
+
+    // ----- money that arrived outside Stripe -----
+    // Cash at the car, Zelle, a transfer over text. Without somewhere to put
+    // it, a real paid job sits unrecorded and the revenue figures are short.
+    if (!(d.payments || []).length) {
+      html += '<details class="advanced-pricing" id="offlinePaymentBox"><summary>Record a payment collected outside Stripe</summary>' +
+        '<p class="field-hint">For a job you were paid for directly. This writes the quote, the booking and the payment so the request reads as the real paid job it was, and the amount counts in your revenue. It does not create a Stripe charge and cannot be refunded from here.</p>' +
+        '<div class="admin-toolbar">' +
+        '<label class="field field-inline"><span>Amount collected $</span><input id="offlineAmount" inputmode="decimal" placeholder="325.00" /></label>' +
+        '<label class="field field-inline"><span>How it was paid</span><input id="offlineNote" maxlength="200" placeholder="Zelle" /></label>' +
+        '<label class="field field-inline"><span>Date collected</span><input id="offlineDate" type="date" /></label>' +
+        "</div>" +
+        '<button class="btn btn-primary btn-sm" id="recordOfflinePayment">Record this payment</button> ' +
+        '<span id="offlinePaymentStatus" class="field-hint"></span></details>';
     }
 
     // ----- refund tracking -----
@@ -1234,6 +1279,10 @@
           expires: document.getElementById("pExpires").value,
           internal: document.getElementById("pInternal").value,
           message: document.getElementById("pMessage").value,
+          sameDay: (function () {
+            var box = document.getElementById("pSameDay");
+            return box ? box.checked : false;
+          })(),
           advancedOpen: proposalSection.querySelector(".advanced-pricing").open
         };
       }
@@ -1252,7 +1301,11 @@
           travelCents: travelCents !== null ? travelCents : undefined,
           addons: addons,
           discountCents: dollarsToCents(form.discount) || undefined,
-          discountLabel: form.discountLabel || undefined
+          discountLabel: form.discountLabel || undefined,
+          sameDayPriority: form.sameDay === true,
+          // The same times the send will use, so the previewed total and the
+          // sent total are computed from identical inputs.
+          slots: slateInstants(proposalSection, draftCfg)
         };
       }
 
@@ -1373,6 +1426,9 @@
               : n.deliveryConfirmed
                 ? "Sent. The customer has the booking link."
                 : "Saved and queued. Delivery is not confirmed yet — check the status above.";
+            if (r.body.sameDayFeeDropped) {
+              statusEl.textContent += " The same-day fee was not charged, because none of the times offered are today.";
+            }
             if (r.body.skipped && r.body.skipped.length) {
               alert("These times were not offered:\n" + r.body.skipped.join("\n"));
             }
@@ -1458,6 +1514,35 @@
     content.querySelectorAll("[data-release-slot]").forEach(function (btn) {
       btn.addEventListener("click", function () { act({ action: "release_slot", slotId: btn.getAttribute("data-release-slot") }); });
     });
+
+    var offlineBtn = document.getElementById("recordOfflinePayment");
+    if (offlineBtn) {
+      offlineBtn.addEventListener("click", function () {
+        var statusEl = document.getElementById("offlinePaymentStatus");
+        var cents = dollarsToCents(document.getElementById("offlineAmount").value);
+        var note = document.getElementById("offlineNote").value.trim();
+        var date = document.getElementById("offlineDate").value;
+        if (!cents || cents <= 0) { statusEl.textContent = "Enter the amount you were actually paid."; return; }
+        if (!note) { statusEl.textContent = "Say how it was paid — for example Zelle, or cash at the vehicle."; return; }
+        if (!confirm("Record " + money(cents) + " as collected outside Stripe (" + note + ")?\n\nThis counts in your revenue and cannot be undone from here.")) return;
+        offlineBtn.disabled = true;
+        statusEl.textContent = "Recording…";
+        act({
+          action: "record_offline_payment",
+          amountCents: cents,
+          offlineNote: note,
+          // A date with no time is midnight UTC, which can land on the previous
+          // day in Las Vegas; noon keeps the date the owner picked.
+          collectedAt: date ? new Date(date + "T12:00:00Z").toISOString() : undefined
+        }, function (r) {
+          offlineBtn.disabled = false;
+          statusEl.textContent = r.ok
+            ? (r.body.completionNote || "Recorded.")
+            : ((r.body && r.body.error && r.body.error.message) || "The payment was not recorded.");
+          return true;
+        });
+      });
+    }
 
     content.querySelectorAll("[data-refund]").forEach(function (btn) {
       btn.addEventListener("click", function () {

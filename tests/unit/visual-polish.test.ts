@@ -77,10 +77,10 @@ describe('premium visual and interaction safeguards', () => {
     // changed again after the first release shipped, so they are at r2 while
     // the assets that did not change stay at r1.
     const BOOKING_ASSETS = {
-      'assets/css/ppi.css': 'ac-kind-20260922-r1',
+      'assets/css/ppi.css': 'ac-fee-20260922-r1',
       'assets/js/ppi-form.js': 'ac-book-20260921-r1',
       'assets/js/ppi-portal.js': 'ac-book-20260922-r1',
-      'assets/js/ppi-admin.js': 'ac-kind-20260922-r1',
+      'assets/js/ppi-admin.js': 'ac-fee-20260922-r1',
     };
     for (const page of [ppiPage, adminPage, portalPage]) {
       for (const [asset, fingerprint] of Object.entries(BOOKING_ASSETS)) {
@@ -98,7 +98,7 @@ describe('premium visual and interaction safeguards', () => {
     }
     // Every reference still carries a known, current fingerprint — no source
     // may invent a third scheme or leave an asset unversioned.
-    const KNOWN = new Set(['ac-ai-20260911-r1', 'ac-book-20260921-r1', 'ac-book-20260922-r1', 'ac-kind-20260922-r1']);
+    const KNOWN = new Set(['ac-ai-20260911-r1', 'ac-book-20260921-r1', 'ac-book-20260922-r1', 'ac-kind-20260922-r1', 'ac-fee-20260922-r1']);
     for (const source of sources) {
       const fingerprints = source.match(/ac-(?:prod|ai|book|kind)-\d{8}-r\d+/gu) ?? [];
       expect(fingerprints.length).toBeGreaterThan(0);

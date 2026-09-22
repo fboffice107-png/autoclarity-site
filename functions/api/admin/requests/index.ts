@@ -9,6 +9,7 @@ import type { Env } from '../../../lib/types.ts';
 import { requireAdmin } from '../../../lib/auth.ts';
 import { isStatus } from '../../../lib/status.ts';
 import { json } from '../../../lib/util.ts';
+import { REAL_RECORDS_ONLY } from '../../../lib/record-kind.ts';
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
   const auth = await requireAdmin(context.request, context.env);
@@ -16,11 +17,16 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
   const url = new URL(context.request.url);
   const statusFilter = url.searchParams.get('status') ?? '';
+  // Test records are hidden by default: the dashboard is a business view, and
+  // 22 fixtures alongside 2 customers cannot be read at a glance. They stay in
+  // the database and come back with ?include=test.
+  const includeTest = url.searchParams.get('include') === 'test';
   const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 50), 1), 200);
 
   const where = statusFilter && isStatus(statusFilter) ? `AND r.status = ?` : '';
   const stmt = `
     SELECT r.id, r.ref, r.status, r.created_at, r.loc_city, r.loc_zip, r.loc_street, r.suggested_tier,
+           r.record_kind,
            r.customer_selected_tier, r.tier_review_needed,
            r.manual_review_reasons, r.same_day_priority, r.travel_miles,
            r.attribution_source,
@@ -54,12 +60,23 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     FROM ppi_requests r
     JOIN customers c ON c.id = r.customer_id
     JOIN vehicles v ON v.id = r.vehicle_id
-    WHERE r.deleted_at IS NULL ${where}
+    WHERE r.deleted_at IS NULL ${where} ${includeTest ? '' : `AND r.${REAL_RECORDS_ONLY}`}
     ORDER BY r.created_at DESC LIMIT ?`;
 
   const rows = statusFilter && isStatus(statusFilter)
     ? await context.env.DB.prepare(stmt).bind(statusFilter, limit).all<Record<string, unknown>>()
     : await context.env.DB.prepare(stmt).bind(limit).all<Record<string, unknown>>();
 
-  return json({ requests: rows.results ?? [] });
+  // Always say how many are hidden, so a hidden record is never a surprise.
+  const hidden = includeTest
+    ? null
+    : await context.env.DB
+        .prepare(`SELECT COUNT(*) AS n FROM ppi_requests WHERE deleted_at IS NULL AND record_kind = 'test'`)
+        .first<{ n: number }>();
+
+  return json({
+    requests: rows.results ?? [],
+    includingTest: includeTest,
+    hiddenTestCount: hidden?.n ?? 0,
+  });
 };

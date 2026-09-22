@@ -14,6 +14,9 @@
   var currentRequestId = null;
   var detailCache = null;
   var requestListNotice = "";
+  var showTestRecords = (function () {
+    try { return sessionStorage.getItem("ppi-show-test") === "1"; } catch (e) { return false; }
+  })();
   var reportEditor = null;
   var uploadBlobUrls = [];
   function leaveDetail() {
@@ -451,14 +454,26 @@
       '<select id="statusFilter"><option value="">All statuses</option>' +
       ["submitted", "needs_info", "seller_access_pending", "ready_for_review", "quote_prepared", "quote_sent", "awaiting_time_selection", "awaiting_agreement", "awaiting_payment", "confirmed", "inspection_in_progress", "report_in_progress", "completed", "customer_cancelled", "admin_cancelled", "expired", "refunded", "refund_reconciliation_needed", "disputed"]
         .map(function (s) { return '<option value="' + s + '">' + s.replace(/_/g, " ") + "</option>"; }).join("") +
-      '</select></div><div id="requestsTable"></div>';
+      '</select>' +
+      '<label class="chip' + (showTestRecords ? " on" : "") + '" id="testToggleChip">' +
+      '<input type="checkbox" id="testToggle"' + (showTestRecords ? " checked" : "") + ' />Show test records</label>' +
+      '</div><div id="requestsTable"></div>';
     content.innerHTML = html;
     document.getElementById("statusFilter").addEventListener("change", loadList);
+    document.getElementById("testToggle").addEventListener("change", function (e) {
+      showTestRecords = e.target.checked;
+      try { sessionStorage.setItem("ppi-show-test", showTestRecords ? "1" : "0"); } catch (err) {}
+      document.getElementById("testToggleChip").classList.toggle("on", showTestRecords);
+      loadList();
+    });
     loadList();
 
     function loadList() {
       var filter = document.getElementById("statusFilter").value;
-      api("/api/admin/requests" + (filter ? "?status=" + encodeURIComponent(filter) : "")).then(function (r) {
+      var params = [];
+      if (filter) params.push("status=" + encodeURIComponent(filter));
+      if (showTestRecords) params.push("include=test");
+      api("/api/admin/requests" + (params.length ? "?" + params.join("&") : "")).then(function (r) {
         if (!r.ok) return;
         var rows = r.body.requests || [];
         var t = '<section class="admin-job-list" aria-label="Inspection requests">';
@@ -469,8 +484,15 @@
           var priceText = row.current_total_cents
             ? money(row.current_total_cents) + " offered"
             : tierLabel(pkg) + " (not quoted yet)";
-          t += '<button type="button" class="portal-card admin-job-card stage-edge-' + esc(stage.kind || "none") + '" data-req="' + esc(row.id) + '">' +
+          var isTest = row.record_kind === "test";
+          // Green is reserved for money that actually arrived.
+          var paidReal = !isTest && row.paid_amount_cents;
+          var cls = "portal-card admin-job-card stage-edge-" + (stage.kind || "none")
+            + (isTest ? " job-card-test" : "") + (paidReal ? " job-card-paid" : "");
+          t += '<button type="button" class="' + esc(cls) + '" data-req="' + esc(row.id) + '">' +
             '<span class="job-card-top"><strong>' + esc([row.year, row.make, row.model].filter(Boolean).join(" ") || "Vehicle not set") + '</strong>' +
+            (isTest ? '<span class="kind-chip kind-test">Test record</span>' : "") +
+            (paidReal ? '<span class="kind-chip kind-paid">' + esc(money(row.paid_amount_cents)) + ' collected</span>' : "") +
             stagePill(stage) + '</span>' +
             '<span class="job-card-grid">' +
               '<span><span class="job-k">Customer</span>' + esc(row.full_name) + '</span>' +
@@ -484,7 +506,14 @@
               (manual ? ' · needs a look' : "") + (row.same_day_priority ? ' · same-day priority' : "") +
               (Number(row.tier_review_needed) === 1 ? ' · package to confirm' : "") + '</span></button>';
         });
-        t += (rows.length === 0 ? '<p style="color:var(--text-3);padding:12px 0 0;">No requests.</p>' : "") + "</section>";
+        t += (rows.length === 0
+          ? '<p style="color:var(--text-3);padding:12px 0 0;">No requests.</p>'
+          : "") + "</section>";
+        if (!r.body.includingTest && r.body.hiddenTestCount) {
+          t += '<p class="field-hint" style="margin-top:12px;">' + esc(r.body.hiddenTestCount) +
+            ' test record' + (r.body.hiddenTestCount === 1 ? "" : "s") +
+            ' hidden — seeded fixtures and smoke tests. Nothing is deleted; tick “Show test records” to see them.</p>';
+        }
         document.getElementById("requestsTable").innerHTML = t;
         document.querySelectorAll("#requestsTable [data-req]").forEach(function (tr) {
           tr.addEventListener("click", function () { openDetail(tr.getAttribute("data-req")); });
@@ -852,6 +881,21 @@
       '<dt>Agreement evidence</dt><dd>' + esc((d.acceptances || []).length) + ' acceptance record(s) — exact versions below</dd>' +
       '<dt>Report state</dt><dd id="jobReportState">Loading…</dd></dl>' +
       '<nav class="report-actions" aria-label="Job sections"><a class="btn btn-ghost btn-sm" href="#inspectionReport">Inspection report</a><a class="btn btn-ghost btn-sm" href="#jobMessages">Messages</a><a class="btn btn-ghost btn-sm" href="#jobScheduling">Scheduling</a><a class="btn btn-ghost btn-sm" href="#jobPayments">Payments / refunds</a></nav></section>';
+
+    // What kind of record is this, and can the owner change it?
+    var rk = d.recordKind || { kind: "real", autoReason: null };
+    if (rk.kind === "test") {
+      html += '<div class="notice warn"><strong>Test record.</strong> Hidden from the business view and excluded from the scoreboard.' +
+        (rk.autoReason ? ' Classified automatically because ' + esc(rk.autoReason) + '.' : '') +
+        ' <button type="button" class="linklike" data-set-kind="real">This is a real customer</button></div>';
+    } else if (rk.autoReason) {
+      html += '<div class="notice warn"><strong>This looks like a test record</strong> — ' + esc(rk.autoReason) +
+        ' — but it is filed as real business and counts on your scoreboard.' +
+        ' <button type="button" class="linklike" data-set-kind="test">File it as a test</button></div>';
+    } else {
+      html += '<p class="field-hint">Real customer record.' +
+        ' <button type="button" class="linklike" data-set-kind="test">File as a test record</button></p>';
+    }
 
     if (req.manual_review_reasons && req.manual_review_reasons !== "[]") {
       var stored = [];
@@ -1359,6 +1403,20 @@
         });
       });
     }
+
+    content.querySelectorAll("[data-set-kind]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var kind = btn.getAttribute("data-set-kind");
+        var ask = kind === "test"
+          ? "File this request as a test record?\n\nIt will be hidden from the business view and excluded from the scoreboard. Nothing is deleted, and you can change it back."
+          : "Mark this request as a real customer?\n\nIt will appear in the business view and count on your scoreboard.";
+        if (!confirm(ask)) return;
+        act({ action: "set_record_kind", recordKind: kind }, function (r) {
+          if (!r.ok) { alert((r.body.error && r.body.error.message) || "Could not change it."); return true; }
+          return false;
+        });
+      });
+    });
 
     document.getElementById("statusGo").addEventListener("click", function () {
       var to = document.getElementById("statusTo").value;

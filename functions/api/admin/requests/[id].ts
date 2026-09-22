@@ -9,6 +9,7 @@ import { applyStatus, isStatus, canTransition, STATUS_LABELS, type Status } from
 import { completeWithPublishedReport, type PublishedReportVersion } from '../../../lib/published-report.ts';
 import { basePriceForTier, computeQuoteTotals, quoteExpiry, travelFeeForMiles, type QuoteLineInput, type Tier } from '../../../lib/pricing.ts';
 import { isTier, suggestTier, tierMismatch } from '../../../lib/vehicle-class.ts';
+import { isRecordKind, testRecordReason } from '../../../lib/record-kind.ts';
 import { buildPriceBreakdown, type PriceBreakdown } from '../../../lib/quote-math.ts';
 import {
   defaultProposalMessage,
@@ -426,6 +427,16 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   return json({
     request: req,
     statusLabel: isStatus(status) ? STATUS_LABELS[status] : status,
+    recordKind: {
+      kind: String(req['record_kind'] ?? 'real'),
+      // Why it LOOKS like a test, shown even when the owner has overridden it,
+      // so the classification is never a black box.
+      autoReason: testRecordReason({
+        ref: String(req['ref'] ?? ''),
+        email: String(req['email'] ?? ''),
+        fullName: String(req['full_name'] ?? ''),
+      }),
+    },
     // Everything the dashboard needs to render a prefilled proposal card
     // without re-deriving any price of its own.
     proposalDraft: {
@@ -502,6 +513,7 @@ interface AdminActionBody {
   proposalKey?: string;
   proposalId?: string;
   vehicleLabel?: string;
+  recordKind?: string;
 }
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
@@ -526,11 +538,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   const req = await db
     .prepare(
-      `SELECT r.id, r.ref, r.status, r.travel_miles, r.attribution_source, c.email, c.full_name FROM ppi_requests r
+      `SELECT r.id, r.ref, r.status, r.travel_miles, r.attribution_source, r.record_kind, c.email, c.full_name FROM ppi_requests r
        JOIN customers c ON c.id = r.customer_id WHERE r.id = ? AND r.deleted_at IS NULL`,
     )
     .bind(id)
-    .first<{ id: string; ref: string; status: string; travel_miles: number | null; attribution_source: string; email: string; full_name: string }>();
+    .first<{ id: string; ref: string; status: string; travel_miles: number | null; attribution_source: string; record_kind: string; email: string; full_name: string }>();
   if (!req || !isStatus(req.status)) return errorJson('not_found', 'Request not found.', 404);
   const status = req.status as Status;
   const base = (env.PUBLIC_BASE_URL ?? new URL(context.request.url).origin).replace(/\/$/, '');
@@ -871,6 +883,42 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       }
       await auditLog(db, actor, 'create_quote', 'quote', quoteId, { version, totalCents: totals.totalCents, tier });
       return json({ ok: true, quoteId, version, totalCents: totals.totalCents, expiresAt });
+    }
+
+    // ------------------------------------------------------ set_record_kind
+    //
+    // The owner's judgement overrides the automatic classification in both
+    // directions: a fixture that turned into a real job, or a real-looking
+    // record that was actually a rehearsal.
+    case 'set_record_kind': {
+      const kind = String(body.recordKind ?? '');
+      if (!isRecordKind(kind)) return errorJson('validation', 'Choose either real or test.', 422);
+      const previous = String(req.record_kind ?? 'real');
+      if (kind === previous) return json({ ok: true, unchanged: true, recordKind: kind });
+      // Money is the one thing that settles the argument: a record with a
+      // settled payment is real business and cannot be filed as a test.
+      if (kind === 'test') {
+        const paid = await db
+          .prepare(
+            `SELECT id FROM payments WHERE request_id = ?
+               AND status IN ('succeeded','partially_refunded','refunded','disputed') LIMIT 1`,
+          )
+          .bind(id)
+          .first<{ id: string }>();
+        if (paid) {
+          return errorJson(
+            'payment_on_record',
+            'This request has a recorded payment, so it cannot be filed as a test. Real money makes it real business.',
+            409,
+          );
+        }
+      }
+      await db
+        .prepare(`UPDATE ppi_requests SET record_kind = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`)
+        .bind(kind, nowIso(), id)
+        .run();
+      await auditLog(db, actor, 'set_record_kind', 'ppi_request', id, { from: previous, to: kind });
+      return json({ ok: true, recordKind: kind });
     }
 
     // ------------------------------------------------------- price_preview

@@ -1164,3 +1164,38 @@ details.portal-secondary[open] > summary { margin-bottom: 14px; }
   .slate-label { flex-basis: 100%; padding-top: 0; }
   .slot-chip { flex-basis: 45%; font-size: 15px; }
 }
+
+/* ===========================================================================
+   Real customers vs test records. Green is reserved for money that actually
+   arrived; a test record is visibly set aside rather than deleted.
+   =========================================================================== */
+.kind-chip {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.kind-chip.kind-test {
+  background: rgba(148, 176, 255, 0.1);
+  color: var(--text-3);
+  border: 1px solid var(--line);
+}
+.kind-chip.kind-paid {
+  background: rgba(61, 214, 140, 0.16);
+  color: var(--green);
+  border: 1px solid rgba(61, 214, 140, 0.4);
+}
+
+/* A test record stays legible but recedes. */
+.admin-job-card.job-card-test { opacity: 0.6; border-style: dashed; }
+.admin-job-card.job-card-test:hover { opacity: 0.85; }
+
+/* Real money gets the only green edge in the list. */
+.admin-job-card.job-card-paid {
+  border-left: 3px solid var(--green);
+  box-shadow: inset 2px 0 0 rgba(61, 214, 140, 0.25), var(--shadow-card);
+}

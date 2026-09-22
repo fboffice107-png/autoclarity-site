@@ -115,7 +115,7 @@ async function submitAndFind(payload: Json): Promise<string> {
   const submitted = await post('/api/ppi/requests', payload, { 'cf-connecting-ip': `203.0.113.${(seq % 200) + 20}` });
   expect(submitted.status).toBe(200);
   expect(submitted.body.ok).toBe(true);
-  const list = await get('/api/admin/requests', admin);
+  const list = await get('/api/admin/requests?include=test', admin);
   const row = list.body.requests.find((r: Json) => r.id === submitted.body.requestId)
     ?? list.body.requests.find((r: Json) => r.ref === submitted.body.ref);
   expect(row, 'submitted request should appear in the admin list').toBeTruthy();
@@ -558,6 +558,70 @@ describe('booking proposal — one owner action, one customer decision', () => {
     expect(lost.body.error.message.toLowerCase()).toMatch(/no longer available|just taken/u);
     // Their request is untouched and they can still pick something else.
     expect((await get('/api/portal', secondPortal)).body.status).toBe('awaiting_time_selection');
+  });
+
+  it('keeps test records out of the business view by default', async () => {
+    // These suites submit from reserved example.com addresses, which can never
+    // receive mail — so the dashboard files them as test records.
+    const requestId = await submitAndFind(corollaIntake());
+
+    const business = await get('/api/admin/requests', admin);
+    expect(business.body.requests.some((r: Json) => r.id === requestId)).toBe(false);
+    expect(business.body.includingTest).toBe(false);
+    // Hidden, never silently: the count is always reported.
+    expect(business.body.hiddenTestCount).toBeGreaterThan(0);
+
+    const everything = await get('/api/admin/requests?include=test', admin);
+    const row = everything.body.requests.find((r: Json) => r.id === requestId);
+    expect(row, 'the record still exists and is retrievable').toBeTruthy();
+    expect(row.record_kind).toBe('test');
+
+    // And the owner can overrule the classification.
+    const promoted = await adminPost(requestId, { action: 'set_record_kind', recordKind: 'real' });
+    expect(promoted.status, JSON.stringify(promoted.body)).toBe(200);
+    const afterPromotion = await get('/api/admin/requests', admin);
+    expect(afterPromotion.body.requests.some((r: Json) => r.id === requestId)).toBe(true);
+
+    // Put it back so it does not pollute the rest of the suite.
+    expect((await adminPost(requestId, { action: 'set_record_kind', recordKind: 'test' })).status).toBe(200);
+  });
+
+  it('promotes a test record that takes real money, and then refuses to demote it', async () => {
+    const requestId = await submitAndFind(corollaIntake());
+    const sent = await adminPost(requestId, {
+      action: 'send_booking_proposal', tier: 'standard',
+      slots: afternoonOptions(5), proposalKey: `paidkind-${seq}`,
+    });
+    expect(sent.status, JSON.stringify(sent.body)).toBe(200);
+    const link = await adminPost(requestId, { action: 'reissue_link' });
+    const portal = { authorization: `Bearer ${new URL(link.body.url).searchParams.get('t')}` };
+    const view = await get('/api/portal', portal);
+    const slot = view.body.slots.find((s: Json) => s.status === 'offered');
+    await post('/api/portal/action', { action: 'select_slot', slotId: slot.id }, portal);
+    const held = await get('/api/portal', portal);
+    await post('/api/portal/action', {
+      action: 'accept_agreements', typedName: 'Payer',
+      versionIds: held.body.agreements.required.map((d: Json) => d.id),
+    }, portal);
+    const checkout = await post('/api/portal/action', { action: 'checkout' }, portal);
+    expect(checkout.status, JSON.stringify(checkout.body)).toBe(200);
+    const sessionId = new URL(checkout.body.checkoutUrl).pathname.split('/').pop()!;
+    await sendWebhook({
+      id: `evt_kind_${seq}`, type: 'checkout.session.completed',
+      data: { object: { id: sessionId, payment_status: 'paid', payment_intent: `pi_kind_${seq}` } },
+    });
+
+    // Money settles the argument. This started as a test record (example.com)
+    // and must rejoin the business view the moment a payment settles, or its
+    // revenue would be silently missing from the scoreboard.
+    const detail = await get(`/api/admin/requests/${requestId}`, admin);
+    expect(detail.body.recordKind.kind).toBe('real');
+    expect((await get('/api/admin/requests', admin)).body.requests.some((r: Json) => r.id === requestId)).toBe(true);
+
+    // And it can no longer be filed away as a test.
+    const refused = await adminPost(requestId, { action: 'set_record_kind', recordKind: 'test' });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.code).toBe('payment_on_record');
   });
 
   it('rejects a modification answer with no description', async () => {

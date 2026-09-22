@@ -10,6 +10,7 @@ import { parseIntake, normalizeUrl } from '../../lib/validate.ts';
 import { validateVin } from '../../lib/vin.ts';
 import { suggestTier, estimateTravel } from '../../lib/pricing.ts';
 import { isTier, tierMismatch, type Tier } from '../../lib/vehicle-class.ts';
+import { initialRecordKind } from '../../lib/record-kind.ts';
 import { verifyTurnstile } from '../../lib/turnstile.ts';
 import { rateLimit } from '../../lib/ratelimit.ts';
 import { issueMagicLink, portalUrl } from '../../lib/magic.ts';
@@ -243,9 +244,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
            decision_timeline, preferred_dates, time_window, same_day_priority, customer_notes,
            travel_miles, travel_estimate_basis, suggested_tier, manual_review_reasons,
            customer_selected_tier, tier_selection_source, tier_review_needed,
+           record_kind,
            attribution_source,
            created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, 'submitted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, 'submitted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         requestId,
@@ -283,6 +285,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         selectedTier,
         selectedTier ? (selectionMismatch ? 'customer' : 'suggested') : null,
         selectionMismatch || tierSuggestion.manualReview ? 1 : 0,
+        // Real unless positively identified as a test. A genuine intake must
+        // never be hidden from the dashboard by accident.
+        initialRecordKind({ ref, email: payload.email, fullName: payload.fullName }),
         payload.attributionSource,
         now,
         now,

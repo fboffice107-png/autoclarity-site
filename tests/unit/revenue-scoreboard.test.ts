@@ -12,6 +12,12 @@ import disputeLedgerMigration from '../../migrations/0006_payment_disputes.sql?r
 import agreementImmutabilityMigration from '../../migrations/0007_agreement_version_immutability.sql?raw';
 import quotePaymentIntegrityMigration from '../../migrations/0008_quote_payment_integrity.sql?raw';
 import attributionMigration from '../../migrations/0009_request_attribution.sql?raw';
+import leadClassificationMigration from '../../migrations/0010_lead_classification.sql?raw';
+import reportFulfillmentMigration from '../../migrations/0011_report_fulfillment_integrity.sql?raw';
+import agreementAcceptanceMigration from '../../migrations/0012_agreement_acceptance_integrity.sql?raw';
+import bookingProposalMigration from '../../migrations/0014_booking_proposal_flow.sql?raw';
+import openAvailabilityMigration from '../../migrations/0015_open_availability.sql?raw';
+import recordKindMigration from '../../migrations/0016_record_kind.sql?raw';
 import { loadRevenueWindow } from '../../functions/api/admin/overview.ts';
 
 afterEach(() => vi.useRealTimers());
@@ -26,6 +32,12 @@ const migrations = [
   agreementImmutabilityMigration,
   quotePaymentIntegrityMigration,
   attributionMigration,
+  leadClassificationMigration,
+  reportFulfillmentMigration,
+  agreementAcceptanceMigration,
+  bookingProposalMigration,
+  openAvailabilityMigration,
+  recordKindMigration,
 ];
 
 function asD1(db: DatabaseSync): D1Database {

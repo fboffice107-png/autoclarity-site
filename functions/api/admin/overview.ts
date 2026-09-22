@@ -3,6 +3,7 @@
 import type { Env } from '../../lib/types.ts';
 import { requireAdmin } from '../../lib/auth.ts';
 import { json } from '../../lib/util.ts';
+import { REAL_RECORDS_ONLY } from '../../lib/record-kind.ts';
 import { releaseExpiredHolds } from '../../lib/portal.ts';
 import {
   summarizeNotificationIssues,
@@ -42,12 +43,18 @@ export async function loadRevenueWindow(db: D1Database, days: number): Promise<R
     db.prepare(
       `WITH params AS (
          SELECT ? AS cutoff_iso, ? AS cutoff_epoch
+       ), real_requests AS (
+         -- Seeded fixtures and smoke tests stay in the database but are not
+         -- business. Every figure below is scoped through this.
+         SELECT id FROM ppi_requests WHERE deleted_at IS NULL AND ${REAL_RECORDS_ONLY}
        ), first_milestones AS (
          SELECT request_id,
                 MIN(CASE WHEN to_status = 'ready_for_review' THEN created_at END) AS ready_for_review_at,
                 MIN(CASE WHEN to_status = 'quote_sent' THEN created_at END) AS quoted_at,
                 MIN(CASE WHEN to_status = 'completed' THEN created_at END) AS completed_at
-         FROM status_history GROUP BY request_id
+         FROM status_history
+         WHERE request_id IN (SELECT id FROM real_requests)
+         GROUP BY request_id
        ), window_refunds AS (
          SELECT * FROM provider_refunds
          WHERE status = 'succeeded'
@@ -57,7 +64,7 @@ export async function loadRevenueWindow(db: D1Database, days: number): Promise<R
          WHERE provider_created > (SELECT cutoff_epoch FROM params)
        )
        SELECT
-         (SELECT COUNT(*) FROM ppi_requests WHERE deleted_at IS NULL
+         (SELECT COUNT(*) FROM ppi_requests WHERE deleted_at IS NULL AND ${REAL_RECORDS_ONLY}
            AND created_at > (SELECT cutoff_iso FROM params)) AS saved_requests,
          (SELECT COUNT(*) FROM first_milestones
            WHERE ready_for_review_at > (SELECT cutoff_iso FROM params)) AS ready_for_review_requests,
@@ -65,12 +72,15 @@ export async function loadRevenueWindow(db: D1Database, days: number): Promise<R
            WHERE quoted_at > (SELECT cutoff_iso FROM params)) AS quoted_requests,
          (SELECT COUNT(DISTINCT stripe_session_id) FROM payments
            WHERE stripe_session_id IS NOT NULL
+             AND request_id IN (SELECT id FROM real_requests)
              AND created_at > (SELECT cutoff_iso FROM params)) AS checkout_starts,
          (SELECT COUNT(*) FROM analytics_events e JOIN payments p
            ON e.id = 'ev_payment_' || p.id AND e.event = 'ppi_payment_confirmed'
-           WHERE e.created_at > (SELECT cutoff_iso FROM params)) AS successful_payments,
+           WHERE e.created_at > (SELECT cutoff_iso FROM params)
+             AND p.request_id IN (SELECT id FROM real_requests)) AS successful_payments,
          (SELECT COUNT(DISTINCT request_id) FROM bookings
            WHERE confirmed_at IS NOT NULL
+             AND request_id IN (SELECT id FROM real_requests)
              AND confirmed_at > (SELECT cutoff_iso FROM params)) AS confirmed_bookings,
          (SELECT COUNT(*) FROM first_milestones
            WHERE completed_at > (SELECT cutoff_iso FROM params)) AS completed_inspections,
@@ -84,12 +94,15 @@ export async function loadRevenueWindow(db: D1Database, days: number): Promise<R
              AND created_at > (SELECT cutoff_iso FROM params)) AS app_store_outbound_clicks`,
     ).bind(cutoff, cutoffEpoch).first<Record<string, unknown>>(),
     db.prepare(
-      `WITH confirmed_payments AS (
+      `WITH real_requests AS (
+         SELECT id FROM ppi_requests WHERE deleted_at IS NULL AND ${REAL_RECORDS_ONLY}
+       ), confirmed_payments AS (
          SELECT p.*
          FROM payments p
          JOIN analytics_events e
            ON e.id = 'ev_payment_' || p.id AND e.event = 'ppi_payment_confirmed'
          WHERE e.created_at > ? AND p.status IN (${CAPTURED_PAYMENT_STATUSES})
+           AND p.request_id IN (SELECT id FROM real_requests)
        ), captured AS (
          SELECT p.*,
                 CASE WHEN p.status = 'disputed'
@@ -106,6 +119,7 @@ export async function loadRevenueWindow(db: D1Database, days: number): Promise<R
               ROUND(AVG(amount_cents)) AS average_paid_ticket_cents,
               (SELECT COUNT(*) FROM payments missing
                WHERE missing.status IN (${CAPTURED_PAYMENT_STATUSES})
+                 AND missing.request_id IN (SELECT id FROM real_requests)
                  AND missing.created_at > ?
                  AND NOT EXISTS (
                    SELECT 1 FROM analytics_events e
@@ -117,13 +131,16 @@ export async function loadRevenueWindow(db: D1Database, days: number): Promise<R
       `WITH cohort AS (
          SELECT id, COALESCE(NULLIF(attribution_source, ''), 'ppi_unknown') AS source
          FROM ppi_requests
-         WHERE deleted_at IS NULL AND created_at > ?
+         WHERE deleted_at IS NULL AND ${REAL_RECORDS_ONLY} AND created_at > ?
        ), first_milestones AS (
          SELECT request_id,
                 MIN(CASE WHEN to_status = 'ready_for_review' THEN created_at END) AS ready_for_review_at,
                 MIN(CASE WHEN to_status = 'quote_sent' THEN created_at END) AS quoted_at,
                 MIN(CASE WHEN to_status = 'completed' THEN created_at END) AS completed_at
-         FROM status_history GROUP BY request_id
+         FROM status_history
+         -- The cohort above is already limited to real records here.
+         WHERE request_id IN (SELECT id FROM cohort)
+         GROUP BY request_id
        ), dispute_cases AS (
          SELECT payment_id, COUNT(*) AS dispute_cases
          FROM payment_disputes GROUP BY payment_id
@@ -203,7 +220,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   await releaseExpiredHolds(db);
 
   const statusCounts = await db
-    .prepare(`SELECT status, COUNT(*) AS n FROM ppi_requests WHERE deleted_at IS NULL GROUP BY status`)
+    .prepare(`SELECT status, COUNT(*) AS n FROM ppi_requests WHERE deleted_at IS NULL AND ${REAL_RECORDS_ONLY} GROUP BY status`)
     .all<{ status: string; n: number }>();
 
   const upcoming = await db

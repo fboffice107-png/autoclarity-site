@@ -1254,6 +1254,13 @@ async function handlePaymentSucceeded(
       if (current && POST_PAYMENT_TERMINAL_STATUSES.has(current.status)) return;
       throw new Error(`Payment ${payment.id} could not transition from ${payment.status} to succeeded.`);
     }
+    // Money settles what kind of record this is. A request filed as a test
+    // that nonetheless takes a real payment must rejoin the business view, or
+    // its revenue would be silently excluded from the scoreboard.
+    await db
+      .prepare(`UPDATE ppi_requests SET record_kind = 'real', updated_at = ? WHERE id = ? AND record_kind = 'test'`)
+      .bind(now, payment.request_id)
+      .run();
   } else if (paymentIntent) {
     await db
       .prepare(`UPDATE payments SET stripe_payment_intent = COALESCE(stripe_payment_intent, ?), updated_at = ? WHERE id = ?`)

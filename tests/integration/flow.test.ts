@@ -330,7 +330,7 @@ describe('public surface', () => {
     }));
     // Either rejected as invalid, or stored normalized without the quote.
     if (r.status === 200) {
-      const list = await get('/api/admin/requests', admin);
+      const list = await get('/api/admin/requests?include=test', admin);
       const row = list.body.requests.find((x: Json) => x.email === 'xss-probe@example.com');
       const detail = await get(`/api/admin/requests/${row.id}`, admin);
       const stored = detail.body.request.listing_url ?? '';
@@ -393,7 +393,7 @@ describe('intake submission', () => {
     expect(r.body.emailStatus).toBe('recorded');
     camryToken = r.body.portalToken;
     camryRef = r.body.ref;
-    const list = await get('/api/admin/requests', admin);
+    const list = await get('/api/admin/requests?include=test', admin);
     expect(list.body.requests.find((row: Json) => row.ref === camryRef).attribution_source).toBe('ppi_google_cpc');
   });
 
@@ -416,7 +416,7 @@ describe('intake submission', () => {
     expect(r.body).not.toHaveProperty('requestRef');
     expect(r.body).not.toHaveProperty('portalToken');
     expect((await get('/api/portal', { authorization: `Bearer ${oldToken}` })).status).toBe(200);
-    const list = await get('/api/admin/requests', admin);
+    const list = await get('/api/admin/requests?include=test', admin);
     expect(list.body.requests.filter((row: Json) => row.ref === camryRef)).toHaveLength(1);
   });
 
@@ -440,12 +440,12 @@ describe('intake submission', () => {
     expect(duplicate).not.toHaveProperty('ref');
     expect(duplicate).not.toHaveProperty('portalToken');
 
-    const list = await get('/api/admin/requests', admin);
+    const list = await get('/api/admin/requests?include=test', admin);
     expect(list.body.requests.filter((row: Json) => row.email === base.email)).toHaveLength(1);
   });
 
   it('records rich deduplicated receipts, a direct owner link, and a safe retry state', async () => {
-    const list = await get('/api/admin/requests', admin);
+    const list = await get('/api/admin/requests?include=test', admin);
     const row = list.body.requests.find((item: Json) => item.ref === camryRef);
     const detail = await get(`/api/admin/requests/${row.id}`, admin);
     const customer = detail.body.messages.find((message: Json) => message.template === 'request_received');
@@ -471,7 +471,7 @@ describe('intake submission', () => {
   });
 
   it('keeps durable record failures visible, deduplicated, and bounded on the admin overview', async () => {
-    const list = await get('/api/admin/requests', admin);
+    const list = await get('/api/admin/requests?include=test', admin);
     const affected = list.body.requests.find((item: Json) => item.ref === camryRef);
     const oldOnly = list.body.requests.find((item: Json) => item.id !== affected.id);
     const before = await get('/api/admin/overview', admin);
@@ -570,7 +570,7 @@ describe('intake submission', () => {
 
 describe('quote → slot → agreements → payment (EUROLX fixture)', () => {
   it('finds the fixture and issues a portal link', async () => {
-    const list = await get('/api/admin/requests', admin);
+    const list = await get('/api/admin/requests?include=test', admin);
     const euro = list.body.requests.find((r: Json) => r.ref === 'PPI-FIXTURE-EUROLX');
     const camry = list.body.requests.find((r: Json) => r.ref === 'PPI-FIXTURE-CAMRY');
     expect(euro).toBeTruthy();
@@ -1362,7 +1362,7 @@ describe('stripe webhook — the source of truth', () => {
   });
 
   it('confirms a normal active hold and emails a tokenized portal URL', async () => {
-    const list = await get('/api/admin/requests', admin);
+    const list = await get('/api/admin/requests?include=test', admin);
     const vette = list.body.requests.find((row: Json) => row.ref === 'PPI-FIXTURE-VETTE');
     expect(vette).toBeTruthy();
 
@@ -1585,7 +1585,7 @@ describe('stripe webhook — the source of truth', () => {
   });
 
   it('records pending/failed refund states, webhook updates, and one explicit idempotent retry', async () => {
-    const list = await get('/api/admin/requests', admin);
+    const list = await get('/api/admin/requests?include=test', admin);
     const paid = list.body.requests.find((row: Json) => row.ref === 'PPI-FIXTURE-PAIDOK');
     expect(paid).toBeTruthy();
     const before = await get(`/api/admin/requests/${paid.id}`, admin);
@@ -2090,7 +2090,7 @@ describe('paid-lapsed terminal reconciliation', () => {
     }), { 'cf-connecting-ip': '203.0.113.210' });
     expect(intake.status).toBe(200);
     const token = intake.body.portalToken;
-    const list = await get('/api/admin/requests', admin);
+    const list = await get('/api/admin/requests?include=test', admin);
     const row = list.body.requests.find((request: Json) => request.ref === intake.body.requestRef);
     expect(row).toBeTruthy();
     expect((await adminPost(row.id, { action: 'set_status', to: 'ready_for_review' })).status).toBe(200);
@@ -2147,7 +2147,7 @@ describe('paid-lapsed terminal reconciliation', () => {
 
 describe('admin expiry lifecycle', () => {
   it('closes the checkout/cancel race, resumes a crash-left claim, then expires all capacity', async () => {
-    const list = await get('/api/admin/requests', admin);
+    const list = await get('/api/admin/requests?include=test', admin);
     const request = list.body.requests.find((row: Json) => row.ref === 'PPI-FIXTURE-LAMBO');
     expect(request).toBeTruthy();
 
@@ -2455,7 +2455,7 @@ describe('uploads', () => {
     expect(res.headers.get('content-type')).toBe('image/png');
     expect(res.headers.get('content-security-policy')).toContain('sandbox');
 
-    const list = await get('/api/admin/requests', admin);
+    const list = await get('/api/admin/requests?include=test', admin);
     const camry = list.body.requests.find((r: Json) => r.ref === camryRef);
     const del = await adminPost(camry.id, { action: 'delete_upload', uploadId });
     expect(del.status).toBe(200);
@@ -2475,7 +2475,7 @@ describe('lifecycle controls', () => {
   });
 
   it('refreshes a revoked email link on retry without revoking another working link', async () => {
-    const list = await get('/api/admin/requests', admin);
+    const list = await get('/api/admin/requests?include=test', admin);
     const request = list.body.requests.find((row: Json) => row.ref === camryRef);
     const before = await get(`/api/admin/requests/${request.id}`, admin);
     const original = before.body.messages.find((message: Json) => message.template === 'request_received');

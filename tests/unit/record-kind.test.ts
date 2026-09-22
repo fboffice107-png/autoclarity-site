@@ -158,6 +158,26 @@ describe('migration 0016 on a production-shaped database', () => {
     } finally { db.close(); }
   });
 
+  it('classifies soft-deleted rows too, instead of leaving them labelled real', () => {
+    // A smoke test that was soft-deleted kept the 'real' default when the
+    // backfill only looked at live rows — a row saying "real business" that
+    // nobody sees until they audit the table.
+    const db = migrated();
+    try {
+      const t = '2026-09-01T00:00:00.000Z';
+      db.exec(`
+        INSERT INTO vehicles (id, make, model, created_at, updated_at) VALUES ('veh_d','T','C','${t}','${t}');
+        INSERT INTO customers (id, full_name, email, phone, created_at, updated_at)
+        VALUES ('cus_d', 'INTERNAL_SMOKE_TEST - DELETED', 'smoke@example.invalid', '7025550100', '${t}', '${t}');
+        INSERT INTO ppi_requests (id, ref, customer_id, vehicle_id, status, created_at, updated_at, deleted_at)
+        VALUES ('req_d', 'PPI-INTERNAL-SMOKE-1', 'cus_d', 'veh_d', 'submitted', '${t}', '${t}', '${t}');
+      `);
+      db.exec(recordKindMigration);
+      expect(db.prepare(`SELECT record_kind FROM ppi_requests WHERE id = 'req_d'`).get())
+        .toEqual({ record_kind: 'test' });
+    } finally { db.close(); }
+  });
+
   it('refuses a value that is neither real nor test', () => {
     const db = migrated();
     try {

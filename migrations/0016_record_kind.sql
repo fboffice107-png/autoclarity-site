@@ -35,10 +35,13 @@ CREATE INDEX IF NOT EXISTS idx_requests_record_kind
 -- both match while "Marco Testa" does not.
 --
 -- Anything not matching stays 'real'.
+-- Deliberately NOT limited to live rows. A soft-deleted smoke test left at
+-- the 'real' default would be a row labelled "real business" that nobody ever
+-- looks at until they restore or audit it. Classify every row honestly; the
+-- queries that care about deletion filter on deleted_at separately.
 UPDATE ppi_requests
 SET record_kind = 'test'
-WHERE deleted_at IS NULL
-  AND (
+WHERE (
     ref LIKE 'PPI-FIXTURE%'
     OR ref LIKE 'PPI-INTERNAL%'
     OR customer_id IN (

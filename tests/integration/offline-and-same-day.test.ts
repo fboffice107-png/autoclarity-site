@@ -136,6 +136,9 @@ describe('the $25 same-day priority fee', () => {
 describe('money collected outside Stripe', () => {
   it('records the job, counts the revenue, and invents no Stripe charge', async () => {
     const id = await submitAndFind(intake());
+    // Whatever the intake itself sent; recording must add nothing to it.
+    const before = await get(`/api/admin/requests/${id}`, admin);
+    const outboundBefore = before.body.messages.filter((m: Json) => m.direction === 'outbound').length;
 
     const recorded = await adminPost(id, {
       action: 'record_offline_payment',
@@ -158,6 +161,15 @@ describe('money collected outside Stripe', () => {
     // Nothing that support could look up in Stripe and fail to find.
     expect(payment.stripe_session_id).toBeFalsy();
     expect(payment.stripe_payment_intent).toBeFalsy();
+
+    // Recording a job that happened weeks ago must not email that customer a
+    // fresh booking confirmation out of the blue.
+    expect(detail.body.messages.filter((m: Json) => m.direction === 'outbound')).toHaveLength(outboundBefore);
+
+    // The walk through the state machine is recorded, so the history reads
+    // like a normal job rather than a row that teleported to confirmed.
+    const history = detail.body.history ?? [];
+    expect(history.some((h: Json) => h.to_status === 'confirmed')).toBe(true);
   });
 
   it('refuses to record a second payment against the same job', async () => {

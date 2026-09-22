@@ -98,9 +98,14 @@ describe('premium visual and interaction safeguards', () => {
     }
     // Every reference still carries a known, current fingerprint — no source
     // may invent a third scheme or leave an asset unversioned.
-    const KNOWN = new Set(['ac-ai-20260911-r1', 'ac-book-20260921-r1', 'ac-book-20260922-r1', 'ac-kind-20260922-r1', 'ac-fee-20260922-r1']);
+    const KNOWN = new Set([
+      'ac-ai-20260911-r1', 'ac-visual-20260913-r1', 'ac-book-20260921-r1',
+      'ac-book-20260922-r1', 'ac-kind-20260922-r1', 'ac-fee-20260922-r1',
+    ]);
     for (const source of sources) {
-      const fingerprints = source.match(/ac-(?:prod|ai|book|kind)-\d{8}-r\d+/gu) ?? [];
+      // Any scheme, not a fixed list: a new prefix must be added to KNOWN
+      // deliberately, rather than slipping past a regex that cannot see it.
+      const fingerprints = source.match(/ac-[a-z]+-\d{8}-r\d+/gu) ?? [];
       expect(fingerprints.length).toBeGreaterThan(0);
       for (const fingerprint of fingerprints) expect(KNOWN).toContain(fingerprint);
     }

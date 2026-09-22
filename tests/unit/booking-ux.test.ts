@@ -253,3 +253,30 @@ describe('intake — package choice and price before submitting', () => {
     expect(formScript).toContain('Submitting still works');
   });
 });
+
+// A checkbox row is a two-column grid: the 22px box, then the content. Any
+// third child lands under the checkbox in a 22px column and wraps one word
+// per line. The error message already carried the fix; the $25 same-day hint
+// shipped without it and rendered as a vertical column of single words on the
+// live page. Anything placed in that row needs the same rule.
+describe('checkbox rows keep their supporting text readable', () => {
+  const css = readFileSync(new URL('../../assets/css/ppi.css', import.meta.url), 'utf8');
+
+  it('puts every element after the label back in the content column', () => {
+    const block = css.slice(css.indexOf('.field-check {'), css.indexOf('.vin-row'));
+    expect(block).toMatch(/\.field-check\s*\{[^}]*grid-template-columns:\s*22px\s+1fr/u);
+    for (const child of ['.field-error', '.field-hint']) {
+      const rule = new RegExp(`\\.field-check\\s+\\${child}[^{]*\\{[^}]*grid-column:\\s*2`, 'u');
+      const grouped = new RegExp(`\\.field-check\\s+\\${child},[\\s\\S]{0,80}?grid-column:\\s*2`, 'u');
+      expect(rule.test(block) || grouped.test(block), `${child} must sit in column 2`).toBe(true);
+    }
+  });
+
+  it('the same-day fee hint is inside a checkbox row, so the rule matters', () => {
+    const page = readFileSync(new URL('../../las-vegas-pre-purchase-inspection/index.html', import.meta.url), 'utf8');
+    const row = page.slice(page.indexOf('id="sameDayPriority"'));
+    const end = row.indexOf('</div>');
+    expect(row.slice(0, end)).toContain('class="field-hint"');
+    expect(row.slice(0, end)).toContain('$25');
+  });
+});

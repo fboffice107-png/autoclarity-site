@@ -296,7 +296,12 @@ fieldset.form-step legend {
   accent-color: var(--blue);
 }
 .field-check label { font-weight: 550; font-size: 15px; margin: 0; }
-.field-check .field-error { grid-column: 2; }
+/* The row is a 22px checkbox plus one content column. Anything after the
+   label is a third grid item, which lands under the checkbox and wraps one
+   word per line unless it is put back in the content column. */
+.field-check .field-error,
+.field-check .field-hint { grid-column: 2; }
+.field-check .field-hint { margin: 2px 0 0; }
 
 .vin-row { display: flex; gap: 8px; }
 .vin-row input { flex: 1; }

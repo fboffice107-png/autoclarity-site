@@ -21,11 +21,12 @@ import leadClassificationMigration from '../../migrations/0010_lead_classificati
 import reportFulfillmentMigration from '../../migrations/0011_report_fulfillment_integrity.sql?raw';
 import agreementAcceptanceMigration from '../../migrations/0012_agreement_acceptance_integrity.sql?raw';
 import bookingProposalMigration from '../../migrations/0014_booking_proposal_flow.sql?raw';
+import openAvailabilityMigration from '../../migrations/0015_open_availability.sql?raw';
 
 const T0 = '2030-01-01T00:00:00.000Z';
 
-/** The production schema as it stands today, then 0014 on top. */
-function migrated(applyBooking = true): DatabaseSync {
+/** The production schema as it stands today, then 0014 (+0015) on top. */
+function migrated(applyBooking = true, applyOpen = true): DatabaseSync {
   const db = new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys = ON;');
   for (const m of [
@@ -35,6 +36,7 @@ function migrated(applyBooking = true): DatabaseSync {
     reportFulfillmentMigration, agreementAcceptanceMigration,
   ]) db.exec(m);
   if (applyBooking) db.exec(bookingProposalMigration);
+  if (applyBooking && applyOpen) db.exec(openAvailabilityMigration);
   return db;
 }
 
@@ -120,7 +122,7 @@ describe('0014 — alternatives for one inspection may share a buffer window', (
   const FOUR = '2030-06-03T23:00:00.000Z';
 
   it('is exactly what the 0004 triggers used to prevent', () => {
-    const db = migrated(false);
+    const db = migrated(false, false);
     try {
       seed(db);
       insertSlot(db, 'slt_1', 'req_a', NINE);
@@ -141,12 +143,54 @@ describe('0014 — alternatives for one inspection may share a buffer window', (
     } finally { db.close(); }
   });
 
-  it('still refuses to offer an overlapping window to a DIFFERENT customer', () => {
+  it('lets a second customer be OFFERED the same free window (0015)', () => {
+    // An offered time reserves nothing, so the same availability can go to
+    // several customers. Only holding or confirming reserves it.
     const db = migrated();
     try {
       seed(db);
       insertSlot(db, 'slt_1', 'req_a', NINE);
-      expect(() => insertSlot(db, 'slt_x', 'req_b', TWELVE_THIRTY)).toThrow(/overlaps an active window/u);
+      insertSlot(db, 'slt_x', 'req_b', NINE);
+      expect(db.prepare(`SELECT COUNT(*) AS n FROM appointment_slots WHERE status = 'offered'`).get())
+        .toEqual({ n: 2 });
+    } finally { db.close(); }
+  });
+
+  it('but only ONE of them can hold it', () => {
+    const db = migrated();
+    try {
+      seed(db);
+      insertSlot(db, 'slt_1', 'req_a', NINE);
+      insertSlot(db, 'slt_x', 'req_b', NINE);
+      db.exec(`UPDATE appointment_slots SET status = 'held' WHERE id = 'slt_1'`);
+      // Same instant → the 0001 partial unique index refuses it.
+      expect(() => db.exec(`UPDATE appointment_slots SET status = 'held' WHERE id = 'slt_x'`)).toThrow();
+    } finally { db.close(); }
+  });
+
+  it('and an overlapping-but-not-identical window cannot be held either', () => {
+    const db = migrated();
+    try {
+      seed(db);
+      insertSlot(db, 'slt_1', 'req_a', NINE);
+      insertSlot(db, 'slt_x', 'req_b', TWELVE_THIRTY);
+      db.exec(`UPDATE appointment_slots SET status = 'held' WHERE id = 'slt_1'`);
+      // Different start time, overlapping buffers → the 0015 trigger refuses.
+      expect(() => db.exec(`UPDATE appointment_slots SET status = 'held' WHERE id = 'slt_x'`))
+        .toThrow(/overlaps an active window/u);
+    } finally { db.close(); }
+  });
+
+  it('offers an hourly slate across several days on one request', () => {
+    const db = migrated();
+    try {
+      seed(db);
+      const day = '2030-06-03';
+      for (let i = 0; i < 8; i++) {
+        insertSlot(db, `slt_h${i}`, 'req_a', `${day}T${String(17 + i).padStart(2, '0')}:00:00.000Z`);
+      }
+      expect(db.prepare(`SELECT COUNT(*) AS n FROM appointment_slots WHERE request_id = 'req_a' AND status = 'offered'`).get())
+        .toEqual({ n: 8 });
     } finally { db.close(); }
   });
 
@@ -161,24 +205,24 @@ describe('0014 — alternatives for one inspection may share a buffer window', (
     } finally { db.close(); }
   });
 
-  it('once a time is held, nobody else can be offered or hold that window', () => {
-    const db = migrated();
-    try {
-      seed(db);
-      insertSlot(db, 'slt_1', 'req_a', NINE);
-      db.exec(`UPDATE appointment_slots SET status = 'held' WHERE id = 'slt_1'`);
-      expect(() => insertSlot(db, 'slt_x', 'req_b', NINE)).toThrow(/overlaps an active window/u);
-      expect(() => insertSlot(db, 'slt_y', 'req_b', TWELVE_THIRTY)).toThrow(/overlaps an active window/u);
-    } finally { db.close(); }
-  });
-
-  it('a confirmed appointment still blocks every other request', () => {
-    const db = migrated();
-    try {
-      seed(db);
-      insertSlot(db, 'slt_1', 'req_a', NINE, 'confirmed');
-      expect(() => insertSlot(db, 'slt_x', 'req_b', NINE)).toThrow(/overlaps an active window/u);
-    } finally { db.close(); }
+  it('a held or confirmed window can never be held or confirmed by anyone else', () => {
+    // This is the guarantee that protects the money. Offering is now open;
+    // reserving is not.
+    for (const occupied of ['held', 'confirmed'] as const) {
+      const db = migrated();
+      try {
+        seed(db);
+        insertSlot(db, 'slt_1', 'req_a', NINE, occupied);
+        // Offering over it is allowed at the database level (the application
+        // preflight is what keeps the owner from doing it by accident)...
+        insertSlot(db, 'slt_x', 'req_b', TWELVE_THIRTY);
+        // ...but it can never become a reservation.
+        expect(() => db.exec(`UPDATE appointment_slots SET status = 'held' WHERE id = 'slt_x'`))
+          .toThrow(/overlaps an active window/u);
+        expect(() => db.exec(`UPDATE appointment_slots SET status = 'confirmed' WHERE id = 'slt_x'`))
+          .toThrow(/overlaps an active window/u);
+      } finally { db.close(); }
+    }
   });
 
   it('keeps the exact-start-time double-booking guard from 0001', () => {

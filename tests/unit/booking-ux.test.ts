@@ -93,6 +93,7 @@ describe('admin — one primary action before booking', () => {
 
   it('refuses to send without times and retains an unsent draft', () => {
     expect(adminScript).toContain('a proposal without times leaves the customer unable to book');
+    expect(adminScript).toContain('Tick at least one day and one time');
     expect(adminScript).toContain('Your unsent booking proposal draft was kept');
     expect(adminScript).toContain('function proposalKeyFor(form, slots)');
   });
@@ -108,9 +109,40 @@ describe('admin — one primary action before booking', () => {
     expect(adminScript).toContain('function whenLong(iso)');
     expect(adminScript).toContain('hour12: true');
     expect(adminScript).toContain("timeZone: \"America/Los_Angeles\"");
-    // Quick-fill builds the instant from a Las Vegas wall clock, DST included.
+    // Slate instants are built from a Las Vegas wall clock, DST included.
     expect(adminScript).toContain('function vegasInstant(dateStr, hhmm)');
     expect(adminScript).toContain('function vegasOffsetMinutes(atUtcMs)');
+  });
+
+  it('offers a whole slate of days and hours, not three fixed boxes', () => {
+    expect(adminScript).toContain('function offerableDays(draftCfg)');
+    expect(adminScript).toContain('function slateInstants(section, draftCfg)');
+    expect(adminScript).toContain('var OFFER_HOURS =');
+    expect(adminScript).toContain('data-slate="workday"');
+    expect(adminScript).toContain('data-slate="afternoons"');
+    // The old three-input picker is gone.
+    expect(adminScript).not.toContain('pSlot');
+    expect(adminScript).not.toContain('data-quickfill');
+  });
+
+  it('only offers days the business actually operates, past the notice period', () => {
+    const start = adminScript.indexOf('function offerableDays(draftCfg)');
+    const body = adminScript.slice(start, adminScript.indexOf('function slateInstants', start));
+    expect(body).toContain('daysOfOperation');
+    expect(body).toContain('minLeadHours');
+    expect(body).toContain('maxAdvanceDays');
+  });
+
+  it('drops a slate time that stops clearing the notice period before Send', () => {
+    const start = adminScript.indexOf('function slateInstants(section, draftCfg)');
+    const body = adminScript.slice(start, start + 900);
+    expect(body).toContain('floor');
+    expect(body).toContain('lead * 3600000');
+  });
+
+  it('tells the owner exactly how many times will go out', () => {
+    expect(adminScript).toContain('will be offered, from');
+    expect(adminScript).toContain('No times selected yet');
   });
 });
 
@@ -143,8 +175,25 @@ describe('customer portal — one journey, no dead end', () => {
   it('shows weekday, date and an unmistakable AM/PM in Las Vegas time', () => {
     expect(portalScript).toContain('function fmtSlotLong(iso)');
     expect(portalScript).toContain('hour12: true');
-    expect(portalScript).toContain('Las Vegas time');
-    expect(portalScript).toContain('These are alternatives for one inspection');
+    expect(portalScript).toContain('All times are Las Vegas time.');
+  });
+
+  it('binds the time buttons by data attribute, not by their class name', () => {
+    // A rename once detached this handler and clicking a time did nothing.
+    expect(portalScript).toContain('elContent.querySelectorAll("[data-slot]")');
+    expect(portalScript).not.toContain('querySelectorAll(".slot-btn")');
+    // Whatever the markup renders must carry the attribute the handler needs.
+    const markup = portalScript.match(/<button type="button" class="slot-chip"[^']*/u)?.[0] ?? '';
+    expect(markup).toContain('data-slot=');
+  });
+
+  it('groups a long slate of times by day instead of listing timestamps', () => {
+    expect(portalScript).toContain('var byDay = []');
+    expect(portalScript).toContain('slot-day-head');
+    expect(portalScript).toContain('slot-chip');
+    expect(portalScript).toContain('Only one of these becomes your appointment');
+    expect(portalCss).toContain('.slot-day-group');
+    expect(portalCss).toContain('.slot-chip');
   });
 
   it('never prechecks consent and keeps cancelling secondary', () => {

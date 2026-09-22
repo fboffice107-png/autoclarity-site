@@ -16,6 +16,13 @@ export interface SlotCandidate {
   blockedEndsAt: string;
 }
 
+/**
+ * How many windows one proposal may offer. Wide enough for a genuine slate —
+ * hourly across several days — and bounded so a runaway client cannot write
+ * thousands of rows or produce an unreadable email.
+ */
+export const MAX_OFFERED_SLOTS = 40;
+
 export interface SlotValidation {
   valid: SlotCandidate[];
   /** Human-readable reason per rejected time; shown to the owner, not stored. */
@@ -39,7 +46,7 @@ export async function validateSlotTimes(
   const skipped: string[] = [];
   const seen = new Set<string>();
 
-  for (const raw of rawStarts.slice(0, 5)) {
+  for (const raw of rawStarts.slice(0, MAX_OFFERED_SLOTS)) {
     const label = String(raw);
     const start = new Date(label);
     if (Number.isNaN(start.getTime())) {
@@ -66,21 +73,20 @@ export async function validateSlotTimes(
     const blockedStartsAt = new Date(start.getTime() - config.scheduling.travelBufferMin * 60_000).toISOString();
     const blockedEndsAt = new Date(end.getTime() + config.scheduling.reportBufferMin * 60_000).toISOString();
 
-    // Options offered on the SAME request are alternatives for one inspection,
-    // so they are allowed to overlap each other's buffers. Anything belonging
-    // to a different request is a real conflict.
+    // Only a held or confirmed window reserves capacity. Offered rows — this
+    // request's or anyone else's — are invitations, so the same free window may
+    // be offered to several customers and the first to hold it takes it.
     const clash = await db
       .prepare(
         `SELECT id FROM appointment_slots
-         WHERE status IN ('offered','held','confirmed')
-           AND NOT (request_id = ? AND status = 'offered')
+         WHERE status IN ('held','confirmed')
            AND COALESCE(blocked_starts_at, starts_at) < ?
            AND COALESCE(blocked_ends_at, ends_at) > ? LIMIT 1`,
       )
-      .bind(requestId, blockedEndsAt, blockedStartsAt)
+      .bind(blockedEndsAt, blockedStartsAt)
       .first<{ id: string }>();
     if (clash) {
-      skipped.push(`${label} — conflicts with another confirmed or offered appointment (including travel and report buffers)`);
+      skipped.push(`${label} — a booked appointment already occupies that window (including travel and report buffers)`);
       continue;
     }
 

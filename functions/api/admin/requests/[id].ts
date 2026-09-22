@@ -18,6 +18,7 @@ import {
   recordProposalNotification,
   travelSentence,
   validateSlotTimes,
+  MAX_OFFERED_SLOTS,
   type BookingProposalRow,
   type SlotCandidate,
 } from '../../../lib/booking-proposal.ts';
@@ -120,6 +121,20 @@ function fmtSlot(startsAt: string, timezone: string): string {
     minute: '2-digit',
     timeZoneName: 'short',
   });
+}
+
+
+/** A slate of times reads as a wall of timestamps unless it is grouped. */
+function groupSlotsByDay(startsAt: string[], timezone: string): string {
+  const days = new Map<string, string[]>();
+  for (const iso of startsAt) {
+    const when = new Date(iso);
+    const day = when.toLocaleDateString('en-US', { timeZone: timezone, weekday: 'long', month: 'long', day: 'numeric' });
+    const time = when.toLocaleTimeString('en-US', { timeZone: timezone, hour: 'numeric', minute: '2-digit', hour12: true });
+    if (!days.has(day)) days.set(day, []);
+    days.get(day)!.push(time);
+  }
+  return [...days.entries()].map(([day, times]) => `  ${day}: ${times.join(', ')}`).join('\n');
 }
 
 async function notificationFailureResponse(
@@ -259,7 +274,7 @@ async function deliverProposalEmail(
       message: input.customerMessage,
       priceLines: priceLines.join('\n'),
       total: formatCents(input.totals.totalCents),
-      slots: slotStarts.map((s) => `  • ${fmtSlot(s, config.scheduling.timezone)}`).join('\n'),
+      slots: groupSlotsByDay(slotStarts, config.scheduling.timezone),
       expires: fmtSlot(input.expiresAt, config.scheduling.timezone),
     },
   }, undefined, `booking_proposal:${input.proposalId}`);
@@ -430,6 +445,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       reviewNotes: draftBreakdown.reviewNotes,
       quoteExpiryHours: config.quotes.expiryHours,
       slotTemplates: config.scheduling.slotTemplates,
+      daysOfOperation: config.scheduling.daysOfOperation,
       timezone: config.scheduling.timezone,
       minLeadHours: config.scheduling.minLeadHours,
       maxAdvanceDays: config.scheduling.maxAdvanceDays,
@@ -977,7 +993,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           { skipped: slotCheck.skipped },
         );
       }
-      if (slotCheck.valid.length > 3) slotCheck.valid = slotCheck.valid.slice(0, 3);
 
       // Take ownership of the request first; this compare-and-swap is what
       // stops two browser tabs from both building a proposal.
@@ -1212,7 +1227,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     // ---------------------------------------------------------- propose_slots
     case 'propose_slots': {
       if (!flags.bookingEnabled) return errorJson('booking_disabled', 'Booking is disabled in this environment.', 409);
-      const slotsIn = (body.slots ?? []).slice(0, 5);
+      const slotsIn = (body.slots ?? []).slice(0, MAX_OFFERED_SLOTS);
       if (slotsIn.length === 0) return errorJson('validation', 'Provide at least one slot start time (ISO).', 422);
       const now = nowIso();
       const nowMs = Date.now();
@@ -1231,17 +1246,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         const end = new Date(start.getTime() + config.scheduling.durationMin * 60_000);
         const blockedStart = new Date(start.getTime() - config.scheduling.travelBufferMin * 60_000).toISOString();
         const blockedEnd = new Date(end.getTime() + config.scheduling.reportBufferMin * 60_000).toISOString();
-        // Friendly preflight; the 0014 triggers are the concurrency-safe
-        // authority. Options already offered on THIS request are alternatives
-        // for the same inspection, so they are not treated as conflicts.
+        // Friendly preflight; the 0015 triggers are the concurrency-safe
+        // authority. Only held and confirmed windows reserve capacity.
         const clash = await db
           .prepare(
-            `SELECT id FROM appointment_slots WHERE status IN ('offered','held','confirmed')
-             AND NOT (request_id = ? AND status = 'offered')
+            `SELECT id FROM appointment_slots WHERE status IN ('held','confirmed')
              AND COALESCE(blocked_starts_at, starts_at) < ?
              AND COALESCE(blocked_ends_at, ends_at) > ? LIMIT 1`,
           )
-          .bind(id, blockedEnd, blockedStart)
+          .bind(blockedEnd, blockedStart)
           .first<{ id: string }>();
         if (clash) {
           skipped.push(`${startRaw} (conflicts with an existing appointment incl. buffers)`);

@@ -554,6 +554,58 @@
     return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(target);
   }
 
+
+  /* Every hour the business will consider offering. The owner ticks a subset;
+     nothing here is offered unless it is ticked. */
+  var OFFER_HOURS = ["09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00"];
+
+  /* Must match MAX_OFFERED_SLOTS in functions/lib/booking-proposal.ts. */
+  var MAX_OFFERED_PROPOSAL = 40;
+
+  /* The days a proposal may legally offer: past the minimum notice, inside the
+     advance window, and on a day the business operates. */
+  function offerableDays(draftCfg) {
+    var lead = Number(draftCfg.minLeadHours || 18);
+    var maxAdvance = Number(draftCfg.maxAdvanceDays || 21);
+    var operating = draftCfg.daysOfOperation || [1, 2, 3, 4, 5, 6];
+    var out = [];
+    for (var i = 0; i <= maxAdvance; i++) {
+      var at = new Date(Date.now() + i * 86400000);
+      var iso = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(at);
+      // The latest hour on this day must still clear the lead time.
+      var latest = vegasInstant(iso, OFFER_HOURS[OFFER_HOURS.length - 1]);
+      if (new Date(latest).getTime() < Date.now() + lead * 3600000) continue;
+      var weekday = new Date(vegasInstant(iso, "12:00")).getDay();
+      if (operating.indexOf(weekday) === -1) continue;
+      out.push({
+        iso: iso,
+        label: new Date(vegasInstant(iso, "12:00")).toLocaleDateString("en-US", {
+          timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric"
+        })
+      });
+      if (out.length >= 14) break;
+    }
+    return out;
+  }
+
+  /* Every ticked day x every ticked hour, as ISO instants, minus anything that
+     no longer clears the lead time by the moment Send is pressed. */
+  function slateInstants(section, draftCfg) {
+    var lead = Number(draftCfg.minLeadHours || 18);
+    var floor = Date.now() + lead * 3600000 - 60000;
+    var days = [].slice.call(section.querySelectorAll("[data-day]")).filter(function (b) { return b.checked; });
+    var hours = [].slice.call(section.querySelectorAll("[data-hour]")).filter(function (b) { return b.checked; });
+    var out = [];
+    days.forEach(function (d) {
+      hours.forEach(function (h) {
+        var iso = vegasInstant(d.getAttribute("data-day"), h.getAttribute("data-hour"));
+        if (new Date(iso).getTime() >= floor) out.push(iso);
+      });
+    });
+    out.sort();
+    return out;
+  }
+
   function proposalCard(d) {
     var draftCfg = d.proposalDraft || {};
     var saved = readDraft() || {};
@@ -630,21 +682,35 @@
       '<input id="pInternal" value="' + esc(saved.internal || "") + '" /></div></details>';
 
     // ---- times ----
-    var nextDate = nextOfferDate(draftCfg.minLeadHours);
-    html += '<h3>Appointment options <span class="opt">(alternatives for one inspection)</span></h3>' +
-      '<p class="field-hint">Las Vegas time. Offer up to three — the customer picks one and the rest are released. Earliest bookable date is ' +
-      esc(nextDate) + " (" + esc(draftCfg.minLeadHours || 18) + "h notice).</p>" +
-      '<div class="slot-picker">';
-    [0, 1, 2].forEach(function (i) {
-      html += '<label class="field field-inline"><span>Option ' + (i + 1) + '</span>' +
-        '<input type="datetime-local" id="pSlot' + i + '" value="' + esc((saved.slots || [])[i] || "") + '" /></label>';
+    // Pick the days, pick the hours, and every combination is offered. The
+    // customer chooses one and the rest are released the moment they pay.
+    var days = offerableDays(draftCfg);
+    var hours = OFFER_HOURS;
+    var savedDays = saved.days || days.slice(0, 3).map(function (d) { return d.iso; });
+    var savedHours = saved.hours || ["13:00", "15:00"];
+
+    html += '<h3>When can he come?</h3>' +
+      '<p class="field-hint">Tick the days and the times. He picks one; the rest are released automatically. ' +
+      'Las Vegas time, earliest ' + esc(days.length ? days[0].label : "—") +
+      ' (' + esc(draftCfg.minLeadHours || 18) + 'h notice), latest ' + esc(days.length ? days[days.length - 1].label : "—") + '.</p>';
+
+    html += '<div class="slate"><div class="slate-group"><span class="slate-label">Days</span><div class="slate-chips">';
+    days.forEach(function (d) {
+      var on = savedDays.indexOf(d.iso) !== -1;
+      html += '<label class="chip' + (on ? " on" : "") + '"><input type="checkbox" data-day="' + esc(d.iso) + '"' + (on ? " checked" : "") + ' />' + esc(d.label) + "</label>";
     });
-    html += "</div>" +
-      '<div class="slot-quickfill"><span class="field-hint">Quick fill (' + esc(nextDate) + "):</span> " +
-      (draftCfg.slotTemplates || []).map(function (t) {
-        return '<button type="button" class="btn btn-ghost btn-sm" data-quickfill="' + esc(t) + '" data-quickdate="' + esc(nextDate) + '">' + esc(pretty12(t)) + "</button>";
-      }).join(" ") +
-      ' <button type="button" class="btn btn-ghost btn-sm" data-quickfill-all="1" data-quickdate="' + esc(nextDate) + '">All three</button></div>' +
+    html += '</div></div><div class="slate-group"><span class="slate-label">Times</span><div class="slate-chips">';
+    hours.forEach(function (h) {
+      var on = savedHours.indexOf(h) !== -1;
+      html += '<label class="chip' + (on ? " on" : "") + '"><input type="checkbox" data-hour="' + esc(h) + '"' + (on ? " checked" : "") + ' />' + esc(pretty12(h)) + "</label>";
+    });
+    html += '</div></div>' +
+      '<div class="slate-actions">' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-slate="workday">Every hour 10\u201317</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-slate="afternoons">Afternoons only</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-slate="clear">Clear</button>' +
+      "</div></div>";
+    html += '<p class="field-hint" id="slateSummary" role="status" aria-live="polite"></p>' +
       '<p class="form-status" id="slotHint" role="status" aria-live="polite"></p>';
 
     // ---- message preview ----
@@ -1100,12 +1166,16 @@
       var draftCfg = (detailCache && detailCache.proposalDraft) || {};
 
       function currentForm() {
-        var slots = [0, 1, 2].map(function (i) {
-          var el = document.getElementById("pSlot" + i);
-          return el ? el.value : "";
-        });
+        var days = [].slice.call(proposalSection.querySelectorAll("[data-day]"))
+          .filter(function (b) { return b.checked; })
+          .map(function (b) { return b.getAttribute("data-day"); });
+        var hours = [].slice.call(proposalSection.querySelectorAll("[data-hour]"))
+          .filter(function (b) { return b.checked; })
+          .map(function (b) { return b.getAttribute("data-hour"); });
         var selected = proposalSection.querySelector('input[name="pTier"]:checked');
         return {
+          days: days,
+          hours: hours,
           tier: selected ? selected.value : draftCfg.tier,
           base: document.getElementById("pBase").value,
           travel: document.getElementById("pTravel").value,
@@ -1116,7 +1186,6 @@
           expires: document.getElementById("pExpires").value,
           internal: document.getElementById("pInternal").value,
           message: document.getElementById("pMessage").value,
-          slots: slots,
           advancedOpen: proposalSection.querySelector(".advanced-pricing").open
         };
       }
@@ -1161,6 +1230,25 @@
         }).catch(function () {});
       }
 
+      function refreshSlate() {
+        var instants = slateInstants(proposalSection, draftCfg);
+        proposalSection.querySelectorAll(".chip").forEach(function (chip) {
+          chip.classList.toggle("on", chip.querySelector("input").checked);
+        });
+        var summary = document.getElementById("slateSummary");
+        if (instants.length === 0) {
+          summary.textContent = "No times selected yet — tick at least one day and one time.";
+        } else {
+          var first = whenLong(instants[0]);
+          var last = whenLong(instants[instants.length - 1]);
+          summary.textContent = instants.length + " time" + (instants.length === 1 ? "" : "s")
+            + " will be offered, from " + first + " to " + last
+            + (instants.length > MAX_OFFERED_PROPOSAL ? " — only the first " + MAX_OFFERED_PROPOSAL + " will be sent" : "");
+        }
+        persist();
+        return instants;
+      }
+
       proposalSection.addEventListener("input", function () {
         clearTimeout(previewTimer);
         previewTimer = setTimeout(refreshPrice, 250);
@@ -1170,39 +1258,43 @@
           proposalSection.querySelectorAll(".tier-option").forEach(function (label) {
             label.classList.toggle("selected", label.querySelector("input").checked);
           });
+          clearTimeout(previewTimer);
+          previewTimer = setTimeout(refreshPrice, 0);
+          return;
         }
-        clearTimeout(previewTimer);
-        previewTimer = setTimeout(refreshPrice, 0);
+        if (event.target && (event.target.hasAttribute("data-day") || event.target.hasAttribute("data-hour"))) {
+          refreshSlate();
+        }
       });
 
-      proposalSection.querySelectorAll("[data-quickfill]").forEach(function (btn) {
+      proposalSection.querySelectorAll("[data-slate]").forEach(function (btn) {
         btn.addEventListener("click", function () {
-          var iso = vegasInstant(btn.getAttribute("data-quickdate"), btn.getAttribute("data-quickfill"));
-          var target = [0, 1, 2].map(function (i) { return document.getElementById("pSlot" + i); })
-            .filter(function (el) { return el && !el.value; })[0];
-          if (!target) { document.getElementById("slotHint").textContent = "All three options are filled — clear one first."; return; }
-          target.value = toLocalInput(iso);
+          var preset = btn.getAttribute("data-slate");
+          var hourSets = {
+            workday: ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00"],
+            afternoons: ["13:00", "14:00", "15:00", "16:00", "17:00"],
+            clear: []
+          };
+          var want = hourSets[preset] || [];
+          proposalSection.querySelectorAll("[data-hour]").forEach(function (b) {
+            b.checked = want.indexOf(b.getAttribute("data-hour")) !== -1;
+          });
+          if (preset === "clear") {
+            proposalSection.querySelectorAll("[data-day]").forEach(function (b) { b.checked = false; });
+          }
           document.getElementById("slotHint").textContent = "";
-          persist();
+          refreshSlate();
         });
       });
-      var fillAll = proposalSection.querySelector("[data-quickfill-all]");
-      if (fillAll) fillAll.addEventListener("click", function () {
-        var date = fillAll.getAttribute("data-quickdate");
-        (draftCfg.slotTemplates || []).slice(0, 3).forEach(function (t, i) {
-          var el = document.getElementById("pSlot" + i);
-          if (el) el.value = toLocalInput(vegasInstant(date, t));
-        });
-        document.getElementById("slotHint").textContent = "";
-        persist();
-      });
+      refreshSlate();
 
       sendBtn.addEventListener("click", function () {
         var form = currentForm();
-        var slots = form.slots.filter(Boolean).map(function (v) { return new Date(v).toISOString(); });
+        var slots = slateInstants(proposalSection, draftCfg).slice(0, MAX_OFFERED_PROPOSAL);
         if (!slots.length) {
-          statusEl.textContent = "Add at least one appointment option — a proposal without times leaves the customer unable to book.";
-          document.getElementById("pSlot0").focus();
+          statusEl.textContent = "Tick at least one day and one time — a proposal without times leaves the customer unable to book.";
+          var firstDay = proposalSection.querySelector("[data-day]");
+          if (firstDay) firstDay.focus();
           return;
         }
         var total = sendBtn.getAttribute("data-total") || draftCfg.totalCents;

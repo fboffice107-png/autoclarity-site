@@ -187,12 +187,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
                AND NOT EXISTS (
                  SELECT 1 FROM appointment_slots other
                  WHERE other.id != appointment_slots.id
-                   AND other.status IN ('offered','held','confirmed')
-                   -- The other options offered on THIS request are alternatives
-                   -- for the same inspection, not competing reservations, so
-                   -- they never block the one the customer picked. Held and
-                   -- confirmed windows still block, on every request.
-                   AND NOT (other.request_id = appointment_slots.request_id AND other.status = 'offered')
+                   -- Only a real reservation blocks. Offered windows, this
+                   -- request's or another customer's, are invitations; the
+                   -- first customer to reach this compare-and-swap wins, and
+                   -- the loser is told the time was just taken.
+                   AND other.status IN ('held','confirmed')
                    AND COALESCE(other.blocked_starts_at, other.starts_at) < COALESCE(appointment_slots.blocked_ends_at, appointment_slots.ends_at)
                    AND COALESCE(other.blocked_ends_at, other.ends_at) > COALESCE(appointment_slots.blocked_starts_at, appointment_slots.starts_at)
                )`,

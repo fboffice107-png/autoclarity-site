@@ -25,6 +25,10 @@ import leadClassificationMigration from '../../migrations/0010_lead_classificati
 import reportFulfillmentMigration from '../../migrations/0011_report_fulfillment_integrity.sql?raw';
 import agreementAcceptanceMigration from '../../migrations/0012_agreement_acceptance_integrity.sql?raw';
 import bookingProposalMigration from '../../migrations/0014_booking_proposal_flow.sql?raw';
+import openAvailabilityMigration from '../../migrations/0015_open_availability.sql?raw';
+
+/** Both migrations this release applies, in order. */
+const RELEASE_MIGRATIONS = `${bookingProposalMigration}\n${openAvailabilityMigration}`;
 
 const T0 = '2026-09-01T00:00:00.000Z';
 const APPT = '2026-09-30T20:00:00.000Z';
@@ -139,7 +143,7 @@ describe('0014 applied to a populated production database', () => {
     try {
       seedLiveTraffic(db);
       const before = census(db);
-      db.exec(bookingProposalMigration);
+      db.exec(RELEASE_MIGRATIONS);
       expect(census(db)).toEqual(before);
 
       // Spot-check the rows that matter most, field by field.
@@ -159,7 +163,7 @@ describe('0014 applied to a populated production database', () => {
     const db = productionSchema();
     try {
       seedLiveTraffic(db);
-      db.exec(bookingProposalMigration);
+      db.exec(RELEASE_MIGRATIONS);
 
       // req_live1 was at awaiting_payment with a held slot. Complete it exactly
       // as the webhook would, against the pre-migration quote, slot and booking.
@@ -187,9 +191,11 @@ describe('0014 applied to a populated production database', () => {
     const db = productionSchema();
     try {
       seedLiveTraffic(db);
-      db.exec(bookingProposalMigration);
-      // req_live2 holds 2026-10-02. Nobody else may be offered that window.
-      expect(() => db.exec(slotSql('slt_intruder', 'req_live1', '2026-10-02T20:00:00.000Z', 'offered')))
+      db.exec(RELEASE_MIGRATIONS);
+      // req_live2 holds a confirmed 2026-10-02 appointment. Another customer
+      // may be OFFERED that window, but can never reserve it.
+      db.exec(slotSql('slt_intruder', 'req_live1', '2026-10-02T20:00:00.000Z', 'offered'));
+      expect(() => db.exec(`UPDATE appointment_slots SET status = 'held' WHERE id = 'slt_intruder'`))
         .toThrow(/overlaps an active window/u);
     } finally { db.close(); }
   });
@@ -198,17 +204,18 @@ describe('0014 applied to a populated production database', () => {
     const db = productionSchema();
     try {
       seedLiveTraffic(db);
-      db.exec(bookingProposalMigration);
+      db.exec(RELEASE_MIGRATIONS);
       const after = census(db);
       // The table and index guards are IF NOT EXISTS and the triggers are
       // dropped before creation, so re-running everything except the ALTERs
       // (which SQLite rejects as duplicate columns, exactly as intended) is
       // safe. Prove the trigger half specifically, since that is what a
       // partially applied migration would most likely repeat.
-      const triggerHalf = bookingProposalMigration.slice(bookingProposalMigration.indexOf('DROP TRIGGER'));
+      const triggerHalf = openAvailabilityMigration.slice(openAvailabilityMigration.indexOf('DROP TRIGGER'));
       db.exec(triggerHalf);
       expect(census(db)).toEqual(after);
-      expect(() => db.exec(slotSql('slt_intruder2', 'req_live1', '2026-10-02T20:00:00.000Z', 'offered')))
+      db.exec(slotSql('slt_intruder2', 'req_live1', '2026-10-02T20:00:00.000Z', 'offered'));
+      expect(() => db.exec(`UPDATE appointment_slots SET status = 'confirmed' WHERE id = 'slt_intruder2'`))
         .toThrow(/overlaps an active window/u);
     } finally { db.close(); }
   });
@@ -216,8 +223,8 @@ describe('0014 applied to a populated production database', () => {
   it('refuses a duplicated ALTER, so a re-run fails loudly instead of corrupting', () => {
     const db = productionSchema();
     try {
-      db.exec(bookingProposalMigration);
-      expect(() => db.exec(bookingProposalMigration)).toThrow(/duplicate column/iu);
+      db.exec(RELEASE_MIGRATIONS);
+      expect(() => db.exec(RELEASE_MIGRATIONS)).toThrow(/duplicate column/iu);
     } finally { db.close(); }
   });
 });

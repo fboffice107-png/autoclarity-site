@@ -355,16 +355,26 @@
       html += '<section class="portal-card"><h2>Choose your appointment</h2>' +
         '<p class="field-hint">' + esc(paidReselection
           ? "Pick a replacement time. There is no additional charge."
-          : "These are alternatives for one inspection — pick the one that works. Selecting holds it for you while you finish booking.") + "</p>" +
-        '<div class="slot-list">';
+          : "Pick whichever time works. Only one of these becomes your appointment — selecting holds it for you while you finish booking.") + "</p>";
+
+      // Grouped by day, because a full slate of hourly options reads as a
+      // wall of timestamps otherwise.
+      var byDay = [];
       offered.forEach(function (s) {
         var when = fmtSlotLong(s.startsAt);
-        html += '<button type="button" class="slot-btn" data-slot="' + esc(s.id) + '">' +
-          '<span class="slot-day">' + esc(when.day) + "</span>" +
-          '<span class="slot-time">' + esc(when.time) + ' <span class="slot-tz">Las Vegas time</span></span>' +
-          '<span class="slot-sub">' + esc(paidReselection ? "Choose this time" : "Select and continue") + "</span></button>";
+        var group = byDay.filter(function (g) { return g.day === when.day; })[0];
+        if (!group) { group = { day: when.day, slots: [] }; byDay.push(group); }
+        group.slots.push({ id: s.id, time: when.time });
       });
-      html += "</div>";
+      byDay.forEach(function (group) {
+        html += '<div class="slot-day-group"><h3 class="slot-day-head">' + esc(group.day) + "</h3>" +
+          '<div class="slot-times">';
+        group.slots.forEach(function (s) {
+          html += '<button type="button" class="slot-chip" data-slot="' + esc(s.id) + '">' + esc(s.time) + "</button>";
+        });
+        html += "</div></div>";
+      });
+      html += '<p class="field-hint slot-tz-note">All times are Las Vegas time.</p>';
       html += '<p class="field-hint slot-none">None of these work? <button type="button" class="linklike" id="requestNewTimes">Ask AutoClarity for different times</button></p>';
       html += "</section>";
     } else if (offerStale) {
@@ -503,7 +513,9 @@
       printReport.disabled = false;
       printStatus.textContent = "Use your browser’s print menu to save as PDF. Keep your private report secure.";
     });
-    elContent.querySelectorAll(".slot-btn").forEach(function (btn) {
+    // Bound by the data attribute, not a class name, so renaming the visual
+    // treatment can never silently detach the handler again.
+    elContent.querySelectorAll("[data-slot]").forEach(function (btn) {
       btn.addEventListener("click", function () {
         btn.disabled = true;
         action({ action: "select_slot", slotId: btn.getAttribute("data-slot") }, function (r) {

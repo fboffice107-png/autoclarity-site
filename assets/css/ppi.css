@@ -1080,3 +1080,87 @@ details.portal-secondary[open] > summary { margin-bottom: 14px; }
 }
 .intake-package .notice ul { margin: 0; padding-left: 18px; }
 .intake-package .line-items { margin-top: 6px; }
+
+/* ===========================================================================
+   Open availability — the owner ticks days and hours, the customer picks one
+   from a slate grouped by day. Same tokens, same card language.
+   =========================================================================== */
+
+/* ---- admin: the day x hour slate ---- */
+.slate {
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: var(--glass);
+  padding: 14px;
+  margin: 10px 0;
+}
+.slate-group { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
+.slate-group:last-of-type { margin-bottom: 4px; }
+.slate-label {
+  flex: 0 0 56px;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  padding-top: 8px;
+}
+.slate-chips { display: flex; flex-wrap: wrap; gap: 8px; flex: 1 1 260px; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg-elev-1);
+  color: var(--text-2);
+  font-size: 13.5px;
+  font-weight: 650;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+.chip input { position: absolute; opacity: 0; width: 0; height: 0; }
+.chip:hover { border-color: var(--blue-bright); }
+.chip.on {
+  border-color: var(--blue-bright);
+  background: rgba(47, 107, 255, 0.16);
+  color: var(--text);
+}
+.chip:focus-within { outline: 2px solid var(--blue-bright); outline-offset: 2px; }
+.slate-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+
+/* ---- customer: the slate, grouped by day ---- */
+.slot-day-group { margin: 14px 0 4px; }
+.slot-day-head {
+  font-size: 14px;
+  font-weight: 750;
+  color: var(--text-2);
+  margin: 0 0 8px;
+  letter-spacing: 0.01em;
+}
+.slot-times { display: flex; flex-wrap: wrap; gap: 8px; }
+.slot-chip {
+  flex: 1 1 96px;
+  min-height: 48px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--glass);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.slot-chip:hover { border-color: var(--blue-bright); background: var(--glass-strong); }
+.slot-chip:focus-visible { outline: 2px solid var(--blue-bright); outline-offset: 2px; }
+.slot-chip[disabled] { opacity: 0.5; cursor: not-allowed; }
+.slot-tz-note { margin-top: 12px; }
+
+@media (max-width: 520px) {
+  .slate-label { flex-basis: 100%; padding-top: 0; }
+  .slot-chip { flex-basis: 45%; font-size: 15px; }
+}

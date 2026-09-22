@@ -122,11 +122,20 @@ async function submitAndFind(payload: Json): Promise<string> {
   return row.id;
 }
 
+/** Every hour from 10:00 to 17:00 Las Vegas time on a given day offset. */
+function hourlySlate(daysOut: number, fromHourUtc = 17, count = 8): string[] {
+  const day = new Date(Date.now() + daysOut * 86_400_000).toISOString().slice(0, 10);
+  return Array.from({ length: count }, (_, i) =>
+    new Date(`${day}T${String(fromHourUtc + i).padStart(2, '0')}:00:00.000Z`).toISOString());
+}
+
 /**
  * Three afternoon options on one Las Vegas day, past the 18-hour lead time.
- * Each caller gets its own day, and the minutes are deliberately odd, so this
- * file's appointments cannot collide with fixtures scheduled elsewhere in the
- * integration suite (which occupy days 6 and 10-20).
+ *
+ * Every test in this file gets its OWN day offset, drawn from 2-9. Other
+ * integration files schedule fixtures on day 6 and across days 10-20, and a
+ * held slot there would break them, so this file stays below that range and
+ * uses odd minutes on top.
  */
 function afternoonOptions(daysOut: number): string[] {
   const day = new Date(Date.now() + daysOut * 86_400_000).toISOString().slice(0, 10);
@@ -202,7 +211,8 @@ describe('booking proposal — one owner action, one customer decision', () => {
     expect(emailBody).toContain('Total: $199.00');
     expect(emailBody).not.toContain('for the your vehicle');
     expect(emailBody.match(/\/ppi\/portal\/\?t=/gu) ?? []).toHaveLength(1);
-    expect(emailBody).toMatch(/AVAILABLE TIMES\n(\s+•.*\n){3}/u);
+    // Times are grouped under their day, so a wide slate stays readable.
+    expect(emailBody).toMatch(/AVAILABLE TIMES\n\s+\w+day, \w+ \d{1,2}: .*\d{1,2}:\d{2} (AM|PM)/u);
 
     // 6. The customer opens the single link.
     const link = await adminPost(requestId, { action: 'reissue_link' });
@@ -336,7 +346,7 @@ describe('booking proposal — one owner action, one customer decision', () => {
       const blocked = await adminPost(requestId, {
         action: 'send_booking_proposal',
         tier: 'standard',
-        slots: afternoonOptions(9),
+        slots: afternoonOptions(21),
         proposalKey: `far-proposal-${seq}`,
       });
       expect(blocked.status).toBe(422);
@@ -380,7 +390,7 @@ describe('booking proposal — one owner action, one customer decision', () => {
     const sent = await adminPost(requestId, {
       action: 'send_booking_proposal',
       tier: 'standard',
-      slots: afternoonOptions(11),
+      slots: afternoonOptions(2),
       proposalKey: `stranded-proposal-${seq}`,
     });
     expect(sent.status, JSON.stringify(sent.body)).toBe(200);
@@ -414,7 +424,7 @@ describe('booking proposal — one owner action, one customer decision', () => {
     const sent = await adminPost(requestId, {
       action: 'send_booking_proposal',
       tier: 'standard',
-      slots: afternoonOptions(13),
+      slots: afternoonOptions(4),
       proposalKey: `settled-proposal-${seq}`,
     });
     expect(sent.status, JSON.stringify(sent.body)).toBe(200);
@@ -448,6 +458,82 @@ describe('booking proposal — one owner action, one customer decision', () => {
     const afterSettled = await get('/api/portal', portal);
     expect(afterSettled.body.status).toBe('awaiting_agreement');
     expect(afterSettled.body.payment.status).toBe('succeeded');
+  });
+
+  it('offers a full hourly slate in one action, and the customer picks one', async () => {
+    const requestId = await submitAndFind(corollaIntake());
+    const slate = hourlySlate(8);
+    const sent = await adminPost(requestId, {
+      action: 'send_booking_proposal',
+      tier: 'standard',
+      slots: slate,
+      proposalKey: `slate-proposal-${seq}`,
+    });
+    expect(sent.status, JSON.stringify(sent.body)).toBe(200);
+    // All eight go out — the old cap silently kept three.
+    expect(sent.body.offeredSlots).toBe(8);
+    expect(sent.body.skipped).toHaveLength(0);
+
+    const link = await adminPost(requestId, { action: 'reissue_link' });
+    const token = new URL(link.body.url).searchParams.get('t')!;
+    const portal = { authorization: `Bearer ${token}` };
+    const view = await get('/api/portal', portal);
+    expect(view.body.slots.filter((s: Json) => s.status === 'offered')).toHaveLength(8);
+
+    // Picking one holds it and releases nothing until payment confirms.
+    const middle = view.body.slots.filter((s: Json) => s.status === 'offered')[3];
+    const held = await post('/api/portal/action', { action: 'select_slot', slotId: middle.id }, portal);
+    expect(held.status, JSON.stringify(held.body)).toBe(200);
+    const after = await get('/api/portal', portal);
+    expect(after.body.status).toBe('awaiting_agreement');
+    expect(after.body.slots.find((s: Json) => s.id === middle.id).status).toBe('held');
+
+    // One email carried the whole slate, grouped by day.
+    const detail = await get(`/api/admin/requests/${requestId}`, admin);
+    const email = detail.body.messages.filter((m: Json) => m.template === 'booking_proposal')[0];
+    expect(email.body_text).toContain('AVAILABLE TIMES');
+    expect(email.body_text).toMatch(/\d{1,2}:\d{2}\s?(AM|PM).*,.*\d{1,2}:\d{2}\s?(AM|PM)/u);
+  });
+
+  it('can offer the same window to two customers — only one can take it', async () => {
+    // This is what open availability means: the owner hands out a slate
+    // without the first customer's untaken options blocking the next one.
+    const slate = hourlySlate(9, 18, 3);
+    const firstId = await submitAndFind(corollaIntake());
+    const secondId = await submitAndFind(corollaIntake());
+
+    for (const [id, key] of [[firstId, `race-a-${seq}`], [secondId, `race-b-${seq}`]] as const) {
+      const sent = await adminPost(id, {
+        action: 'send_booking_proposal', tier: 'standard', slots: slate, proposalKey: key,
+      });
+      expect(sent.status, JSON.stringify(sent.body)).toBe(200);
+      expect(sent.body.offeredSlots).toBe(3);
+    }
+
+    async function portalFor(id: string): Promise<Record<string, string>> {
+      const link = await adminPost(id, { action: 'reissue_link' });
+      return { authorization: `Bearer ${new URL(link.body.url).searchParams.get('t')}` };
+    }
+    const firstPortal = await portalFor(firstId);
+    const secondPortal = await portalFor(secondId);
+
+    const firstSlot = (await get('/api/portal', firstPortal)).body.slots.find((s: Json) => s.status === 'offered');
+    const won = await post('/api/portal/action', { action: 'select_slot', slotId: firstSlot.id }, firstPortal);
+    expect(won.status, JSON.stringify(won.body)).toBe(200);
+
+    // The second customer's equivalent window is now unreachable.
+    const secondView = await get('/api/portal', secondPortal);
+    const sameInstant = secondView.body.slots
+      .filter((s: Json) => s.status === 'offered')
+      .find((s: Json) => s.startsAt === firstSlot.startsAt);
+    expect(sameInstant, 'the same instant should still be offered to the second customer').toBeTruthy();
+    const lost = await post('/api/portal/action', { action: 'select_slot', slotId: sameInstant.id }, secondPortal);
+    expect(lost.status).toBe(409);
+    expect(['slot_taken', 'slot_unavailable']).toContain(lost.body.error.code);
+    // And they are told plainly, not left guessing.
+    expect(lost.body.error.message.toLowerCase()).toMatch(/no longer available|just taken/u);
+    // Their request is untouched and they can still pick something else.
+    expect((await get('/api/portal', secondPortal)).body.status).toBe('awaiting_time_selection');
   });
 
   it('rejects a modification answer with no description', async () => {

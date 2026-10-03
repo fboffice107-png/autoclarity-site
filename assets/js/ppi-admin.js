@@ -607,8 +607,8 @@
       // The latest hour on this day must still clear the lead time.
       var latest = vegasInstant(iso, OFFER_HOURS[OFFER_HOURS.length - 1]);
       if (new Date(latest).getTime() < Date.now() + lead * 3600000) continue;
-      var weekday = new Date(vegasInstant(iso, "12:00")).getDay();
-      if (operating.indexOf(weekday) === -1) continue;
+      var weekday = new Date(iso + "T12:00:00Z").getUTCDay();
+      if (operating.indexOf(weekday) === -1 || (draftCfg.blackoutDates || []).indexOf(iso) !== -1) continue;
       out.push({
         iso: iso,
         label: new Date(vegasInstant(iso, "12:00")).toLocaleDateString("en-US", {
@@ -628,9 +628,11 @@
     var days = [].slice.call(section.querySelectorAll("[data-day]")).filter(function (b) { return b.checked; });
     var hours = [].slice.call(section.querySelectorAll("[data-hour]")).filter(function (b) { return b.checked; });
     var out = [];
+    var sundayHours = [].slice.call(section.querySelectorAll("[data-sunday-hour]")).filter(function (b) { return b.checked; });
     days.forEach(function (d) {
-      hours.forEach(function (h) {
-        var iso = vegasInstant(d.getAttribute("data-day"), h.getAttribute("data-hour"));
+      var sunday = new Date(d.getAttribute("data-day") + "T12:00:00Z").getUTCDay() === 0;
+      (sunday ? sundayHours : hours).forEach(function (h) {
+        var iso = vegasInstant(d.getAttribute("data-day"), h.getAttribute(sunday ? "data-sunday-hour" : "data-hour"));
         if (new Date(iso).getTime() >= floor) out.push(iso);
       });
     });
@@ -737,7 +739,7 @@
     // customer chooses one and the rest are released the moment they pay.
     var days = offerableDays(draftCfg);
     var hours = OFFER_HOURS;
-    var savedDays = saved.days || days.slice(0, 3).map(function (d) { return d.iso; });
+    var savedDays = saved.days || days.filter(function (d) { return new Date(d.iso + "T12:00:00Z").getUTCDay() !== 0; }).slice(0, 3).map(function (d) { return d.iso; });
     var savedHours = saved.hours || ["13:00", "15:00"];
 
     html += '<h3>When can he come?</h3>' +
@@ -762,6 +764,16 @@
       '<button type="button" class="btn btn-ghost btn-sm" data-slate="afternoons">Afternoons only</button>' +
       '<button type="button" class="btn btn-ghost btn-sm" data-slate="clear">Clear</button>' +
       "</div></div>";
+    if (draftCfg.sundayEligible) {
+      html += '<div class="slate-group"><span class="slate-label">Sunday times</span><div class="slate-chips">';
+      (draftCfg.slotTemplates || []).forEach(function (h) {
+        var on = (saved.sundayHours || []).indexOf(h) !== -1;
+        html += '<label class="chip' + (on ? ' on' : '') + '"><input type="checkbox" data-sunday-hour="' + esc(h) + '"' + (on ? ' checked' : '') + ' />' + esc(pretty12(h)) + '</label>';
+      });
+      html += '</div></div><p class="field-hint">For Sunday, tick a Sunday date and the Sunday times you want to offer. Templates come from Configuration → scheduling.slotTemplates. You can also use the existing custom appointment fields below. Nothing is offered until you send the proposal.</p>';
+    } else {
+      html += '<p class="field-hint">Sunday requires a private-sale vehicle at a confirmed private residence with inspection permission. Review Seller and Location below.</p>';
+    }
     html += '<p class="field-hint" id="slateSummary" role="status" aria-live="polite"></p>' +
       '<p class="form-status" id="slotHint" role="status" aria-live="polite"></p>';
 
@@ -945,12 +957,25 @@
       "<dt>Known issues</dt><dd>" + esc(req.known_issues || "—") + "</dd>" +
       "<dt>Location</dt><dd>" + esc([req.loc_street, req.loc_unit, req.loc_city, req.loc_state, req.loc_zip].filter(Boolean).join(", ")) + "</dd>" +
       "<dt>Seller</dt><dd>" + esc([req.seller_type, req.seller_name, req.seller_phone].filter(Boolean).join(" · ") || "—") + "</dd>" +
+      "<dt>Dealership name</dt><dd>" + esc(req.seller_type === "dealership" ? req.dealership_name || "Not provided" : "Not applicable") + "</dd>" +
+      "<dt>Inspection location type</dt><dd>" + esc({ private_residence: "Private residence", other: "Another location", unknown: "Not sure" }[req.inspection_location_type] || "Not confirmed") + "</dd>" +
+      "<dt>Discovery (customer-reported)</dt><dd>" + esc(d.discoveryLabel || "Not provided") + (req.discovery_detail ? " — " + esc(req.discovery_detail) : "") + "</dd>" +
       "<dt>Access</dt><dd>Inspection OK: " + yn(req.perm_inspection) + " · Road test: " + esc(req.perm_road_test) + " · Photos: " + esc(req.perm_photos) + " · Underbody: " + esc(req.perm_underbody) + " · Lift: " + esc(req.lift_available) + " · Level surface: " + esc(req.level_surface) + "</dd>" +
       "<dt>Timing</dt><dd>" + esc([req.decision_timeline, req.preferred_dates, req.time_window].filter(Boolean).join(" · ")) + (req.same_day_priority ? " · SAME-DAY PRIORITY" : "") + "</dd>" +
       "<dt>Travel est.</dt><dd>" + (req.travel_miles != null ? esc(req.travel_miles) + " mi (" + esc(req.travel_estimate_basis) + ")" : "unknown — custom review") + "</dd>" +
       "<dt>Acquisition source</dt><dd>" + esc(attributionLabel(req.attribution_source)) + "</dd>" +
       "<dt>Customer notes</dt><dd>" + esc(req.customer_notes || "—") + "</dd>" +
       "</dl></section>";
+
+    if (preBooking && !paid.length && req.seller_type === "private") {
+      html += '<section class="portal-card"><h2>Private-sale inspection location</h2>' +
+        '<p class="field-hint">Confirm the location for this existing request. Confirm seller permission only when it has been granted. A dealership vehicle is never eligible, wherever it is parked.</p>' +
+        '<label for="privateLocation">Inspection location</label><select id="privateLocation">' +
+        '<option value="">Choose location</option>' +
+        ['private_residence', 'other', 'unknown'].map(function (value) { return '<option value="' + value + '"' + (req.inspection_location_type === value ? ' selected' : '') + '>' + ({ private_residence: 'Private residence', other: 'Another location', unknown: 'Not sure' }[value]) + '</option>'; }).join('') +
+        '</select><label class="field field-check"><input type="checkbox" id="privateInspectionPermission"' + (Number(req.perm_inspection) === 1 ? ' checked' : '') + ' /><span>Seller has authorized inspection access</span></label>' +
+        '<button type="button" class="btn btn-ghost btn-sm" id="savePrivateLocation">Save location</button></section>';
+    }
 
     html += '<section class="portal-card" id="inspectionReport" aria-label="Inspection report workspace"></section>';
 
@@ -1015,7 +1040,7 @@
     } else {
       html += '<p style="color:var(--text-3);">No slots proposed yet.</p>';
     }
-    html += '<h3>Offer windows (your local time)</h3><div class="admin-toolbar">' +
+    html += '<h3>Offer windows (Las Vegas time)</h3><div class="admin-toolbar">' +
       '<input type="datetime-local" id="slot1" /><input type="datetime-local" id="slot2" /><input type="datetime-local" id="slot3" />' +
       '<button class="btn btn-ghost" id="slotsGo">Propose</button></div>' +
       '<p class="field-hint">Las Vegas time. Suggested templates: 9:00 AM, 12:30 PM, 4:00 PM. Options offered on this same request are alternatives and may share buffers; anything clashing with another job is rejected automatically.</p></details>';
@@ -1250,6 +1275,11 @@
       });
     });
 
+    var saveLocation = document.getElementById("savePrivateLocation");
+    if (saveLocation) saveLocation.addEventListener("click", function () {
+      act({ action: "set_inspection_location", inspectionLocationType: document.getElementById("privateLocation").value, permInspection: document.getElementById("privateInspectionPermission").checked });
+    });
+
     // ---------- booking proposal ----------
     var proposalSection = document.getElementById("bookingProposal");
     if (proposalSection) {
@@ -1269,6 +1299,7 @@
         return {
           days: days,
           hours: hours,
+          sundayHours: [].slice.call(proposalSection.querySelectorAll("[data-sunday-hour]")).filter(function (b) { return b.checked; }).map(function (b) { return b.getAttribute("data-sunday-hour"); }),
           tier: selected ? selected.value : draftCfg.tier,
           base: document.getElementById("pBase").value,
           travel: document.getElementById("pTravel").value,
@@ -1363,7 +1394,7 @@
           previewTimer = setTimeout(refreshPrice, 0);
           return;
         }
-        if (event.target && (event.target.hasAttribute("data-day") || event.target.hasAttribute("data-hour"))) {
+        if (event.target && (event.target.hasAttribute("data-day") || event.target.hasAttribute("data-hour") || event.target.hasAttribute("data-sunday-hour"))) {
           refreshSlate();
         }
       });
@@ -1379,6 +1410,10 @@
           var want = hourSets[preset] || [];
           proposalSection.querySelectorAll("[data-hour]").forEach(function (b) {
             b.checked = want.indexOf(b.getAttribute("data-hour")) !== -1;
+          });
+          proposalSection.querySelectorAll("[data-sunday-hour]").forEach(function (b) {
+            var hour = b.getAttribute("data-sunday-hour");
+            b.checked = preset === "afternoons" ? hour >= "12:00" : preset === "workday" ? hour >= "10:00" && hour <= "17:00" : false;
           });
           if (preset === "clear") {
             proposalSection.querySelectorAll("[data-day]").forEach(function (b) { b.checked = false; });
@@ -1503,9 +1538,14 @@
     });
 
     document.getElementById("slotsGo").addEventListener("click", function () {
-      var slots = ["slot1", "slot2", "slot3"].map(function (id) { return document.getElementById(id).value; })
-        .filter(Boolean)
-        .map(function (v) { return new Date(v).toISOString(); });
+      var values = ["slot1", "slot2", "slot3"].map(function (id) { return document.getElementById(id).value; }).filter(Boolean);
+      var cfg = (detailCache && detailCache.proposalDraft) || {};
+      var invalid = values.some(function (value) {
+        var date = value.split("T")[0];
+        return (cfg.daysOfOperation || []).indexOf(new Date(date + "T12:00:00Z").getUTCDay()) === -1 || (cfg.blackoutDates || []).indexOf(date) !== -1;
+      });
+      if (invalid) { alert("Choose an eligible operating day that is not blacked out. Sunday requires a confirmed private residence and private-sale inspection permission."); return; }
+      var slots = values.map(function (v) { var parts = v.split("T"); return vegasInstant(parts[0], parts[1]); });
       if (!slots.length) return;
       act({ action: "propose_slots", slots: slots }, function (r) {
         if (r.ok && r.body.skipped && r.body.skipped.length) alert("Skipped:\n" + r.body.skipped.join("\n"));

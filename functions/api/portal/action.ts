@@ -5,6 +5,8 @@
 //   message            — send a note to AutoClarity
 //   cancel             — request cancellation (auto only before payment)
 
+import { appointmentDateError, type SellerLocation } from '../../lib/appointment-eligibility.ts';
+import { saveMissingDiscovery } from '../../lib/discovery.ts';
 import type { Env } from '../../lib/types.ts';
 import { modeFlags } from '../../lib/types.ts';
 import { getConfig } from '../../lib/config.ts';
@@ -29,6 +31,8 @@ import { readJsonBody, requestBodyErrorResponse } from '../../lib/request-body.t
 
 interface ActionBody {
   action?: string;
+  discoverySource?: unknown;
+  discoveryDetail?: unknown;
   slotId?: string;
   typedName?: string;
   versionIds?: string[];
@@ -92,13 +96,18 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   const req = await db
     .prepare(
-      `SELECT r.id, r.ref, r.status, r.attribution_source, c.email, c.full_name FROM ppi_requests r
+      `SELECT r.id, r.ref, r.status, r.attribution_source, r.seller_type, r.inspection_location_type, r.perm_inspection, c.email, c.full_name FROM ppi_requests r
        JOIN customers c ON c.id = r.customer_id WHERE r.id = ? AND r.deleted_at IS NULL`,
     )
     .bind(requestId)
-    .first<{ id: string; ref: string; status: string; attribution_source: string; email: string; full_name: string }>();
+    .first<{ id: string; ref: string; status: string; attribution_source: string; email: string; full_name: string } & SellerLocation>();
   if (!req || !isStatus(req.status)) return errorJson('not_found', 'This request no longer exists.', 404);
   const status = req.status as Status;
+
+  if (['select_slot', 'accept_agreements', 'checkout'].includes(body.action ?? '') &&
+      ['quote_sent', 'awaiting_time_selection', 'awaiting_agreement', 'awaiting_payment'].includes(status)) {
+    await saveMissingDiscovery(db, requestId, body.discoverySource, body.discoveryDetail);
+  }
 
   switch (body.action) {
     // ------------------------------------------------------------ select_slot
@@ -150,6 +159,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         .bind(slotId, requestId)
         .first<{ starts_at: string; ends_at: string; blocked_starts_at: string; blocked_ends_at: string }>();
       if (!slot) return errorJson('slot_unavailable', 'That time is no longer available. Please pick another window.', 409);
+      const dateError = appointmentDateError(new Date(slot.starts_at), config, req);
+      if (dateError) return errorJson('slot_invalid', dateError, 409);
       if (slot.starts_at < earliest || slot.starts_at > latest || slot.ends_at <= slot.starts_at) {
         return errorJson('slot_invalid', 'That time is outside the current scheduling window. Please pick another option.', 409);
       }

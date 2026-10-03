@@ -48,7 +48,7 @@ function intake(overrides: Json = {}): Json {
     year: '2018', make: 'Mercedes-Benz', model: 'GLS-Class', trim: 'AMG GLS 63',
     mileage: '61000', modStatus: 'stock', titleStatus: 'clean', startsDrives: 'yes',
     locStreet: '4000 Example Ave', locCity: 'Las Vegas', locState: 'NV', locZip: '89147',
-    sellerType: 'private', permInspection: true, permRoadTest: 'yes', permPhotos: 'yes',
+    sellerType: 'private', inspectionLocationType: 'private_residence', permInspection: true, permRoadTest: 'yes', permPhotos: 'yes',
     permUnderbody: 'unknown', ackAccessDependent: true,
     decisionTimeline: 'few_days', timeWindow: 'afternoon', sameDayPriority: false,
     ...overrides,
@@ -67,10 +67,9 @@ async function submitAndFind(payload: Json): Promise<string> {
 
 /** Hours on today's Las Vegas date, and on a day well in the future. */
 function hoursToday(count = 3): string[] {
-  // Vegas is UTC-7 in September, so 20:00–23:00Z is 1pm–4pm today there.
-  const day = new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10);
-  return Array.from({ length: count }, (_, i) =>
-    new Date(`${day}T${String(20 + i).padStart(2, '0')}:00:00.000Z`).toISOString());
+  // Keep the test on today's business-local date even when UTC is tomorrow.
+  // Immediate future instants also avoid testing already-past afternoon slots.
+  return Array.from({ length: count }, (_, i) => new Date(Date.now() + (i + 1) * 1000).toISOString());
 }
 function hoursOnDay(daysOut: number, count = 3): string[] {
   const day = new Date(Date.now() + daysOut * 86_400_000).toISOString().slice(0, 10);

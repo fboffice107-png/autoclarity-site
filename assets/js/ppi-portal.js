@@ -350,6 +350,10 @@
     // ---------- exact published report snapshot ----------
     if (v.report) html += renderPublishedReport(v.report);
 
+    if (step > 0 && v.quote && !paidReselection && !(v.discovery && v.discovery.source) && window.AutoClarityDiscovery) {
+      html += '<section class="portal-card">' + window.AutoClarityDiscovery.render(v.discoveryOptions) + '</section>';
+    }
+
     // ---------- step 1: choose a time ----------
     if (step === 1 && offered.length > 0 && v.quote && (!v.quote.expired || paidReselection)) {
       html += '<section class="portal-card"><h2>Choose your appointment</h2>' +
@@ -479,6 +483,7 @@
 
     if (reportPhotoDispose) reportPhotoDispose();
     elContent.innerHTML = html;
+    if (window.AutoClarityDiscovery) window.AutoClarityDiscovery.bind(elContent);
     if (v.report) {
       reportPhotoDispose = window.AutoClarityReportView.hydrate(elContent, function (id, signal) {
         return fetch("/api/portal/report-photo?id=" + encodeURIComponent(id) + "&versionId=" + encodeURIComponent(v.report.versionId), {
@@ -668,6 +673,9 @@
   }
 
   function action(payload, cb) {
+    if (["select_slot", "accept_agreements", "checkout"].indexOf(payload.action) !== -1 && window.AutoClarityDiscovery) {
+      Object.assign(payload, window.AutoClarityDiscovery.read(elContent));
+    }
     api("/api/portal/action", {
       method: "POST",
       headers: { "content-type": "application/json" },

@@ -1,6 +1,8 @@
 // /api/admin/requests/:id — GET full detail; POST admin actions.
 // Every mutation is authorized, state-machine-checked, and audit-logged.
 
+import { appointmentDateError, appointmentDays, sundayEligible, type SellerLocation } from '../../../lib/appointment-eligibility.ts';
+import { discoveryLabel } from '../../../lib/discovery.ts';
 import type { Env } from '../../../lib/types.ts';
 import { modeFlags } from '../../../lib/types.ts';
 import { requireAdmin, auditLog } from '../../../lib/auth.ts';
@@ -431,6 +433,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
   return json({
     request: req,
+    discoveryLabel: discoveryLabel(req['discovery_source']),
     statusLabel: isStatus(status) ? STATUS_LABELS[status] : status,
     recordKind: {
       kind: String(req['record_kind'] ?? 'real'),
@@ -464,7 +467,9 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       sameDayPriorityCents: config.fees.sameDayPriorityCents,
       quoteExpiryHours: config.quotes.expiryHours,
       slotTemplates: config.scheduling.slotTemplates,
-      daysOfOperation: config.scheduling.daysOfOperation,
+      daysOfOperation: appointmentDays(config, req),
+      sundayEligible: sundayEligible(req),
+      blackoutDates: config.scheduling.blackoutDates,
       timezone: config.scheduling.timezone,
       minLeadHours: config.scheduling.minLeadHours,
       maxAdvanceDays: config.scheduling.maxAdvanceDays,
@@ -524,6 +529,8 @@ interface AdminActionBody {
   recordKind?: string;
   sameDayPriority?: boolean;
   offlineNote?: string;
+  inspectionLocationType?: string;
+  permInspection?: boolean;
   collectedAt?: string;
   label?: string;
 }
@@ -550,16 +557,34 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   const req = await db
     .prepare(
-      `SELECT r.id, r.ref, r.status, r.travel_miles, r.attribution_source, r.record_kind, c.email, c.full_name FROM ppi_requests r
+      `SELECT r.id, r.ref, r.status, r.travel_miles, r.attribution_source, r.record_kind, r.seller_type, r.inspection_location_type, r.perm_inspection, c.email, c.full_name FROM ppi_requests r
        JOIN customers c ON c.id = r.customer_id WHERE r.id = ? AND r.deleted_at IS NULL`,
     )
     .bind(id)
-    .first<{ id: string; ref: string; status: string; travel_miles: number | null; attribution_source: string; record_kind: string; email: string; full_name: string }>();
+    .first<{ id: string; ref: string; status: string; travel_miles: number | null; attribution_source: string; record_kind: string; email: string; full_name: string } & SellerLocation>();
   if (!req || !isStatus(req.status)) return errorJson('not_found', 'Request not found.', 404);
   const status = req.status as Status;
   const base = (env.PUBLIC_BASE_URL ?? new URL(context.request.url).origin).replace(/\/$/, '');
 
   switch (body.action) {
+    case 'set_inspection_location': {
+      if (req.seller_type !== 'private') return errorJson('validation', 'Only an explicitly private-sale request can have a private inspection location confirmed.', 422);
+      if (!['submitted', 'needs_info', 'seller_access_pending', 'ready_for_review', 'quote_prepared', 'quote_sent', 'awaiting_time_selection'].includes(status)) {
+        return errorJson('wrong_state', 'Confirm the location before an appointment is held or paid.', 409);
+      }
+      const location = body.inspectionLocationType;
+      if (!location || !['private_residence', 'other', 'unknown'].includes(location)) return errorJson('validation', 'Choose the inspection location.', 422);
+      const permission = typeof body.permInspection === 'boolean' ? (body.permInspection ? 1 : 0) : (Number(req.perm_inspection) === 1 ? 1 : 0);
+      const changed = await db.prepare(`UPDATE ppi_requests SET inspection_location_type = ?, perm_inspection = ?, updated_at = ?
+        WHERE id = ? AND status = ? AND seller_type = 'private' AND deleted_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM payments WHERE request_id = ?)
+          AND NOT EXISTS (SELECT 1 FROM appointment_slots WHERE request_id = ? AND status IN ('held','confirmed'))`)
+        .bind(location, permission, nowIso(), id, status, id, id).run();
+      if (changed.meta.changes !== 1) return errorJson('conflict', 'The request has a hold or payment record. Its location was not changed.', 409);
+      await auditLog(db, actor, 'set_inspection_location', 'ppi_request', id, { from: req.inspection_location_type ?? null, to: location, priorPermission: req.perm_inspection, permission });
+      return json({ ok: true });
+    }
+
     // ------------------------------------------------------------- set_status
     case 'set_status': {
       const to = String(body.to ?? '');
@@ -1466,6 +1491,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           skipped.push(`${startRaw} (beyond the ${config.scheduling.maxAdvanceDays}-day scheduling window)`);
           continue;
         }
+        const dateError = appointmentDateError(start, config, req);
+        if (dateError) { skipped.push(`${startRaw} — ${dateError}`); continue; }
         const end = new Date(start.getTime() + config.scheduling.durationMin * 60_000);
         const blockedStart = new Date(start.getTime() - config.scheduling.travelBufferMin * 60_000).toISOString();
         const blockedEnd = new Date(end.getTime() + config.scheduling.reportBufferMin * 60_000).toISOString();

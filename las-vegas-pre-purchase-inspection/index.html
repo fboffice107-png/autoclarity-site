@@ -741,12 +741,29 @@
                 </div>
               </div>
               <div class="field">
-                <label for="sellerType">Seller type</label>
-                <select id="sellerType" name="sellerType">
-                  <option value="dealership">Dealership</option>
-                  <option value="private">Private seller</option>
+                <label for="sellerType">Is this a dealership vehicle?</label>
+                <select id="sellerType" name="sellerType" required>
+                  <option value="">Please choose</option>
+                  <option value="dealership">Yes, it’s a dealership vehicle.</option>
+                  <option value="private">No, it’s a private-sale vehicle.</option>
                   <option value="unknown">Not sure</option>
                 </select>
+                <p class="field-hint">Choose dealership even if the vehicle is parked elsewhere.</p>
+                <p class="field-error" data-error-for="sellerType" role="alert"></p>
+              </div>
+              <div class="field" id="dealershipNameField" hidden>
+                <label for="dealershipName">Dealership name <span class="opt">(optional)</span></label>
+                <input id="dealershipName" name="dealershipName" type="text" maxlength="120" disabled />
+              </div>
+              <div class="field" id="inspectionLocationField" hidden>
+                <label for="inspectionLocationType">Where will the private-sale vehicle be inspected?</label>
+                <select id="inspectionLocationType" name="inspectionLocationType" disabled>
+                  <option value="">Please choose</option>
+                  <option value="private_residence">At a private residence</option>
+                  <option value="other">At another location</option>
+                  <option value="unknown">Not sure yet</option>
+                </select>
+                <p class="field-error" data-error-for="inspectionLocationType" role="alert"></p>
               </div>
               <div class="field-row">
                 <div class="field">
@@ -875,6 +892,7 @@
                   </select>
                 </div>
               </div>
+              <div id="intakeDiscovery"></div>
               <div class="field">
                 <label for="customerNotes">Anything else? <span class="opt">(optional)</span></label>
                 <textarea id="customerNotes" name="customerNotes" rows="2" maxlength="2000"></textarea>
@@ -1099,6 +1117,7 @@
   </footer>
 
   <script src="/assets/js/main.js?v=ac-visual-20260913-r1" defer></script>
-  <script src="/assets/js/ppi-form.js?v=ac-book-20260921-r1" defer></script>
+  <script src="/assets/js/ppi-discovery.js?v=ac-sunday-20261002-r1" defer></script>
+  <script src="/assets/js/ppi-form.js?v=ac-sunday-20261002-r1" defer></script>
 </body>
 </html>

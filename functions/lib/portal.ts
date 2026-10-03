@@ -1,6 +1,8 @@
 // Shared helpers for the customer portal: token auth, lazy hold expiry, and
 // the customer-visible view of a request (never internal notes or risk data).
 
+import { appointmentDateError } from './appointment-eligibility.ts';
+import { DISCOVERY_OPTIONS } from './discovery.ts';
 import { modeFlags, type Env } from './types.ts';
 import type { PpiConfig } from './config.ts';
 import { inspectMagicToken, verifyMagicToken } from './magic.ts';
@@ -137,6 +139,8 @@ export async function releaseExpiredHolds(db: D1Database): Promise<void> {
 }
 
 export interface PortalView {
+  discovery: { source: string | null; detail: string | null };
+  discoveryOptions: typeof DISCOVERY_OPTIONS;
   ref: string;
   status: Status;
   statusLabel: string;
@@ -271,6 +275,8 @@ export async function loadPortalView(env: Env, config: PpiConfig, requestId: str
 
   const status = String(req['status']) as Status;
   return {
+    discovery: { source: (req['discovery_source'] as string | null) ?? null, detail: (req['discovery_detail'] as string | null) ?? null },
+    discoveryOptions: DISCOVERY_OPTIONS,
     ref: String(req['ref']),
     status,
     statusLabel: STATUS_LABELS[status] ?? String(req['status']),
@@ -288,7 +294,8 @@ export async function loadPortalView(env: Env, config: PpiConfig, requestId: str
       street: (req['loc_street'] as string | null) ?? null,
     },
     quote,
-    slots: (slots.results ?? []).map((s) => ({
+    // Keep historical held/confirmed records visible; only eligible offers are selectable.
+    slots: (slots.results ?? []).filter((s) => s.status !== 'offered' || !appointmentDateError(new Date(s.starts_at), config, req)).map((s) => ({
       id: s.id,
       startsAt: s.starts_at,
       endsAt: s.ends_at,

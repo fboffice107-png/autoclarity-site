@@ -730,6 +730,8 @@ export const EMAIL_TEMPLATES = {
       optionalDetail('VIN', ctx.extra?.['vin']),
       optionalDetail('Inspection location', ctx.extra?.['location']),
       optionalDetail('Seller', ctx.extra?.['seller']),
+      optionalDetail('Dealership name', ctx.extra?.['dealership']),
+      optionalDetail('Discovery (customer-reported)', ctx.extra?.['discovery']),
       optionalDetail('Requested timing', ctx.extra?.['timing']),
       optionalDetail('Customer notes', ctx.extra?.['concerns']),
       optionalDetail('Access / restrictions', ctx.extra?.['access']),

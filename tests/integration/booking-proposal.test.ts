@@ -88,6 +88,7 @@ function corollaIntake(overrides: Json = {}): Json {
     locState: 'NV',
     locZip: '89147', // the service-base ZIP: travel is genuinely included
     sellerType: 'private',
+    inspectionLocationType: 'private_residence',
     permInspection: true,
     permRoadTest: 'yes',
     permPhotos: 'yes',
@@ -482,6 +483,8 @@ describe('booking proposal — one owner action, one customer decision', () => {
     const slot = view.body.slots.find((s: Json) => s.status === 'offered');
     const held = await post('/api/portal/action', { action: 'select_slot', slotId: slot.id }, portal);
     expect(held.status, JSON.stringify(held.body)).toBe(200);
+    // This test is done: do not let its near-term hold consume the same-day fee test's capacity.
+    expect((await adminPost(requestId, { action: 'release_slot', slotId: slot.id })).status).toBe(200);
   });
 
   it('offers a full hourly slate in one action, and the customer picks one', async () => {

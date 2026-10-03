@@ -528,7 +528,11 @@
     progressBar = document.getElementById("progressBar");
     stepLine = document.getElementById("stepLine");
 
+    var discovery = window.AutoClarityDiscovery;
+    if (discovery) document.getElementById("intakeDiscovery").innerHTML = discovery.render(runtime && runtime.discoveryOptions);
     var draftState = restoreDraft();
+    if (discovery) discovery.bind(form);
+    setupSellerFields();
     setupDraftControls(draftState);
     showStep(current, true);
 
@@ -559,6 +563,22 @@
     setupModDetails();
     setupVin();
     buildStickyBar(); // Request-only bar; call/text added by applyContact if configured
+  }
+
+  function updateSellerFields() {
+    var dealership = val("sellerType") === "dealership";
+    var privateSale = val("sellerType") === "private";
+    document.getElementById("dealershipNameField").hidden = !dealership;
+    form.elements.dealershipName.disabled = !dealership;
+    document.getElementById("inspectionLocationField").hidden = !privateSale;
+    form.elements.inspectionLocationType.disabled = !privateSale;
+    form.elements.inspectionLocationType.required = privateSale;
+    if (!dealership) form.elements.dealershipName.value = "";
+    if (!privateSale) form.elements.inspectionLocationType.value = "";
+  }
+  function setupSellerFields() {
+    form.elements.sellerType.addEventListener("change", updateSellerFields);
+    updateSellerFields();
   }
 
   function showStep(n, initial) {
@@ -626,6 +646,8 @@
       }
     }
     if (n === 2) {
+      if (!val("sellerType")) fail("sellerType", "Please choose the seller type, or select Not sure.");
+      if (val("sellerType") === "private" && !val("inspectionLocationType")) fail("inspectionLocationType", "Choose the inspection location, or select Not sure yet.");
       if (!val("locCity")) fail("locCity", "City is required.");
       if (!/^\d{5}$/.test(val("locZip"))) fail("locZip", "Enter a 5-digit ZIP code.");
     }
@@ -773,7 +795,7 @@
   }
 
   /* ---------- draft save/resume (user's own device only) ---------- */
-  var FIELDS = ["fullName","email","phone","preferredContact","transactionalConsent","marketingConsent","vin","year","mileage","make","model","trim","askingPrice","expectedPrice","listingUrl","modStatus","modDetails","warningLights","knownIssues","titleStatus","startsDrives","locStreet","locUnit","locCity","locState","locZip","sellerType","sellerName","sellerPhone","locNotes","liftAvailable","levelSurface","permInspection","permScan","permRoadTest","permPhotos","permUnderbody","ackAccessDependent","decisionTimeline","preferredDates","timeWindow","sameDayPriority","customerNotes","selectedTier"];
+  var FIELDS = ["fullName","email","phone","preferredContact","transactionalConsent","marketingConsent","vin","year","mileage","make","model","trim","askingPrice","expectedPrice","listingUrl","modStatus","modDetails","warningLights","knownIssues","titleStatus","startsDrives","locStreet","locUnit","locCity","locState","locZip","sellerType","inspectionLocationType","dealershipName","discoverySource","discoveryDetail","sellerName","sellerPhone","locNotes","liftAvailable","levelSurface","permInspection","permScan","permRoadTest","permPhotos","permUnderbody","ackAccessDependent","decisionTimeline","preferredDates","timeWindow","sameDayPriority","customerNotes","selectedTier"];
 
   function createSubmissionKey() {
     try {
@@ -817,6 +839,8 @@
       if (!window.confirm("Clear the saved draft and reset every field in this form? This cannot be undone.")) return;
       clearDraft();
       form.reset();
+      updateSellerFields();
+      if (window.AutoClarityDiscovery) window.AutoClarityDiscovery.bind(form);
       current = 1;
       steps.forEach(function (step) { clearErrors(step); });
       showStep(1, true);
@@ -829,7 +853,7 @@
 
   function saveDraft() {
     try {
-      var data = { _step: current, _savedAt: Date.now(), _submissionKey: ensureSubmissionKey() };
+      var data = { _sellerChoiceVersion: 2, _step: current, _savedAt: Date.now(), _submissionKey: ensureSubmissionKey() };
       FIELDS.forEach(function (name) {
         var el = form.elements[name];
         if (!el) return;
@@ -861,7 +885,9 @@
         if (el.type === "checkbox") el.checked = Boolean(data[name]);
         else el.value = data[name];
       });
-      if (data._step >= 1 && data._step <= 4) current = data._step;
+      // The old form preselected dealership, so an old draft cannot prove an explicit choice.
+      if (data._sellerChoiceVersion !== 2) { form.elements.sellerType.value = ""; current = 2; }
+      if (data._sellerChoiceVersion === 2 && data._step >= 1 && data._step <= 4) current = data._step;
       // Migrate an existing pre-TTL draft on first use without discarding a
       // customer's in-progress request.
       if (!savedAt || !isValidSubmissionKey(data._submissionKey)) saveDraft();
@@ -1073,6 +1099,8 @@
         rows: [
           ["Inspection address", address],
           ["Seller type", choiceLabel("sellerType", payload.sellerType)],
+          ["Inspection location type", choiceLabel("inspectionLocationType", payload.inspectionLocationType) || "Not provided"],
+          ["Dealership name", payload.sellerType === "dealership" ? payload.dealershipName || "Not provided" : "Not applicable"],
           ["Seller / salesperson", payload.sellerName || "Not provided"],
           ["Seller contact", payload.sellerPhone || "Not provided"],
           ["Access notes", payload.locNotes || "None provided"]

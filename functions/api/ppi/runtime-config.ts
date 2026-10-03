@@ -2,6 +2,7 @@
 // mode flags, Turnstile site key, customer-facing pricing display, scan scope,
 // and the (config-gated) urgent contact path. Nothing sensitive here, ever.
 
+import { DISCOVERY_OPTIONS } from '../../lib/discovery.ts';
 import type { Env } from '../../lib/types.ts';
 import { modeFlags } from '../../lib/types.ts';
 import { getConfig, tierDisplayPrice, launchActive } from '../../lib/config.ts';
@@ -21,6 +22,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
   return json(
     {
+      discoveryOptions: DISCOVERY_OPTIONS,
       mode: flags.mode,
       bookingEnabled: flags.bookingEnabled,
       uploadsEnabled: flags.uploadsEnabled,

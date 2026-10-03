@@ -2,6 +2,7 @@
 // exists for usability only — this is the enforcement layer.
 
 import { clampStr } from './util.ts';
+import { parseDiscovery } from './discovery.ts';
 
 export interface FieldErrors {
   [field: string]: string;
@@ -103,6 +104,10 @@ export function normalizeAttributionSource(v: unknown): string {
 
 export interface IntakePayload {
   attributionSource: string;
+  discoverySource: string | null;
+  discoveryDetail: string | null;
+  dealershipName: string;
+  inspectionLocationType: 'private_residence' | 'other' | 'unknown' | null;
   // buyer
   fullName: string;
   email: string;
@@ -162,7 +167,14 @@ export function parseIntake(raw: Record<string, unknown>): { payload: IntakePayl
   const s = (k: string, max: number) => clampStr(raw[k], max);
   const b = (k: string) => raw[k] === true || raw[k] === 'true' || raw[k] === 'on' || raw[k] === '1';
 
+  const discovery = parseDiscovery(raw['discoverySource'], raw['discoveryDetail']);
+  const locationType = raw['inspectionLocationType'];
   const payload: IntakePayload = {
+    discoverySource: discovery.source,
+    discoveryDetail: discovery.detail,
+    dealershipName: raw['sellerType'] === 'dealership' ? s('dealershipName', 120) : '',
+    inspectionLocationType: raw['sellerType'] === 'private' &&
+      (locationType === 'private_residence' || locationType === 'other' || locationType === 'unknown') ? locationType : null,
     attributionSource: normalizeAttributionSource(raw['attributionSource']),
     fullName: s('fullName', 120),
     email: s('email', 254).toLowerCase(),
@@ -228,6 +240,9 @@ export function parseIntake(raw: Record<string, unknown>): { payload: IntakePayl
   if (!payload.model) errors['model'] = 'Vehicle model is required.';
   if (payload.year === null) errors['year'] = 'Please enter a valid model year.';
   if (payload.listingUrl && !validUrl(payload.listingUrl)) errors['listingUrl'] = 'Listing link must be a valid http(s) URL.';
+  if (!['dealership', 'private', 'unknown'].includes(String(raw['sellerType'] ?? ''))) {
+    errors['sellerType'] = 'Please choose the seller type, or select Not sure.';
+  }
   if (!payload.locCity) errors['locCity'] = 'City is required.';
   if (!ZIP_RE.test(payload.locZip)) errors['locZip'] = 'Please enter a 5-digit ZIP code.';
   if (payload.locState && payload.locState.length !== 2) errors['locState'] = 'Use the 2-letter state code.';

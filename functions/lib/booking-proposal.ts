@@ -6,6 +6,7 @@
 // customer looking at a price with no way to accept it. This module makes the
 // price and the times a single saved object with a single notification.
 
+import { appointmentDateError, type SellerLocation } from './appointment-eligibility.ts';
 import type { PpiConfig } from './config.ts';
 import { nowIso, newId } from './util.ts';
 
@@ -45,6 +46,8 @@ export async function validateSlotTimes(
   const valid: SlotCandidate[] = [];
   const skipped: string[] = [];
   const seen = new Set<string>();
+  const request = await db.prepare(`SELECT seller_type, inspection_location_type, perm_inspection FROM ppi_requests WHERE id = ? AND deleted_at IS NULL`)
+    .bind(requestId).first<SellerLocation>();
 
   for (const raw of rawStarts.slice(0, MAX_OFFERED_SLOTS)) {
     const label = String(raw);
@@ -68,6 +71,12 @@ export async function validateSlotTimes(
     }
     if (start.getTime() > now + config.scheduling.maxAdvanceDays * 86_400_000 + 60_000) {
       skipped.push(`${label} — beyond the ${config.scheduling.maxAdvanceDays}-day scheduling window`);
+      continue;
+    }
+
+    const dateError = appointmentDateError(start, config, request ?? {});
+    if (dateError) {
+      skipped.push(`${label} — ${dateError}`);
       continue;
     }
 

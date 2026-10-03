@@ -137,8 +137,8 @@ async function seedAgreementFixture(suffix: string): Promise<{
     VALUES (${sqlLiteral(customerId)}, 'Agreement Fixture', ${sqlLiteral(`${suffix}@example.com`)}, '702-555-0189', ${sqlLiteral(now)}, ${sqlLiteral(now)});
     INSERT INTO vehicles (id, make, model, created_at, updated_at)
     VALUES (${sqlLiteral(vehicleId)}, 'Test', 'Agreement Vehicle', ${sqlLiteral(now)}, ${sqlLiteral(now)});
-    INSERT INTO ppi_requests (id, ref, customer_id, vehicle_id, status, created_at, updated_at)
-    VALUES (${sqlLiteral(requestId)}, ${sqlLiteral(`PPI-AGREEMENT-${suffix.toUpperCase()}`)}, ${sqlLiteral(customerId)}, ${sqlLiteral(vehicleId)}, 'quote_sent', ${sqlLiteral(now)}, ${sqlLiteral(now)});
+    INSERT INTO ppi_requests (id, ref, customer_id, vehicle_id, status, seller_type, inspection_location_type, perm_inspection, created_at, updated_at)
+    VALUES (${sqlLiteral(requestId)}, ${sqlLiteral(`PPI-AGREEMENT-${suffix.toUpperCase()}`)}, ${sqlLiteral(customerId)}, ${sqlLiteral(vehicleId)}, 'quote_sent', 'private', 'private_residence', 1, ${sqlLiteral(now)}, ${sqlLiteral(now)});
     INSERT INTO quotes (id, request_id, version, status, tier, currency, subtotal_cents, total_cents, expires_at, approved_by, created_at, updated_at)
     VALUES (${sqlLiteral(quoteId)}, ${sqlLiteral(requestId)}, 1, 'draft', 'standard', 'usd', 19900, 19900, '2041-01-01T00:00:00.000Z', 'test', ${sqlLiteral(now)}, ${sqlLiteral(now)});
     INSERT INTO quote_line_items (id, quote_id, kind, label, amount_cents, sort)
@@ -1375,6 +1375,8 @@ describe('stripe webhook — the source of truth', () => {
     expect((await adminPost(vette.id, { action: 'send_quote', quoteId: prepared.body.quoteId })).status).toBe(200);
     const startsAt = new Date(Date.now() + 15 * 86_400_000);
     startsAt.setUTCHours(22, 0, 0, 0);
+    // This fixture is a dealership: its payment test must use a non-Sunday.
+    if (startsAt.getUTCDay() === 0) { startsAt.setUTCDate(startsAt.getUTCDate() + 1); startsAt.setUTCHours(9); }
     expect((await adminPost(vette.id, { action: 'propose_slots', slots: [startsAt.toISOString()] })).body.inserted).toBe(1);
     const link = await adminPost(vette.id, { action: 'reissue_link' });
     const token = new URL(link.body.url).searchParams.get('t')!;

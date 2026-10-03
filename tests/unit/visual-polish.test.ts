@@ -78,9 +78,10 @@ describe('premium visual and interaction safeguards', () => {
     // the assets that did not change stay at r1.
     const BOOKING_ASSETS = {
       'assets/css/ppi.css': 'ac-fee-20260922-r2',
-      'assets/js/ppi-form.js': 'ac-book-20260921-r1',
-      'assets/js/ppi-portal.js': 'ac-book-20260922-r1',
-      'assets/js/ppi-admin.js': 'ac-fee-20260922-r1',
+      'assets/js/ppi-form.js': 'ac-sunday-20261002-r1',
+      'assets/js/ppi-portal.js': 'ac-sunday-20261002-r1',
+      'assets/js/ppi-admin.js': 'ac-sunday-20261002-r1',
+      'assets/js/ppi-discovery.js': 'ac-sunday-20261002-r1',
     };
     for (const page of [ppiPage, adminPage, portalPage]) {
       for (const [asset, fingerprint] of Object.entries(BOOKING_ASSETS)) {
@@ -101,7 +102,7 @@ describe('premium visual and interaction safeguards', () => {
     const KNOWN = new Set([
       'ac-ai-20260911-r1', 'ac-visual-20260913-r1', 'ac-book-20260921-r1',
       'ac-book-20260922-r1', 'ac-kind-20260922-r1', 'ac-fee-20260922-r1',
-      'ac-fee-20260922-r2',
+      'ac-fee-20260922-r2', 'ac-sunday-20261002-r1',
     ]);
     for (const source of sources) {
       // Any scheme, not a fixed list: a new prefix must be added to KNOWN

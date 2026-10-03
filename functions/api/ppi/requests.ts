@@ -3,6 +3,7 @@
 // mandatory) → validation → duplicate damper → create records → magic link →
 // emails. Uploads attach afterwards via the returned portal token.
 
+import { discoveryLabel } from '../../lib/discovery.ts';
 import type { Env } from '../../lib/types.ts';
 import { modeFlags } from '../../lib/types.ts';
 import { getConfig } from '../../lib/config.ts';
@@ -245,9 +246,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
            travel_miles, travel_estimate_basis, suggested_tier, manual_review_reasons,
            customer_selected_tier, tier_selection_source, tier_review_needed,
            record_kind,
-           attribution_source,
+           attribution_source, dealership_name, inspection_location_type, discovery_source, discovery_detail,
            created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, 'submitted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, 'submitted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         requestId,
@@ -289,6 +290,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         // never be hidden from the dashboard by accident.
         initialRecordKind({ ref, email: payload.email, fullName: payload.fullName }),
         payload.attributionSource,
+        payload.dealershipName || null,
+        payload.inspectionLocationType,
+        payload.discoverySource,
+        payload.discoveryDetail,
         now,
         now,
       ),
@@ -398,6 +403,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           timing: timing || 'Flexible',
           concerns: concerns || 'None provided',
           access,
+          dealership: payload.dealershipName,
+          discovery: [discoveryLabel(payload.discoverySource), payload.discoveryDetail].filter(Boolean).join(' — '),
           tier: `${tierSuggestion.tier}${tierSuggestion.manualReview ? ' — MANUAL REVIEW' : ''}`,
           adminUrl: `${base}/ppi/admin/?request=${encodeURIComponent(requestId)}`,
         },

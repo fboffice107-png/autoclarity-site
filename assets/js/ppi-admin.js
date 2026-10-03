@@ -589,7 +589,7 @@
 
   /* Every hour the business will consider offering. The owner ticks a subset;
      nothing here is offered unless it is ticked. */
-  var OFFER_HOURS = ["09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00"];
+  var OFFER_HOURS = ["09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"];
 
   /* Must match MAX_OFFERED_SLOTS in functions/lib/booking-proposal.ts. */
   var MAX_OFFERED_PROPOSAL = 40;
@@ -664,7 +664,7 @@
     });
     html += '</div></div>' +
       '<div class="slate-actions"><span class="field-hint">Start-time presets (optional):</span>' +
-      '<button type="button" class="btn btn-ghost btn-sm" data-slate="workday">Select hourly start times: 10 AM–5 PM</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-slate="workday">Select hourly start times: 10 AM–6 PM</button>' +
       '<button type="button" class="btn btn-ghost btn-sm" data-slate="afternoons">Afternoon</button>' +
       '<button type="button" class="btn btn-ghost btn-sm" data-slate="clear">Clear</button>' +
       "</div>";
@@ -1439,8 +1439,8 @@
         if (!btn || !proposalSection.contains(btn)) return;
         var preset = btn.getAttribute("data-slate");
         var hourSets = {
-          workday: ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00"],
-          afternoons: ["13:00", "14:00", "15:00", "16:00", "17:00"],
+          workday: ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"],
+          afternoons: ["13:00", "14:00", "15:00", "16:00", "17:00", "18:00"],
           clear: []
         };
         var want = hourSets[preset] || [];
@@ -1449,7 +1449,7 @@
         });
         proposalSection.querySelectorAll("[data-sunday-hour]").forEach(function (b) {
           var hour = b.getAttribute("data-sunday-hour");
-          b.checked = preset === "afternoons" ? hour >= "12:00" : preset === "workday" ? hour >= "10:00" && hour <= "17:00" : false;
+          b.checked = preset === "afternoons" ? hour >= "12:00" : preset === "workday" ? hour >= "10:00" && hour <= "18:00" : false;
         });
         if (preset === "clear") {
           proposalSection.querySelectorAll("[data-day]").forEach(function (b) { b.checked = false; });

@@ -258,6 +258,39 @@ describe('private Sundays and optional discovery, real local HTTP', () => {
     } finally { await configure(before); }
   });
 
+  it('offers Sunday and Monday 6 PM starts through the combined proposal with unchanged duration and buffers', async () => {
+    const evening = new Date(nextSunday());
+    const hourInVegas = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hourCycle: 'h23' }).format(evening));
+    evening.setUTCHours(evening.getUTCHours() + 18 - hourInVegas, 0, 0, 0);
+    const sunday = evening.toISOString();
+    const monday = new Date(evening.getTime() + 86_400_000).toISOString();
+    const id = await submitAndFind(corollaIntake());
+    const sent = await adminPost(id, { action: 'send_booking_proposal', tier: 'standard', basePriceCents: 19900, travelCents: 2500, slots: [sunday, monday], proposalKey: `evening_${id}` });
+    expect(sent.status, JSON.stringify(sent.body)).toBe(200);
+    expect(sent.body.offeredSlots).toBe(2);
+    expect(sent.body.totalCents).toBe(22400);
+    const d = await detail(id);
+    const proposed = d.slots.find((s: Json) => s.starts_at === sunday);
+    expect(Date.parse(proposed.ends_at) - Date.parse(proposed.starts_at)).toBe(120 * 60_000);
+    expect(Date.parse(proposed.starts_at) - Date.parse(proposed.blocked_starts_at)).toBe(45 * 60_000);
+    expect(Date.parse(proposed.blocked_ends_at) - Date.parse(proposed.ends_at)).toBe(60 * 60_000);
+    expect(d.messages.filter((m: Json) => m.template === 'booking_proposal')[0].status).toBe('recorded');
+    const headers = await portalHeaders(id);
+    expect((await post('/api/portal/action', { action: 'select_slot', slotId: proposed.id }, headers)).status).toBe(200);
+    const conflictId = await submitAndFind(corollaIntake());
+    // Same start, report-buffer-only overlap, and an overlap introduced by the travel buffer.
+    for (const offsetHours of [0, 3.5, -3.5]) {
+      const clash = await offer(conflictId, [new Date(evening.getTime() + offsetHours * 3600_000).toISOString()]);
+      expect(clash.status).toBe(422);
+      expect(clash.body.error.skipped.join(' ')).toContain('buffers');
+    }
+    const dealer = await submitAndFind(corollaIntake({ sellerType: 'dealership', dealershipName: 'Example Motors' }));
+    expect((await offer(dealer, [sunday])).body.error.skipped.join(' ')).toContain('Sunday');
+    expect((await offer(dealer, [monday])).status).toBe(200);
+    // Keep this test's hold from affecting other local scenarios.
+    expect((await adminPost(id, { action: 'release_slot', slotId: proposed.id })).status).toBe(200);
+  });
+
   it('carries Sunday 1, 2, and 3 PM options in one $224 proposal through agreements, mock Checkout and verified payment', async () => {
     const id = await submitAndFind(corollaIntake({ year: '2016' }));
     const afternoon = new Date(nextSunday());

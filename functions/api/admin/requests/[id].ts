@@ -27,6 +27,7 @@ import {
   type BookingProposalRow,
   type SlotCandidate,
 } from '../../../lib/booking-proposal.ts';
+import { proposalEmailDetails, queueProposalOwnerCopy } from '../../../lib/proposal-email.ts';
 import { issueMagicLink, portalUrl } from '../../../lib/magic.ts';
 import { retryStoredEmail, sendTemplate, type EmailResult, type EmailStatus, type EmailTemplateKey, type StoredEmailMessage } from '../../../lib/email.ts';
 import { persistNotificationIssue, resolveNotificationActionIssues } from '../../../lib/notification-issues.ts';
@@ -243,6 +244,8 @@ async function deliverProposalEmail(
   input: {
     requestId: string;
     proposalId: string;
+    customerFirstName: string;
+    waitUntil: (promise: Promise<unknown>) => void;
     ref: string;
     email: string;
     config: Awaited<ReturnType<typeof getConfig>>;
@@ -297,6 +300,12 @@ async function deliverProposalEmail(
     emailResult.id,
     status === 'failed' ? (emailResult.failure ?? 'delivery_failed') : null,
   );
+  // Optional owner delivery is isolated from the already completed customer
+  // send. Provider work continues after the response, using its own outbox key.
+  await queueProposalOwnerCopy(env, db, {
+    requestId: input.requestId, proposalId: input.proposalId,
+    customerFirstName: input.customerFirstName, customerEmail: emailResult,
+  }, input.waitUntil);
   return emailResult;
 }
 
@@ -323,6 +332,10 @@ async function describeProposal(
         .all<{ id: string; starts_at: string; status: string }>()
     : { results: [] as Array<{ id: string; starts_at: string; status: string }> };
   return {
+    ...await proposalEmailDetails(db, {
+      requestId: proposal.request_id, proposalId: proposal.id,
+      messageId: proposal.notification_message_id, sentAt: proposal.sent_at,
+    }),
     id: proposal.id,
     quoteId: proposal.quote_id,
     totalCents: proposal.total_cents,
@@ -1349,6 +1362,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       // next is recorded against it truthfully rather than assumed.
       const emailResult = await deliverProposalEmail(env, db, {
         requestId: id, proposalId, ref: req.ref, email: req.email, config, base,
+        customerFirstName: req.full_name, waitUntil: task => context.waitUntil(task),
         breakdown, totals, slots: slotCheck.valid, expiresAt, customerMessage,
       });
 
@@ -1383,7 +1397,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         .first<BookingProposalRow>();
       if (!proposal) return errorJson('not_found', 'That booking proposal was not found for this request.', 404);
       if (proposal.notification_status === 'sent') {
-        return json({ ok: true, alreadySent: true, note: 'This proposal was already delivered. Nothing was re-sent.' });
+        return json({ ok: true, alreadySent: true, note: 'This proposal was already sent. Nothing was re-sent.' });
       }
 
       const quote = await db
@@ -1405,6 +1419,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
       const emailResult = await deliverProposalEmail(env, db, {
         requestId: id, proposalId: proposal.id, ref: req.ref, email: req.email, config, base,
+        customerFirstName: req.full_name, waitUntil: task => context.waitUntil(task),
         priceLines: (lines.results ?? []).map((l) => `  ${l.label}: ${l.kind === 'discount' ? '−' : ''}${formatCents(Math.abs(l.amount_cents))}`),
         totals: { totalCents: quote.total_cents },
         slotStarts: (slots.results ?? []).map((s) => s.starts_at),
@@ -1721,6 +1736,16 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         config,
         confirmFreshAfterWindow: body.confirmFresh === true,
       });
+      if (message.template === 'booking_proposal' && result.status === 'sent') {
+        const proposal = await db.prepare(`SELECT id FROM booking_proposals WHERE request_id = ? AND notification_message_id = ?`)
+          .bind(id, message.id).first<{ id: string }>();
+        if (proposal) {
+          await recordProposalNotification(db, proposal.id, 'sent', result.id, null);
+          await queueProposalOwnerCopy(env, db, {
+            requestId: id, proposalId: proposal.id, customerFirstName: req.full_name, customerEmail: result,
+          }, task => context.waitUntil(task));
+        }
+      }
       await auditLog(db, actor, 'retry_email', 'message', message.id, {
         from: message.status,
         to: result.status,

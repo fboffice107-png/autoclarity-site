@@ -758,6 +758,16 @@
     return html;
   }
 
+  function sentProposalEmailHtml(snapshot) {
+    if (!snapshot) return '';
+    return '<details class="sent-proposal-email"><summary>View sent proposal email</summary>' +
+      '<p class="field-hint">Stored email text from this proposal. The secure booking link is hidden in this view.</p>' +
+      '<p><strong>Subject:</strong> ' + esc(snapshot.subject || '') + '<br />' +
+      '<strong>Recipient:</strong> ' + esc(snapshot.recipient || '') + '<br />' +
+      '<strong>' + (snapshot.sentAt ? 'Sent:' : 'Recorded (send not confirmed):') + '</strong> ' + esc(when(snapshot.sentAt || snapshot.recordedAt)) + '</p>' +
+      '<pre style="white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.6;">' + esc(snapshot.bodyText || '') + '</pre></details>';
+  }
+
   function proposalCard(d) {
     var draftCfg = d.proposalDraft || {};
     var saved = migrateProposalDraft(readDraft() || {});
@@ -772,16 +782,25 @@
       var noteKind = proposal.notificationStatus === "sent" ? "good"
         : proposal.notificationStatus === "failed" ? "warn" : "info";
       var noteText = proposal.notificationStatus === "sent"
-        ? "Delivered to the customer " + when(proposal.sentAt)
+        ? "Proposal sent to customer " + when(proposal.sentAt)
         : proposal.notificationStatus === "queued"
-          ? "Saved and queued — the provider has not confirmed delivery yet"
+          ? "Saved and queued — provider acceptance is not confirmed yet"
           : proposal.notificationStatus === "failed"
-            ? "Saved, but the email was NOT delivered" + (proposal.notificationError ? " (" + proposal.notificationError + ")" : "")
+            ? "Saved, but the provider did not confirm the email send" + (proposal.notificationError ? " (" + proposal.notificationError + ")" : "")
             : "Saved — not sent";
       html += '<div class="notice ' + noteKind + '" id="proposalStatusNote"><strong>Last proposal · ' +
         esc(money(proposal.totalCents)) + '</strong><br />' + esc(noteText) + '<br />' +
         esc("Times offered: " + (proposal.slots.length ? proposal.slots.map(function (s) { return s.label; }).join(" · ") : "none")) +
-        '<br /><span class="msg-meta">Saved ' + esc(when(proposal.createdAt)) + '</span></div>';
+        '<br />' + esc(proposal.slots.length + " appointment choice" + (proposal.slots.length === 1 ? "" : "s")) +
+        (proposal.emailSnapshot ? '<br />Recipient: ' + esc(proposal.emailSnapshot.recipient || '') : '') +
+        '<br /><span class="msg-meta">Saved ' + esc(when(proposal.createdAt)) + '</span>';
+      var ownerStatus = proposal.ownerCopy && proposal.ownerCopy.status;
+      var ownerText = ownerStatus === "sent" ? "Owner copy sent — accepted by the email provider."
+        : ownerStatus === "recorded" ? "Owner copy queued. Refresh job status to check the send result."
+        : ownerStatus === "failed" ? "Owner copy failed. The customer proposal remains sent; do not resend it to retry the owner copy."
+        : "No owner copy recorded. Earlier proposals are not copied automatically.";
+      html += '<p class="field-hint' + (ownerStatus === "failed" ? ' notice warn' : '') + '">' + esc(ownerText) + '</p>' +
+        sentProposalEmailHtml(proposal.emailSnapshot) + '</div>';
       if (proposal.notificationStatus !== "sent") {
         html += '<button class="btn btn-ghost btn-sm" data-retry-proposal="' + esc(proposal.id) + '">Retry sending this proposal</button> ' +
           '<span class="field-hint">Reuses the same proposal — it cannot create a second one.</span>';
@@ -1567,8 +1586,8 @@
             statusEl.textContent = r.body.duplicate
               ? "Already sent — nothing was duplicated."
               : n.deliveryConfirmed
-                ? "Sent. The customer has the booking link."
-                : "Saved and queued. Delivery is not confirmed yet — check the status above.";
+                ? "Proposal sent to customer. Accepted by the email provider."
+                : "Saved and queued. Provider acceptance is not confirmed yet — check the status above.";
             if (r.body.sameDayFeeDropped) {
               statusEl.textContent += " The same-day fee was not charged, because none of the times offered are today.";
             }
@@ -1593,10 +1612,10 @@
             btn.disabled = false;
             if (!r.ok) { statusEl.textContent = (r.body.error && r.body.error.message) || "Retry failed."; return true; }
             statusEl.textContent = r.body.alreadySent
-              ? "Already delivered — nothing was re-sent."
+              ? "Already sent — nothing was re-sent."
               : (r.body.notification && r.body.notification.deliveryConfirmed)
-                ? "Delivered."
-                : "Queued again; delivery still unconfirmed.";
+                ? "Proposal sent to customer."
+                : "Queued again; provider acceptance is still unconfirmed.";
             return true;
           });
         });

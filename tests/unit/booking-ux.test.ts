@@ -99,8 +99,8 @@ describe('admin — one primary action before booking', () => {
   });
 
   it('never claims a delivery it cannot support', () => {
-    expect(adminScript).toContain('Saved and queued — the provider has not confirmed delivery yet');
-    expect(adminScript).toContain('Saved, but the email was NOT delivered');
+    expect(adminScript).toContain('Saved and queued — provider acceptance is not confirmed yet');
+    expect(adminScript).toContain('Saved, but the provider did not confirm the email send');
     expect(adminScript).toContain('Reuses the same proposal — it cannot create a second one.');
     expect(adminScript).toContain('retry_proposal_notification');
   });

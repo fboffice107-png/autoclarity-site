@@ -608,7 +608,14 @@ describe('quote → slot → agreements → payment (EUROLX fixture)', () => {
   });
 
   it('prevents offering a conflicting time to another customer (double-booking guard)', async () => {
-    const r = await adminPost(camryFixtureId, { action: 'propose_slots', slots: [heldSlotStart] });
+    const created = await post('/api/ppi/requests', intakePayload({ submissionKey: 'manual_conflict_quoted_fixture', email: 'conflict@example.com' }), { 'cf-connecting-ip': '192.0.2.230' });
+    expect(created.status).toBe(200);
+    const list = await get('/api/admin/requests?include=test', admin);
+    const id = list.body.requests.find((row: Json) => row.ref === created.body.requestRef).id;
+    await adminPost(id, { action: 'set_status', to: 'ready_for_review' });
+    const quote = await adminPost(id, { action: 'create_quote', tier: 'standard', basePriceCents: 19900 });
+    expect((await adminPost(id, { action: 'send_quote', quoteId: quote.body.quoteId })).status).toBe(200);
+    const r = await adminPost(id, { action: 'propose_slots', slots: [heldSlotStart] });
     expect(r.status).toBe(200);
     expect(r.body.inserted).toBe(0);
     expect(r.body.skipped.length).toBe(1);

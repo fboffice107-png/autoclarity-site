@@ -222,3 +222,19 @@ export function hasSameDaySlot(startsAt: string[], timezone: string, now: Date =
     return !Number.isNaN(when.getTime()) && localDay(when) === today;
   });
 }
+
+/** Match the existing customer selection gate before emailing manual options. */
+export function manualSlotOfferError(status: string, quotes: Record<string, unknown>[], payments: Record<string, unknown>[], nowMs = Date.now()): string | null {
+  if (status !== 'quote_sent' && status !== 'awaiting_time_selection') {
+    return 'Manual appointment invitations require a request awaiting time selection. Use Send booking proposal for a normal booking.';
+  }
+  const paid = status === 'awaiting_time_selection'
+    ? payments.find(p => p['status'] === 'succeeded' || p['status'] === 'partially_refunded')
+    : undefined;
+  const quote = quotes.find(q => q['status'] === 'sent' || (paid && q['status'] === 'accepted'));
+  if (!quote || (!paid && !(Date.parse(String(quote['expires_at'])) > nowMs))) {
+    return 'Manual appointment invitations require a current sent quote. Use Send booking proposal to send the full quote and times together.';
+  }
+  if (paid && !paid['booking_id']) return 'The recorded payment needs booking reconciliation before new appointment options can be sent.';
+  return null;
+}

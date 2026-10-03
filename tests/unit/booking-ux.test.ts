@@ -65,8 +65,8 @@ describe('admin — the request answers "who acts next"', () => {
 
 describe('admin — one primary action before booking', () => {
   it('leads with the booking proposal and its total', () => {
-    expect(adminScript).toContain('Review &amp; send booking proposal');
-    expect(adminScript).toContain('Review &amp; Send Booking Proposal');
+    expect(adminScript).toContain('Booking proposal');
+    expect(adminScript).toContain('Send booking proposal');
     expect(adminScript).toContain('send_booking_proposal');
     expect(adminScript).toContain("id=\"sendProposal\"");
   });
@@ -88,7 +88,7 @@ describe('admin — one primary action before booking', () => {
 
   it('demotes the old quote and scheduling tools to secondary panels', () => {
     expect(adminScript).toContain('Quotes &amp; manual quote builder</summary>');
-    expect(adminScript).toContain('Scheduling detail &amp; manual time offers</summary>');
+    expect(adminScript).toContain('Advanced scheduling tools</summary>');
   });
 
   it('refuses to send without times and retains an unsent draft', () => {

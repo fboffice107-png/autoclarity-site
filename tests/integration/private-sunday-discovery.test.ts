@@ -165,11 +165,38 @@ describe('private Sundays and optional discovery, real local HTTP', () => {
       const rejected = await offer(id, [nextSunday()]);
       expect(rejected.status, JSON.stringify(rejected.body)).toBe(422);
       expect(rejected.body.error.skipped.join(' ')).toContain('Sunday');
+      expect((await detail(id)).slots).toHaveLength(0);
+      const monday = new Date(Date.parse(nextSunday()) + 86_400_000).toISOString();
+      expect((await offer(id, [monday])).status).toBe(200);
       const manual = await adminPost(id, { action: 'propose_slots', slots: [nextSunday()] });
       expect(manual.body.inserted).toBe(0);
       expect(manual.body.skipped.join(' ')).toContain('Sunday');
-      expect((await detail(id)).slots).toHaveLength(0);
+      expect((await detail(id)).slots).toHaveLength(1);
     }
+  });
+
+  it('blocks unquoted, draft-only, expired, and wrong-state manual invitations without emails or slots', async () => {
+    const id = await submitAndFind(corollaIntake());
+    const slots = [nextSunday()];
+    const before = await detail(id);
+    expect(before.manualSlotOfferError).toBeTruthy();
+    const denied = await adminPost(id, { action: 'propose_slots', slots });
+    expect(denied.status).toBe(409);
+    expect(denied.body.error.code).toBe('manual_slots_not_bookable');
+    expect((await detail(id)).messages).toHaveLength(before.messages.length);
+    expect((await detail(id)).slots).toHaveLength(0);
+    await adminPost(id, { action: 'set_status', to: 'ready_for_review' });
+    const draft = await adminPost(id, { action: 'create_quote', tier: 'standard', basePriceCents: 19900 });
+    expect(draft.status).toBe(200);
+    expect((await adminPost(id, { action: 'propose_slots', slots })).status).toBe(409);
+    expect((await adminPost(id, { action: 'send_quote', quoteId: draft.body.quoteId })).status).toBe(200);
+    expect((await detail(id)).manualSlotOfferError).toBeNull();
+    expect((await adminPost(id, { action: 'propose_slots', slots })).body.inserted).toBe(1);
+    const valid = await detail(id);
+    await executeLocalD1(`UPDATE quotes SET expires_at='2000-01-01T00:00:00.000Z' WHERE id=${sqlLiteral(draft.body.quoteId)}`);
+    expect((await adminPost(id, { action: 'propose_slots', slots })).status).toBe(409);
+    expect((await detail(id)).messages).toHaveLength(valid.messages.length);
+    expect((await detail(id)).slots).toHaveLength(valid.slots.length);
   });
 
   it('hides and rejects a stale/forged dealership Sunday offer even when globally enabled', async () => {
@@ -231,12 +258,31 @@ describe('private Sundays and optional discovery, real local HTTP', () => {
     } finally { await configure(before); }
   });
 
-  it('keeps Sunday intact through selection, optional late discovery, agreements, mock Checkout and signed idempotent webhook', async () => {
+  it('carries one $224 proposal and multiple options through Sunday selection, agreements, mock Checkout and verified payment', async () => {
     const id = await submitAndFind(corollaIntake({ year: '2016' }));
     const sunday = nextSunday();
-    expect((await offer(id, [sunday])).status).toBe(200);
-    const headers = await portalHeaders(id);
+    const slots = [new Date(Date.parse(sunday) - 3600_000).toISOString(), sunday, new Date(Date.parse(sunday) + 86_400_000).toISOString()];
+    const customerNote = 'Please choose one afternoon appointment.';
+    const sent = await adminPost(id, { action: 'send_booking_proposal', tier: 'standard', basePriceCents: 19900, travelCents: 2500, slots, customerNote, proposalKey: `complete_sunday_${id}` });
+    expect(sent.status, JSON.stringify(sent.body)).toBe(200);
+    expect(sent.body.totalCents).toBe(22400);
+    expect(sent.body.offeredSlots).toBe(3);
+    const proposed = await detail(id);
+    expect(proposed.quotes).toHaveLength(1);
+    expect(proposed.quotes[0]).toMatchObject({ request_id: id, tier: 'standard', travel_cents: 2500, total_cents: 22400, version: 1 });
+    const emails = proposed.messages.filter((m: Json) => m.template === 'booking_proposal');
+    expect(emails).toHaveLength(1);
+    expect(emails[0].status).toBe('recorded'); // provider keys are blank: recorded only, never delivered
+    expect(emails[0].body_text).toContain('Standard Vehicle PPI: $199.00');
+    expect(emails[0].body_text).toContain('Mobile-service charge: $25.00');
+    expect(emails[0].body_text).toContain('Total: $224.00');
+    expect(emails[0].body_text.match(/\/ppi\/portal\/\?t=/gu)).toHaveLength(1);
+    const link = emails[0].body_text.match(/https?:\/\/[^\s]+\/ppi\/portal\/\?t=[^\s]+/u)[0];
+    const headers = { authorization: `Bearer ${new URL(link).searchParams.get('t')}`, 'cf-connecting-ip': '192.0.2.42' };
     const view = (await get('/api/portal', headers)).body;
+    expect(view.quote).toMatchObject({ id: proposed.quotes[0].id, version: 1, totalCents: 22400, customerNote });
+    expect(view.quote.lines).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'base', amountCents: 19900 }), expect.objectContaining({ kind: 'travel', amountCents: 2500 })]));
+    expect(view.slots.map((s: Json) => s.startsAt).sort()).toEqual(slots.sort());
     const chosen = view.slots.find((s: Json) => s.startsAt === sunday);
     expect(chosen).toBeTruthy();
     expect(view.discovery.source).toBeNull();
@@ -244,7 +290,7 @@ describe('private Sundays and optional discovery, real local HTTP', () => {
     expect((await post('/api/portal/action', { action: 'select_slot', slotId: chosen.id, discoverySource: 'other', discoveryDetail: 'A neighborhood flyer' }, headers)).status).toBe(200);
     const held = (await get('/api/portal', headers)).body;
     expect(held.discovery).toEqual({ source: 'other', detail: 'A neighborhood flyer' });
-    expect(held.slots[0].startsAt).toBe(sunday);
+    expect(held.slots.find((s: Json) => s.status === 'held').startsAt).toBe(sunday);
     const heldDetail = await detail(id);
     const beforeMessages = heldDetail.messages.length;
     // A later blank cannot erase the answer; agreements remain the same required set.
@@ -255,7 +301,9 @@ describe('private Sundays and optional discovery, real local HTTP', () => {
     expect(checkout.status, JSON.stringify(checkout.body)).toBe(200);
     expect((await get('/api/portal', headers)).body.status).toBe('awaiting_payment');
     const params = await (await fetch('http://127.0.0.1:8798/last-session')).json() as Json;
+    expect(params['line_items[0][price_data][unit_amount]']).toBe('22400');
     expect(params['metadata[request_id]']).toBe(id);
+    expect(params['metadata[quote_id]']).toBe(view.quote.id);
     expect(params['metadata[booking_id]']).toBeTruthy();
     expect(JSON.stringify(params)).not.toContain('neighborhood flyer');
     expect(Object.keys(params).some((k) => k.includes('discovery'))).toBe(false);
@@ -270,6 +318,9 @@ describe('private Sundays and optional discovery, real local HTTP', () => {
     expect(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', weekday: 'long' }).format(new Date(booked.booking.startsAt))).toBe('Sunday');
     const done = await detail(id);
     expect(done.payments).toHaveLength(1);
+    expect(done.payments[0].amount_cents).toBe(22400);
+    expect(done.slots.filter((s: Json) => s.status === 'confirmed').map((s: Json) => s.id)).toEqual([chosen.id]);
+    expect(done.slots.filter((s: Json) => s.id !== chosen.id).map((s: Json) => s.status)).toEqual(['released', 'released']);
     expect(done.history.filter((h: Json) => h.to_status === 'confirmed')).toHaveLength(1);
     expect(done.messages.filter((m: Json) => ['payment_confirmed', 'booking_confirmed', 'owner_notify'].includes(m.template)).some((m: Json) => m.body_text.includes('Sun'))).toBe(true);
     expect((await adminPost(id, { action: 'set_inspection_location', inspectionLocationType: 'other' })).status).toBe(409);

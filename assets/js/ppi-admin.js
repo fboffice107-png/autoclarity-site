@@ -640,13 +640,57 @@
     return out;
   }
 
+  function appointmentChoices(draftCfg, saved) {
+    var days = offerableDays(draftCfg);
+    var hours = OFFER_HOURS;
+    var savedDays = saved.days || days.filter(function (d) { return new Date(d.iso + "T12:00:00Z").getUTCDay() !== 0; }).slice(0, 3).map(function (d) { return d.iso; });
+    var savedHours = saved.hours || ["13:00", "15:00"];
+
+    var html = '<h3>Appointment options</h3>' +
+      '<p class="field-hint">Tick the days and the times. The customer picks one; the rest are released automatically. ' +
+      'Las Vegas time, earliest ' + esc(days.length ? days[0].label : "—") +
+      (leadHours(draftCfg) > 0 ? ' (' + esc(leadHours(draftCfg)) + 'h notice)' : '') +
+      ', latest ' + esc(days.length ? days[days.length - 1].label : "—") + '.</p>';
+
+    html += '<div class="slate"><div class="slate-group"><span class="slate-label">Days</span><div class="slate-chips">';
+    days.forEach(function (d) {
+      var on = savedDays.indexOf(d.iso) !== -1;
+      html += '<label class="chip' + (on ? " on" : "") + '"><input type="checkbox" data-day="' + esc(d.iso) + '"' + (on ? " checked" : "") + ' />' + esc(d.label) + "</label>";
+    });
+    html += '</div></div><div class="slate-group"><span class="slate-label">Monday–Saturday times</span><div class="slate-chips">';
+    hours.forEach(function (h) {
+      var on = savedHours.indexOf(h) !== -1;
+      html += '<label class="chip' + (on ? " on" : "") + '"><input type="checkbox" data-hour="' + esc(h) + '"' + (on ? " checked" : "") + ' />' + esc(pretty12(h)) + "</label>";
+    });
+    html += '</div></div>' +
+      '<div class="slate-actions"><span class="field-hint">Start-time presets (optional):</span>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-slate="workday">Select hourly start times: 10 AM–5 PM</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-slate="afternoons">Afternoon</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-slate="clear">Clear</button>' +
+      "</div>";
+    if (draftCfg.sundayEligible) {
+      html += '<div class="slate-group"><span class="slate-label">Sunday times</span><div class="slate-chips">';
+      (draftCfg.slotTemplates || []).forEach(function (h) {
+        var on = (saved.sundayHours || []).indexOf(h) !== -1;
+        html += '<label class="chip' + (on ? ' on' : '') + '"><input type="checkbox" data-sunday-hour="' + esc(h) + '"' + (on ? ' checked' : '') + ' />' + esc(pretty12(h)) + '</label>';
+      });
+      html += '</div></div><p class="field-hint">For a Sunday date, choose from these times. All selected dates and times go into the same proposal; the customer chooses one appointment.</p>';
+    } else {
+      html += '<p class="field-hint">Sunday requires a private-sale vehicle at a confirmed private residence with inspection permission. Confirm Inspection location &amp; Sunday eligibility below.</p>';
+    }
+    html += '</div><p class="field-hint" id="slateSummary" role="status" aria-live="polite"></p>' +
+      '<p class="form-status" id="slotHint" role="status" aria-live="polite"></p>';
+
+    return html;
+  }
+
   function proposalCard(d) {
     var draftCfg = d.proposalDraft || {};
     var saved = readDraft() || {};
     var tier = saved.tier || draftCfg.tier || "standard";
     var proposal = d.proposal;
 
-    var html = '<section class="portal-card proposal-card" id="bookingProposal"><h2>Review &amp; send booking proposal</h2>' +
+    var html = '<section class="portal-card proposal-card" id="bookingProposal"><h2>Booking proposal</h2>' +
       '<p class="field-hint">One action: confirm the package, pick times, send. The customer gets a single link that takes them from choosing a time to paying.</p>';
 
     // ---- what was already sent, and whether it actually went out ----
@@ -737,45 +781,7 @@
     // ---- times ----
     // Pick the days, pick the hours, and every combination is offered. The
     // customer chooses one and the rest are released the moment they pay.
-    var days = offerableDays(draftCfg);
-    var hours = OFFER_HOURS;
-    var savedDays = saved.days || days.filter(function (d) { return new Date(d.iso + "T12:00:00Z").getUTCDay() !== 0; }).slice(0, 3).map(function (d) { return d.iso; });
-    var savedHours = saved.hours || ["13:00", "15:00"];
-
-    html += '<h3>When can he come?</h3>' +
-      '<p class="field-hint">Tick the days and the times. He picks one; the rest are released automatically. ' +
-      'Las Vegas time, earliest ' + esc(days.length ? days[0].label : "—") +
-      (leadHours(draftCfg) > 0 ? ' (' + esc(leadHours(draftCfg)) + 'h notice)' : '') +
-      ', latest ' + esc(days.length ? days[days.length - 1].label : "—") + '.</p>';
-
-    html += '<div class="slate"><div class="slate-group"><span class="slate-label">Days</span><div class="slate-chips">';
-    days.forEach(function (d) {
-      var on = savedDays.indexOf(d.iso) !== -1;
-      html += '<label class="chip' + (on ? " on" : "") + '"><input type="checkbox" data-day="' + esc(d.iso) + '"' + (on ? " checked" : "") + ' />' + esc(d.label) + "</label>";
-    });
-    html += '</div></div><div class="slate-group"><span class="slate-label">Times</span><div class="slate-chips">';
-    hours.forEach(function (h) {
-      var on = savedHours.indexOf(h) !== -1;
-      html += '<label class="chip' + (on ? " on" : "") + '"><input type="checkbox" data-hour="' + esc(h) + '"' + (on ? " checked" : "") + ' />' + esc(pretty12(h)) + "</label>";
-    });
-    html += '</div></div>' +
-      '<div class="slate-actions">' +
-      '<button type="button" class="btn btn-ghost btn-sm" data-slate="workday">Every hour 10\u201317</button>' +
-      '<button type="button" class="btn btn-ghost btn-sm" data-slate="afternoons">Afternoons only</button>' +
-      '<button type="button" class="btn btn-ghost btn-sm" data-slate="clear">Clear</button>' +
-      "</div></div>";
-    if (draftCfg.sundayEligible) {
-      html += '<div class="slate-group"><span class="slate-label">Sunday times</span><div class="slate-chips">';
-      (draftCfg.slotTemplates || []).forEach(function (h) {
-        var on = (saved.sundayHours || []).indexOf(h) !== -1;
-        html += '<label class="chip' + (on ? ' on' : '') + '"><input type="checkbox" data-sunday-hour="' + esc(h) + '"' + (on ? ' checked' : '') + ' />' + esc(pretty12(h)) + '</label>';
-      });
-      html += '</div></div><p class="field-hint">For Sunday, tick a Sunday date and the Sunday times you want to offer. Templates come from Configuration → scheduling.slotTemplates. You can also use the existing custom appointment fields below. Nothing is offered until you send the proposal.</p>';
-    } else {
-      html += '<p class="field-hint">Sunday requires a private-sale vehicle at a confirmed private residence with inspection permission. Review Seller and Location below.</p>';
-    }
-    html += '<p class="field-hint" id="slateSummary" role="status" aria-live="polite"></p>' +
-      '<p class="form-status" id="slotHint" role="status" aria-live="polite"></p>';
+    html += '<div id="proposalAvailability">' + appointmentChoices(draftCfg, saved) + '</div>';
 
     // ---- message preview ----
     html += '<h3>Message to the customer</h3>' +
@@ -784,7 +790,7 @@
       esc(saved.message || "") + "</textarea></div>";
 
     html += '<button class="btn btn-primary btn-lg" id="sendProposal" style="width:100%;margin-top:6px;">' +
-      'Review &amp; Send Booking Proposal' + (draftCfg.totalCents ? " — " + esc(money(draftCfg.totalCents)) : "") + "</button>" +
+      'Send booking proposal' + (draftCfg.totalCents ? " — " + esc(money(draftCfg.totalCents)) : "") + "</button>" +
       '<p class="form-status" id="proposalStatus" role="status" aria-live="polite"></p></section>';
     return html;
   }
@@ -862,6 +868,36 @@
       var failure = { ok: false, body: { error: { message: "Network problem — the action was not confirmed. Please try again." } } };
       if (cb) cb(failure);
       alert(failure.body.error.message);
+    });
+  }
+
+  function bindLocationConfirmation(refreshProposal) {
+    var button = document.getElementById("savePrivateLocation");
+    if (!button) return;
+    button.addEventListener("click", function () {
+      var requestId = currentRequestId;
+      var status = document.getElementById("locationSaveStatus");
+      var saved = false;
+      button.disabled = true;
+      status.textContent = "Saving location…";
+      return api("/api/admin/requests/" + encodeURIComponent(requestId), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "set_inspection_location", inspectionLocationType: document.getElementById("privateLocation").value, permInspection: document.getElementById("privateInspectionPermission").checked })
+      }).then(function (r) {
+        if (!r.ok) throw new Error((r.body.error && r.body.error.message) || "Location was not saved.");
+        saved = true;
+        return api("/api/admin/requests/" + encodeURIComponent(requestId));
+      }).then(function (r) {
+        if (!r.ok) throw new Error("The updated appointment choices could not be loaded.");
+        if (currentRequestId !== requestId || !button.isConnected) return;
+        refreshProposal(r.body);
+        status.textContent = "Location saved. The booking proposal above is up to date.";
+      }).catch(function (error) {
+        if (currentRequestId === requestId && button.isConnected) {
+          status.textContent = (saved ? "Location saved, but availability could not refresh. Refresh the request before sending. " : "") + error.message;
+        }
+      }).finally(function () { button.disabled = false; });
     });
   }
 
@@ -958,9 +994,9 @@
       "<dt>Location</dt><dd>" + esc([req.loc_street, req.loc_unit, req.loc_city, req.loc_state, req.loc_zip].filter(Boolean).join(", ")) + "</dd>" +
       "<dt>Seller</dt><dd>" + esc([req.seller_type, req.seller_name, req.seller_phone].filter(Boolean).join(" · ") || "—") + "</dd>" +
       "<dt>Dealership name</dt><dd>" + esc(req.seller_type === "dealership" ? req.dealership_name || "Not provided" : "Not applicable") + "</dd>" +
-      "<dt>Inspection location type</dt><dd>" + esc({ private_residence: "Private residence", other: "Another location", unknown: "Not sure" }[req.inspection_location_type] || "Not confirmed") + "</dd>" +
+      "<dt>Inspection location type</dt><dd id='inspectionLocationValue'>" + esc({ private_residence: "Private residence", other: "Another location", unknown: "Not sure" }[req.inspection_location_type] || "Not confirmed") + "</dd>" +
       "<dt>Discovery (customer-reported)</dt><dd>" + esc(d.discoveryLabel || "Not provided") + (req.discovery_detail ? " — " + esc(req.discovery_detail) : "") + "</dd>" +
-      "<dt>Access</dt><dd>Inspection OK: " + yn(req.perm_inspection) + " · Road test: " + esc(req.perm_road_test) + " · Photos: " + esc(req.perm_photos) + " · Underbody: " + esc(req.perm_underbody) + " · Lift: " + esc(req.lift_available) + " · Level surface: " + esc(req.level_surface) + "</dd>" +
+      "<dt>Access</dt><dd>Inspection OK: <span id='inspectionAccessValue'>" + yn(req.perm_inspection) + "</span> · Road test: " + esc(req.perm_road_test) + " · Photos: " + esc(req.perm_photos) + " · Underbody: " + esc(req.perm_underbody) + " · Lift: " + esc(req.lift_available) + " · Level surface: " + esc(req.level_surface) + "</dd>" +
       "<dt>Timing</dt><dd>" + esc([req.decision_timeline, req.preferred_dates, req.time_window].filter(Boolean).join(" · ")) + (req.same_day_priority ? " · SAME-DAY PRIORITY" : "") + "</dd>" +
       "<dt>Travel est.</dt><dd>" + (req.travel_miles != null ? esc(req.travel_miles) + " mi (" + esc(req.travel_estimate_basis) + ")" : "unknown — custom review") + "</dd>" +
       "<dt>Acquisition source</dt><dd>" + esc(attributionLabel(req.attribution_source)) + "</dd>" +
@@ -968,13 +1004,14 @@
       "</dl></section>";
 
     if (preBooking && !paid.length && req.seller_type === "private") {
-      html += '<section class="portal-card"><h2>Private-sale inspection location</h2>' +
-        '<p class="field-hint">Confirm the location for this existing request. Confirm seller permission only when it has been granted. A dealership vehicle is never eligible, wherever it is parked.</p>' +
+      html += '<section class="portal-card"><h2>Inspection location &amp; Sunday eligibility</h2>' +
+        '<p class="field-hint">Dealership inspections are fully supported. Sunday appointments are available only for eligible private-sale inspections at a confirmed private residence.</p>' +
+        '<p><strong>Seller type:</strong> Private seller</p>' +
         '<label for="privateLocation">Inspection location</label><select id="privateLocation">' +
         '<option value="">Choose location</option>' +
         ['private_residence', 'other', 'unknown'].map(function (value) { return '<option value="' + value + '"' + (req.inspection_location_type === value ? ' selected' : '') + '>' + ({ private_residence: 'Private residence', other: 'Another location', unknown: 'Not sure' }[value]) + '</option>'; }).join('') +
-        '</select><label class="field field-check"><input type="checkbox" id="privateInspectionPermission"' + (Number(req.perm_inspection) === 1 ? ' checked' : '') + ' /><span>Seller has authorized inspection access</span></label>' +
-        '<button type="button" class="btn btn-ghost btn-sm" id="savePrivateLocation">Save location</button></section>';
+        '</select><p class="field-hint">Confirm inspection permission only when the seller has granted it.</p><label class="field field-check"><input type="checkbox" id="privateInspectionPermission"' + (Number(req.perm_inspection) === 1 ? ' checked' : '') + ' /><span>Seller has authorized inspection access</span></label>' +
+        '<button type="button" class="btn btn-ghost btn-sm" id="savePrivateLocation">Save location</button><p class="form-status" id="locationSaveStatus" role="status" aria-live="polite"></p></section>';
     }
 
     html += '<section class="portal-card" id="inspectionReport" aria-label="Inspection report workspace"></section>';
@@ -1029,7 +1066,8 @@
       '<button class="btn btn-ghost" id="qCreate">Create draft quote</button></details>';
 
     // ----- scheduling -----
-    html += '<details class="portal-card portal-secondary" id="jobScheduling"><summary>Scheduling detail &amp; manual time offers</summary>';
+    html += '<details class="portal-card portal-secondary" id="jobScheduling"><summary>Advanced scheduling tools</summary>' +
+      '<p class="field-hint">This does not send the customer’s full quote. Use Send booking proposal above for normal bookings.</p>';
     if ((d.slots || []).length) {
       html += '<table class="admin-table"><thead><tr><th>Start</th><th>Status</th><th></th></tr></thead><tbody>';
       d.slots.forEach(function (s) {
@@ -1042,8 +1080,9 @@
     }
     html += '<h3>Offer windows (Las Vegas time)</h3><div class="admin-toolbar">' +
       '<input type="datetime-local" id="slot1" /><input type="datetime-local" id="slot2" /><input type="datetime-local" id="slot3" />' +
-      '<button class="btn btn-ghost" id="slotsGo">Propose</button></div>' +
-      '<p class="field-hint">Las Vegas time. Suggested templates: 9:00 AM, 12:30 PM, 4:00 PM. Options offered on this same request are alternatives and may share buffers; anything clashing with another job is rejected automatically.</p></details>';
+      '<button class="btn btn-ghost" id="slotsGo"' + (d.manualSlotOfferError ? ' disabled' : '') + '>Send appointment options only</button></div>' +
+      (d.manualSlotOfferError ? '<p class="notice info">' + esc(d.manualSlotOfferError) + '</p>' : '') +
+      '<p class="field-hint">Sends an appointment-options email when you press the button. Las Vegas time. Suggested templates: 9:00 AM, 12:30 PM, 4:00 PM. Options offered on this same request are alternatives and may share buffers; anything clashing with another job is rejected automatically.</p></details>';
 
     // ----- payments -----
     html += '<section class="portal-card" id="jobPayments"><h2>Payments</h2>';
@@ -1275,19 +1314,14 @@
       });
     });
 
-    var saveLocation = document.getElementById("savePrivateLocation");
-    if (saveLocation) saveLocation.addEventListener("click", function () {
-      act({ action: "set_inspection_location", inspectionLocationType: document.getElementById("privateLocation").value, permInspection: document.getElementById("privateInspectionPermission").checked });
-    });
-
     // ---------- booking proposal ----------
     var proposalSection = document.getElementById("bookingProposal");
     if (proposalSection) {
       var sendBtn = document.getElementById("sendProposal");
       var statusEl = document.getElementById("proposalStatus");
       var previewTimer = null;
+      var previewSequence = 0;
       var draftCfg = (detailCache && detailCache.proposalDraft) || {};
-
       function currentForm() {
         var days = [].slice.call(proposalSection.querySelectorAll("[data-day]"))
           .filter(function (b) { return b.checked; })
@@ -1341,6 +1375,7 @@
       }
 
       function refreshPrice() {
+        var sequence = ++previewSequence;
         var form = currentForm();
         persist();
         var payload = pricePayload(form);
@@ -1350,14 +1385,14 @@
           headers: { "content-type": "application/json" },
           body: JSON.stringify(payload)
         }).then(function (r) {
-          if (!r.ok) return;
+          if (!r.ok || sequence !== previewSequence || !proposalSection.isConnected) return;
           document.getElementById("proposalPrice").innerHTML = priceTable(r.body.lines, r.body.totalCents);
           document.getElementById("proposalReviewNotes").innerHTML = reviewNoteHtml(r.body.reviewNotes);
           var note = document.getElementById("proposalTravelNote");
           if (note && r.body.travel) {
             note.textContent = r.body.travel.basisLabel + " Measured from " + (draftCfg.travelOriginLabel || "the AutoClarity service base") + ".";
           }
-          sendBtn.innerHTML = "Review &amp; Send Booking Proposal" + (r.body.totalCents ? " — " + esc(money(r.body.totalCents)) : "");
+          sendBtn.innerHTML = "Send booking proposal" + (r.body.totalCents ? " — " + esc(money(r.body.totalCents)) : "");
           sendBtn.setAttribute("data-total", r.body.totalCents || "");
         }).catch(function () {});
       }
@@ -1399,30 +1434,49 @@
         }
       });
 
-      proposalSection.querySelectorAll("[data-slate]").forEach(function (btn) {
-        btn.addEventListener("click", function () {
-          var preset = btn.getAttribute("data-slate");
-          var hourSets = {
-            workday: ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00"],
-            afternoons: ["13:00", "14:00", "15:00", "16:00", "17:00"],
-            clear: []
-          };
-          var want = hourSets[preset] || [];
-          proposalSection.querySelectorAll("[data-hour]").forEach(function (b) {
-            b.checked = want.indexOf(b.getAttribute("data-hour")) !== -1;
-          });
-          proposalSection.querySelectorAll("[data-sunday-hour]").forEach(function (b) {
-            var hour = b.getAttribute("data-sunday-hour");
-            b.checked = preset === "afternoons" ? hour >= "12:00" : preset === "workday" ? hour >= "10:00" && hour <= "17:00" : false;
-          });
-          if (preset === "clear") {
-            proposalSection.querySelectorAll("[data-day]").forEach(function (b) { b.checked = false; });
-          }
-          document.getElementById("slotHint").textContent = "";
-          refreshSlate();
+      proposalSection.addEventListener("click", function (event) {
+        var btn = event.target.closest("[data-slate]");
+        if (!btn || !proposalSection.contains(btn)) return;
+        var preset = btn.getAttribute("data-slate");
+        var hourSets = {
+          workday: ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00"],
+          afternoons: ["13:00", "14:00", "15:00", "16:00", "17:00"],
+          clear: []
+        };
+        var want = hourSets[preset] || [];
+        proposalSection.querySelectorAll("[data-hour]").forEach(function (b) {
+          b.checked = want.indexOf(b.getAttribute("data-hour")) !== -1;
         });
+        proposalSection.querySelectorAll("[data-sunday-hour]").forEach(function (b) {
+          var hour = b.getAttribute("data-sunday-hour");
+          b.checked = preset === "afternoons" ? hour >= "12:00" : preset === "workday" ? hour >= "10:00" && hour <= "17:00" : false;
+        });
+        if (preset === "clear") {
+          proposalSection.querySelectorAll("[data-day]").forEach(function (b) { b.checked = false; });
+        }
+        document.getElementById("slotHint").textContent = "";
+        refreshSlate();
       });
       refreshSlate();
+      refreshPrice();
+
+      bindLocationConfirmation(function (fresh) {
+        // Keep the current package, fees, message, and checked times in place.
+        // Only the availability controls depend on the newly confirmed facts.
+        var form = currentForm();
+        detailCache = fresh;
+        draftCfg = fresh.proposalDraft || {};
+        document.getElementById("proposalAvailability").innerHTML = appointmentChoices(draftCfg, form);
+        document.getElementById("inspectionLocationValue").textContent = { private_residence: "Private residence", other: "Another location", unknown: "Not sure" }[fresh.request.inspection_location_type] || "Not confirmed";
+        document.getElementById("inspectionAccessValue").textContent = yn(fresh.request.perm_inspection);
+        clearTimeout(previewTimer);
+        refreshSlate();
+        refreshPrice();
+        statusEl.textContent = draftCfg.sundayEligible
+          ? "Location saved. Eligible Sunday dates and times are now available above. Review your choices before sending."
+          : "Location saved. Appointment choices are up to date. Sunday requires a private residence and inspection permission.";
+        document.getElementById("proposalAvailability").scrollIntoView({ behavior: "smooth", block: "start" });
+      });
 
       sendBtn.addEventListener("click", function () {
         var form = currentForm();

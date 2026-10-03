@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG } from '../../functions/lib/config.ts';
 import { appointmentDateError, appointmentDays, sundayEligible, type SellerLocation } from '../../functions/lib/appointment-eligibility.ts';
-import { validateSlotTimes } from '../../functions/lib/booking-proposal.ts';
+import { manualSlotOfferError, validateSlotTimes } from '../../functions/lib/booking-proposal.ts';
 import { DISCOVERY_OPTIONS, parseDiscovery, saveMissingDiscovery } from '../../functions/lib/discovery.ts';
 import { parseIntake } from '../../functions/lib/validate.ts';
 import { EMAIL_TEMPLATES } from '../../functions/lib/email.ts';
@@ -21,6 +21,13 @@ describe('one explicit Sunday eligibility rule', () => {
       expect(appointmentDateError(sunday, config(), request)).toContain('Sunday');
     }
     expect(sundayEligible({ ...privateHome, dealership_name: 'stale name' } as SellerLocation)).toBe(true);
+  });
+  it('supports dealership inspections on every configured Monday–Saturday', () => {
+    const c = config(); c.scheduling.daysOfOperation = [1, 2, 3, 4, 5, 6];
+    for (let day = 5; day <= 10; day++) {
+      expect(appointmentDateError(new Date(`2026-10-${String(day).padStart(2, '0')}T20:00:00Z`), c, { seller_type: 'dealership' })).toBeNull();
+    }
+    expect(appointmentDateError(sunday, c, { seller_type: 'dealership' })).toContain('Sunday');
   });
   it('never opens dealership Sundays even if Sunday is in global operating days', () => {
     const c = config(); c.scheduling.daysOfOperation = [0, 1, 3, 4, 5, 6];
@@ -95,5 +102,16 @@ describe('optional customer-reported discovery', () => {
     expect(EMAIL_TEMPLATES.owner_new_request(ctx).text).toContain('Dealership name: Example Motors');
     expect(EMAIL_TEMPLATES.owner_new_request({ ...ctx, extra: {} }).text).not.toContain('Discovery');
     expect(EMAIL_TEMPLATES.request_received(ctx).text).not.toContain('Discovery');
+  });
+});
+
+describe('advanced manual invitations remain bookable', () => {
+  it('retains paid reselection without demanding another quote or payment', () => {
+    const paid = [{ status: 'succeeded', booking_id: 'existing-booking' }];
+    const accepted = [{ status: 'accepted', expires_at: '2000-01-01T00:00:00Z' }];
+    expect(manualSlotOfferError('awaiting_time_selection', accepted, paid)).toBeNull();
+    expect(manualSlotOfferError('confirmed', accepted, paid)).toContain('awaiting time selection');
+    expect(manualSlotOfferError('awaiting_time_selection', accepted, [{ status: 'succeeded' }])).toContain('reconciliation');
+    expect(manualSlotOfferError('awaiting_time_selection', accepted, [])).toContain('current sent quote');
   });
 });

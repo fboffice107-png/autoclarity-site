@@ -23,6 +23,7 @@ import {
   validateSlotTimes,
   hasSameDaySlot,
   MAX_OFFERED_SLOTS,
+  manualSlotOfferError,
   type BookingProposalRow,
   type SlotCandidate,
 } from '../../../lib/booking-proposal.ts';
@@ -433,6 +434,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
   return json({
     request: req,
+    manualSlotOfferError: manualSlotOfferError(status, quotes.results ?? [], payments.results ?? []),
     discoveryLabel: discoveryLabel(req['discovery_source']),
     statusLabel: isStatus(status) ? STATUS_LABELS[status] : status,
     recordKind: {
@@ -1475,6 +1477,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     // ---------------------------------------------------------- propose_slots
     case 'propose_slots': {
       if (!flags.bookingEnabled) return errorJson('booking_disabled', 'Booking is disabled in this environment.', 409);
+      // A times-only email is useful only when the existing portal can book it.
+      // Preserve paid reselection, including its accepted/expired quote behavior.
+      const [manualQuotes, manualPayments] = await Promise.all([
+        db.prepare(`SELECT status, expires_at FROM quotes WHERE request_id = ? ORDER BY version DESC`).bind(id).all<Record<string, unknown>>(),
+        db.prepare(`SELECT status, booking_id FROM payments WHERE request_id = ? ORDER BY updated_at DESC`).bind(id).all<Record<string, unknown>>(),
+      ]);
+      const manualError = manualSlotOfferError(status, manualQuotes.results ?? [], manualPayments.results ?? []);
+      if (manualError) return errorJson('manual_slots_not_bookable', manualError, 409);
       const slotsIn = (body.slots ?? []).slice(0, MAX_OFFERED_SLOTS);
       if (slotsIn.length === 0) return errorJson('validation', 'Provide at least one slot start time (ISO).', 422);
       const now = nowIso();

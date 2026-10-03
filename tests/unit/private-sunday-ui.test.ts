@@ -12,12 +12,12 @@ const form = read('assets/js/ppi-form.js');
 const portal = read('assets/js/ppi-portal.js');
 function calendar() {
   const start = admin.indexOf('  function vegasOffsetMinutes(');
-  const end = admin.indexOf('  function proposalCard(', start);
+  const end = admin.indexOf('  function priceTable(', start);
   const RealDate = Date;
   class FixedDate extends RealDate {
     static now() { return RealDate.parse('2026-10-02T23:00:00Z'); }
   }
-  return vm.runInNewContext(admin.slice(start, end) + '\n({ offerableDays, vegasInstant, slateInstants })', { Date: FixedDate, Intl });
+  return vm.runInNewContext(admin.slice(start, end) + '\n({ offerableDays, vegasInstant, slateInstants, appointmentChoices, proposalCard })', { Date: FixedDate, Intl, esc: String, readDraft: () => ({}), money: (n: number) => '$' + (n / 100).toFixed(2), priceTable: () => '', tierLabel: String, reviewNoteHtml: () => '' });
 }
 const cfg = { minLeadHours: 0, maxAdvanceDays: 21, daysOfOperation: [0, 1, 3, 4, 5, 6], blackoutDates: [] };
 
@@ -47,6 +47,75 @@ describe('Sunday owner controls execute with business-local dates', () => {
     expect(calendar().slateInstants(section, cfg)).toEqual([]);
     controls['[data-sunday-hour]'] = [box({ 'data-sunday-hour': '16:00' }), box({ 'data-sunday-hour': '12:30' }, false)];
     expect(calendar().slateInstants(section, cfg)).toEqual(['2026-10-04T23:00:00.000Z']);
+  });
+});
+
+describe('one owner proposal workflow', () => {
+  it('puts Sunday days and familiar time chips inside the main proposal, with optional presets', () => {
+    const c = calendar();
+    const html = c.proposalCard({ proposalDraft: { ...cfg, sundayEligible: true, slotTemplates: ['09:00', '12:30', '16:00'] } });
+    expect(html).toContain('id="bookingProposal"');
+    expect(html).toContain('data-day="2026-10-04"');
+    expect(html).toContain('data-sunday-hour="12:30"');
+    expect(html).toContain('12:30 PM');
+    expect(html).toContain('Select hourly start times: 10 AM–5 PM');
+    expect(html).toContain('Start-time presets (optional)');
+    expect(html).not.toContain('10\\u201317');
+    expect(html).not.toContain('scheduling.slotTemplates');
+    expect(html).toContain('Send booking proposal');
+    const ordinary = c.proposalCard({ proposalDraft: { ...cfg, daysOfOperation: [1, 2, 3, 4, 5, 6] } });
+    expect(ordinary).not.toContain('data-day="2026-10-04"');
+    expect(ordinary).not.toContain('data-sunday-hour=');
+    expect(ordinary).toContain('data-day="2026-10-06"');
+  });
+  it('clearly distinguishes private location, dealership Sunday limits, and the collapsed manual email tool', () => {
+    expect(admin).toContain('Dealership inspections are fully supported. Sunday appointments are available only for eligible private-sale inspections at a confirmed private residence.');
+    expect(admin).not.toContain('A dealership vehicle is never eligible');
+    expect(admin).toContain('Seller type:</strong> Private seller');
+    expect(admin).toContain('Inspection location &amp; Sunday eligibility');
+    expect(admin).toContain('id="jobScheduling"><summary>Advanced scheduling tools</summary>');
+    expect(admin).toContain('This does not send the customer’s full quote. Use Send booking proposal above for normal bookings.');
+    expect(admin).toContain('>Send appointment options only');
+    expect(admin).toContain('payload.action = "send_booking_proposal"');
+  });
+  async function locationSave(fail = false, navigate = false) {
+    let click: () => Promise<void> = async () => {};
+    const fields: Record<string, any> = {
+      savePrivateLocation: { disabled: false, isConnected: true, addEventListener: (_: string, fn: () => Promise<void>) => { click = fn; } },
+      locationSaveStatus: { textContent: '' }, privateLocation: { value: 'private_residence' }, privateInspectionPermission: { checked: true },
+    };
+    const calls: any[] = [], updates: any[] = [];
+    const fresh = { proposalDraft: { ...cfg, sundayEligible: true, slotTemplates: ['09:00', '12:30', '16:00'] } };
+    const ctx = { currentRequestId: 'test-request', document: { getElementById: (id: string) => fields[id] },
+      api: async (url: string, init?: any) => {
+        calls.push({ url, init });
+        if (!init && navigate) ctx.currentRequestId = 'another-request';
+        return fail ? { ok: false, body: { error: { message: 'Save rejected' } } } : { ok: true, body: init ? {} : fresh };
+      } };
+    const start = admin.indexOf('  function bindLocationConfirmation(');
+    const end = admin.indexOf('  function renderDetail()', start);
+    const bind = vm.runInNewContext(admin.slice(start, end) + '\nbindLocationConfirmation', ctx);
+    bind((data: any) => updates.push(calendar().appointmentChoices(data.proposalDraft, { days: ['2026-10-05'], hours: ['15:00'] })));
+    await click();
+    return { fields, calls, updates };
+  }
+  it('saves only confirmed facts then fetches fresh Sunday availability without a page reload or proposal send', async () => {
+    const { fields, calls, updates } = await locationSave();
+    expect(calls).toHaveLength(2);
+    expect(JSON.parse(calls[0].init.body)).toEqual({ action: 'set_inspection_location', inspectionLocationType: 'private_residence', permInspection: true });
+    expect(calls[1]).toEqual({ url: '/api/admin/requests/test-request', init: undefined });
+    expect(updates[0]).toContain('data-day="2026-10-04"');
+    expect(updates[0]).toContain('data-day="2026-10-05" checked');
+    expect(updates[0]).toContain('data-hour="15:00" checked');
+    expect(updates[0]).not.toContain('data-day="2026-10-04" checked');
+    expect(fields.savePrivateLocation.disabled).toBe(false);
+    expect(fields.locationSaveStatus.textContent).toContain('up to date');
+  });
+  it('does not announce eligibility after failure or overwrite a different request', async () => {
+    const failed = await locationSave(true);
+    expect(failed.calls).toHaveLength(1); expect(failed.updates).toHaveLength(0);
+    expect(failed.fields.locationSaveStatus.textContent).toContain('Save rejected');
+    expect((await locationSave(false, true)).updates).toHaveLength(0);
   });
 });
 

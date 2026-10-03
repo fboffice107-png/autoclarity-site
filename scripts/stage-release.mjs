@@ -66,6 +66,6 @@ for (const path of migrationPaths) {
   writeFileSync(join(output, path), bytes);
   migrations.push({ path, sha256: hash(bytes) });
 }
-const manifest = { commit: expected, tree: git('rev-parse', `${expected}^{tree}`).toString().trim(), build: 'ac-proposal-ux-20261003-r1', compilerVersions, publicDirectory: publicDir, files, staticSources: sources, functionSources: sourceFiles.filter(p => p.startsWith('functions/')).map(path => ({ path, sha256: hash(git('show', `${expected}:${path}`)) })), migrations, warning: 'LOCAL ARTIFACT ONLY. No deployment or production migration has occurred.' };
+const manifest = { commit: expected, tree: git('rev-parse', `${expected}^{tree}`).toString().trim(), build: 'ac-sunday-hours-20261003-r1', compilerVersions, publicDirectory: publicDir, files, staticSources: sources, functionSources: sourceFiles.filter(p => p.startsWith('functions/')).map(path => ({ path, sha256: hash(git('show', `${expected}:${path}`)) })), migrations, warning: 'LOCAL ARTIFACT ONLY. No deployment or production migration has occurred.' };
 writeFileSync(join(output, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 console.log(JSON.stringify({ commit: expected, publicFiles: files.length, migrations: migrations.length, manifest: join(output, 'manifest.json'), manifestSha256: hash(readFileSync(join(output, 'manifest.json'))) }, null, 2));

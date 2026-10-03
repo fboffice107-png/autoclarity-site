@@ -258,10 +258,15 @@ describe('private Sundays and optional discovery, real local HTTP', () => {
     } finally { await configure(before); }
   });
 
-  it('carries one $224 proposal and multiple options through Sunday selection, agreements, mock Checkout and verified payment', async () => {
+  it('carries Sunday 1, 2, and 3 PM options in one $224 proposal through agreements, mock Checkout and verified payment', async () => {
     const id = await submitAndFind(corollaIntake({ year: '2016' }));
-    const sunday = nextSunday();
-    const slots = [new Date(Date.parse(sunday) - 3600_000).toISOString(), sunday, new Date(Date.parse(sunday) + 86_400_000).toISOString()];
+    const afternoon = new Date(nextSunday());
+    const hourInVegas = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hourCycle: 'h23' }).format(afternoon));
+    afternoon.setUTCHours(afternoon.getUTCHours() + 14 - hourInVegas, 0, 0, 0);
+    const sunday = afternoon.toISOString();
+    const slots = [new Date(Date.parse(sunday) - 3600_000).toISOString(), sunday, new Date(Date.parse(sunday) + 3600_000).toISOString()];
+    expect(slots.map(iso => new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', weekday: 'long', hour: 'numeric', minute: '2-digit' }).format(new Date(iso))))
+      .toEqual(['Sunday 1:00 PM', 'Sunday 2:00 PM', 'Sunday 3:00 PM']);
     const customerNote = 'Please choose one afternoon appointment.';
     const sent = await adminPost(id, { action: 'send_booking_proposal', tier: 'standard', basePriceCents: 19900, travelCents: 2500, slots, customerNote, proposalKey: `complete_sunday_${id}` });
     expect(sent.status, JSON.stringify(sent.body)).toBe(200);

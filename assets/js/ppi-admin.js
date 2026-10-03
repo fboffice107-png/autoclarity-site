@@ -670,7 +670,7 @@
       "</div>";
     if (draftCfg.sundayEligible) {
       html += '<div class="slate-group"><span class="slate-label">Sunday times</span><div class="slate-chips">';
-      (draftCfg.slotTemplates || []).forEach(function (h) {
+      hours.forEach(function (h) {
         var on = (saved.sundayHours || []).indexOf(h) !== -1;
         html += '<label class="chip' + (on ? ' on' : '') + '"><input type="checkbox" data-sunday-hour="' + esc(h) + '"' + (on ? ' checked' : '') + ' />' + esc(pretty12(h)) + '</label>';
       });

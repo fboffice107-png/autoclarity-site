@@ -36,7 +36,7 @@ describe('Sunday owner controls execute with business-local dates', () => {
     expect(c.vegasInstant('2026-10-04', '17:00')).toBe('2026-10-05T00:00:00.000Z');
     expect(c.vegasInstant('2026-11-01', '16:00')).toBe('2026-11-02T00:00:00.000Z');
   });
-  it('offers only admin-ticked Sunday templates, without inheriting weekday defaults', () => {
+  it('offers only admin-ticked Sunday hours, without inheriting weekday defaults', () => {
     const box = (attrs: Record<string, string>, checked = true) => ({ checked, getAttribute: (k: string) => attrs[k] });
     const controls: Record<string, any[]> = {
       '[data-day]': [box({ 'data-day': '2026-10-04' })],
@@ -45,7 +45,7 @@ describe('Sunday owner controls execute with business-local dates', () => {
     };
     const section = { querySelectorAll: (selector: string) => controls[selector] || [] };
     expect(calendar().slateInstants(section, cfg)).toEqual([]);
-    controls['[data-sunday-hour]'] = [box({ 'data-sunday-hour': '16:00' }), box({ 'data-sunday-hour': '12:30' }, false)];
+    controls['[data-sunday-hour]'] = [box({ 'data-sunday-hour': '16:00' }), box({ 'data-sunday-hour': '12:00' }, false)];
     expect(calendar().slateInstants(section, cfg)).toEqual(['2026-10-04T23:00:00.000Z']);
   });
 });
@@ -56,8 +56,11 @@ describe('one owner proposal workflow', () => {
     const html = c.proposalCard({ proposalDraft: { ...cfg, sundayEligible: true, slotTemplates: ['09:00', '12:30', '16:00'] } });
     expect(html).toContain('id="bookingProposal"');
     expect(html).toContain('data-day="2026-10-04"');
-    expect(html).toContain('data-sunday-hour="12:30"');
-    expect(html).toContain('12:30 PM');
+    const normalHours = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
+    expect([...html.matchAll(/data-sunday-hour="([^"]+)"/g)].map(m => m[1])).toEqual(normalHours);
+    expect([...html.matchAll(/data-hour="([^"]+)"/g)].map(m => m[1])).toEqual(normalHours);
+    expect(html).not.toContain('data-sunday-hour="12:30"');
+    for (const label of ['1:00 PM', '2:00 PM', '3:00 PM']) expect(html).toContain(label);
     expect(html).toContain('Select hourly start times: 10 AM–5 PM');
     expect(html).toContain('Start-time presets (optional)');
     expect(html).not.toContain('10\\u201317');
@@ -67,6 +70,18 @@ describe('one owner proposal workflow', () => {
     expect(ordinary).not.toContain('data-day="2026-10-04"');
     expect(ordinary).not.toContain('data-sunday-hour=');
     expect(ordinary).toContain('data-day="2026-10-06"');
+  });
+  it('turns the main proposal’s checked Sunday 1, 2, and 3 PM choices into offered instants', () => {
+    const c = calendar();
+    const saved = { days: ['2026-10-04'], hours: ['09:00'], sundayHours: ['13:00', '14:00', '15:00'] };
+    const html = c.appointmentChoices({ ...cfg, sundayEligible: true, slotTemplates: ['09:00', '12:30', '16:00'] }, saved);
+    // Read the rendered checkbox choices rather than substituting a separate time list.
+    const inputs = [...html.matchAll(/<input type="checkbox" (data-(?:day|hour|sunday-hour))="([^"]+)"( checked)?/g)]
+      .map(m => ({ checked: Boolean(m[3]), attr: m[1], getAttribute: (name: string) => name === m[1] ? m[2] : null }));
+    const section = { querySelectorAll: (selector: string) => inputs.filter(i => selector === `[${i.attr}]`) };
+    expect(c.slateInstants(section, cfg)).toEqual([
+      '2026-10-04T20:00:00.000Z', '2026-10-04T21:00:00.000Z', '2026-10-04T22:00:00.000Z',
+    ]);
   });
   it('clearly distinguishes private location, dealership Sunday limits, and the collapsed manual email tool', () => {
     expect(admin).toContain('Dealership inspections are fully supported. Sunday appointments are available only for eligible private-sale inspections at a confirmed private residence.');

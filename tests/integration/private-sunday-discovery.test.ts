@@ -291,20 +291,21 @@ describe('private Sundays and optional discovery, real local HTTP', () => {
     expect((await adminPost(id, { action: 'release_slot', slotId: proposed.id })).status).toBe(200);
   });
 
-  it('carries Sunday 1, 2, and 3 PM options in one $224 proposal through agreements, mock Checkout and verified payment', async () => {
+  it('carries independent Sunday, Monday, and Tuesday choices in one $224 proposal through agreements, mock Checkout and verified payment', async () => {
     const id = await submitAndFind(corollaIntake({ year: '2016' }));
     const afternoon = new Date(nextSunday());
     const hourInVegas = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hourCycle: 'h23' }).format(afternoon));
-    afternoon.setUTCHours(afternoon.getUTCHours() + 14 - hourInVegas, 0, 0, 0);
+    afternoon.setUTCHours(afternoon.getUTCHours() + 13 - hourInVegas, 0, 0, 0);
     const sunday = afternoon.toISOString();
-    const slots = [new Date(Date.parse(sunday) - 3600_000).toISOString(), sunday, new Date(Date.parse(sunday) + 3600_000).toISOString()];
+    // Sunday 10/1/4, Monday 6 only, Tuesday 9/12/3/6: eight exact pairs.
+    const slots = [-3, 0, 3, 29, 44, 47, 50, 53].map(hours => new Date(Date.parse(sunday) + hours * 3600_000).toISOString());
     expect(slots.map(iso => new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', weekday: 'long', hour: 'numeric', minute: '2-digit' }).format(new Date(iso))))
-      .toEqual(['Sunday 1:00 PM', 'Sunday 2:00 PM', 'Sunday 3:00 PM']);
-    const customerNote = 'Please choose one afternoon appointment.';
+      .toEqual(['Sunday 10:00 AM', 'Sunday 1:00 PM', 'Sunday 4:00 PM', 'Monday 6:00 PM', 'Tuesday 9:00 AM', 'Tuesday 12:00 PM', 'Tuesday 3:00 PM', 'Tuesday 6:00 PM']);
+    const customerNote = 'Please choose one appointment from these date-specific options.';
     const sent = await adminPost(id, { action: 'send_booking_proposal', tier: 'standard', basePriceCents: 19900, travelCents: 2500, slots, customerNote, proposalKey: `complete_sunday_${id}` });
     expect(sent.status, JSON.stringify(sent.body)).toBe(200);
     expect(sent.body.totalCents).toBe(22400);
-    expect(sent.body.offeredSlots).toBe(3);
+    expect(sent.body.offeredSlots).toBe(8);
     const proposed = await detail(id);
     expect(proposed.quotes).toHaveLength(1);
     expect(proposed.quotes[0]).toMatchObject({ request_id: id, tier: 'standard', travel_cents: 2500, total_cents: 22400, version: 1 });
@@ -358,7 +359,7 @@ describe('private Sundays and optional discovery, real local HTTP', () => {
     expect(done.payments).toHaveLength(1);
     expect(done.payments[0].amount_cents).toBe(22400);
     expect(done.slots.filter((s: Json) => s.status === 'confirmed').map((s: Json) => s.id)).toEqual([chosen.id]);
-    expect(done.slots.filter((s: Json) => s.id !== chosen.id).map((s: Json) => s.status)).toEqual(['released', 'released']);
+    expect(done.slots.filter((s: Json) => s.id !== chosen.id).map((s: Json) => s.status)).toEqual(Array(7).fill('released'));
     expect(done.history.filter((h: Json) => h.to_status === 'confirmed')).toHaveLength(1);
     expect(done.messages.filter((m: Json) => ['payment_confirmed', 'booking_confirmed', 'owner_notify'].includes(m.template)).some((m: Json) => m.body_text.includes('Sun'))).toBe(true);
     expect((await adminPost(id, { action: 'set_inspection_location', inspectionLocationType: 'other' })).status).toBe(409);

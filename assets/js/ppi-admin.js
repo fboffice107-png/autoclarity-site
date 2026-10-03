@@ -620,73 +620,147 @@
     return out;
   }
 
-  /* Every ticked day x every ticked hour, as ISO instants, minus anything that
-     no longer clears the lead time by the moment Send is pressed. */
+  function draftHours(values) {
+    return (Array.isArray(values) ? values : []).filter(function (hour, i, all) {
+      return typeof hour === "string" && /^(09|1[0-8]):[0-5][0-9]$/.test(hour)
+        && hour <= "18:00" && all.indexOf(hour) === i;
+    }).sort();
+  }
+
+  // Browser-only draft upgrade: copy each old shared selection to its selected
+  // dates. Leave prices, notes, and every unrelated draft field intact.
+  function migrateProposalDraft(saved) {
+    saved = saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+    var upgraded = Object.assign({}, saved);
+    var perDate = saved.availability && typeof saved.availability === "object" && !Array.isArray(saved.availability);
+    var days = Array.isArray(saved.days) ? saved.days : perDate ? Object.keys(saved.availability) : [];
+    days = days.filter(function (date, i) { return typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date) && days.indexOf(date) === i; });
+    var availability = {};
+    if (perDate) {
+      Object.keys(saved.availability).forEach(function (date) {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(date)) availability[date] = draftHours(saved.availability[date]);
+      });
+    } else {
+      days.forEach(function (date) {
+        var sunday = new Date(date + "T12:00:00Z").getUTCDay() === 0;
+        availability[date] = draftHours(sunday ? saved.sundayHours || [] : saved.hours || ["13:00", "15:00"]);
+      });
+    }
+    upgraded.days = days;
+    upgraded.availability = availability;
+    upgraded.availabilityVersion = 2;
+    delete upgraded.hours;
+    delete upgraded.sundayHours;
+    return upgraded;
+  }
+
+  function selectedDates(section) {
+    return [].slice.call(section.querySelectorAll("[data-day]")).filter(function (box) { return box.checked; })
+      .map(function (box) { return box.getAttribute("data-day"); });
+  }
+
+  function readAvailability(section, previous) {
+    var availability = Object.assign({}, previous || {});
+    var seen = {};
+    section.querySelectorAll("[data-date-hour][data-hour]").forEach(function (box) {
+      var date = box.getAttribute("data-date-hour");
+      if (!seen[date]) { availability[date] = []; seen[date] = true; }
+      if (box.checked) availability[date].push(box.getAttribute("data-hour"));
+    });
+    return availability;
+  }
+
+  // Only checked date/time pairs are offered; no shared-hours product.
   function slateInstants(section, draftCfg) {
     var lead = leadHours(draftCfg);
     var floor = Date.now() + lead * 3600000 - 60000;
-    var days = [].slice.call(section.querySelectorAll("[data-day]")).filter(function (b) { return b.checked; });
-    var hours = [].slice.call(section.querySelectorAll("[data-hour]")).filter(function (b) { return b.checked; });
+    var days = selectedDates(section);
     var out = [];
-    var sundayHours = [].slice.call(section.querySelectorAll("[data-sunday-hour]")).filter(function (b) { return b.checked; });
-    days.forEach(function (d) {
-      var sunday = new Date(d.getAttribute("data-day") + "T12:00:00Z").getUTCDay() === 0;
-      (sunday ? sundayHours : hours).forEach(function (h) {
-        var iso = vegasInstant(d.getAttribute("data-day"), h.getAttribute(sunday ? "data-sunday-hour" : "data-hour"));
-        if (new Date(iso).getTime() >= floor) out.push(iso);
-      });
+    section.querySelectorAll("[data-date-hour][data-hour]").forEach(function (box) {
+      var date = box.getAttribute("data-date-hour");
+      if (!box.checked || days.indexOf(date) === -1) return;
+      var iso = vegasInstant(date, box.getAttribute("data-hour"));
+      if (new Date(iso).getTime() >= floor) out.push(iso);
     });
     out.sort();
     return out;
   }
 
+  function applyDatePreset(row, preset) {
+    var hours = {
+      workday: ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"],
+      afternoons: ["13:00", "14:00", "15:00", "16:00", "17:00", "18:00"],
+      clear: []
+    };
+    if (!Object.prototype.hasOwnProperty.call(hours, preset)) return;
+    row.querySelectorAll("[data-hour]").forEach(function (box) {
+      box.checked = hours[preset].indexOf(box.getAttribute("data-hour")) !== -1;
+    });
+  }
+
+  function appointmentDateLabel(date) {
+    return new Date(vegasInstant(date, "12:00")).toLocaleDateString("en-US", {
+      timeZone: "America/Los_Angeles", weekday: "long", month: "short", day: "numeric"
+    });
+  }
+
+  function proposalSummary(instants) {
+    if (!instants.length) return "No times selected yet — choose start times for each selected date.";
+    var offered = instants.slice(0, MAX_OFFERED_PROPOSAL);
+    var groups = {};
+    offered.forEach(function (iso) {
+      var at = new Date(iso);
+      var date = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(at);
+      if (!groups[date]) groups[date] = [];
+      groups[date].push(at.toLocaleTimeString("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit" }));
+    });
+    var lines = Object.keys(groups).map(function (date) {
+      return '<strong>' + esc(appointmentDateLabel(date)) + ':</strong> ' + esc(groups[date].join(", "));
+    });
+    lines.push(offered.length + " appointment option" + (offered.length === 1 ? "" : "s") + " will be offered.");
+    if (instants.length > MAX_OFFERED_PROPOSAL) lines.push("You selected " + instants.length + " times; only the first " + MAX_OFFERED_PROPOSAL + " shown above will be sent. Reduce your selections to include every option.");
+    return lines.join("<br />");
+  }
+
   function appointmentChoices(draftCfg, saved) {
     var days = offerableDays(draftCfg);
-    var hours = OFFER_HOURS;
-    var savedDays = saved.days || days.filter(function (d) { return new Date(d.iso + "T12:00:00Z").getUTCDay() !== 0; }).slice(0, 3).map(function (d) { return d.iso; });
-    var savedHours = saved.hours || ["13:00", "15:00"];
-
+    saved = migrateProposalDraft(saved);
     var html = '<h3>Appointment options</h3>' +
-      '<p class="field-hint">Tick the days and the times. The customer picks one; the rest are released automatically. ' +
-      'Las Vegas time, earliest ' + esc(days.length ? days[0].label : "—") +
+      '<p class="field-hint">Select a date, then choose the exact start times you want to offer for that day. The customer will choose one appointment.</p>' +
+      '<p class="field-hint">Las Vegas time, earliest ' + esc(days.length ? days[0].label : "—") +
       (leadHours(draftCfg) > 0 ? ' (' + esc(leadHours(draftCfg)) + 'h notice)' : '') +
       ', latest ' + esc(days.length ? days[days.length - 1].label : "—") + '.</p>';
-
     html += '<div class="slate"><div class="slate-group"><span class="slate-label">Days</span><div class="slate-chips">';
-    days.forEach(function (d) {
-      var on = savedDays.indexOf(d.iso) !== -1;
-      html += '<label class="chip' + (on ? " on" : "") + '"><input type="checkbox" data-day="' + esc(d.iso) + '"' + (on ? " checked" : "") + ' />' + esc(d.label) + "</label>";
+    days.forEach(function (day) {
+      var on = saved.days.indexOf(day.iso) !== -1;
+      html += '<label class="chip' + (on ? " on" : "") + '"><input type="checkbox" data-day="' + esc(day.iso) + '"' + (on ? " checked" : "") + ' />' + esc(day.label) + '</label>';
     });
-    html += '</div></div><div class="slate-group"><span class="slate-label">Monday–Saturday times</span><div class="slate-chips">';
-    hours.forEach(function (h) {
-      var on = savedHours.indexOf(h) !== -1;
-      html += '<label class="chip' + (on ? " on" : "") + '"><input type="checkbox" data-hour="' + esc(h) + '"' + (on ? " checked" : "") + ' />' + esc(pretty12(h)) + "</label>";
-    });
-    html += '</div></div>' +
-      '<div class="slate-actions"><span class="field-hint">Start-time presets (optional):</span>' +
-      '<button type="button" class="btn btn-ghost btn-sm" data-slate="workday">Select hourly start times: 10 AM–6 PM</button>' +
-      '<button type="button" class="btn btn-ghost btn-sm" data-slate="afternoons">Afternoon</button>' +
-      '<button type="button" class="btn btn-ghost btn-sm" data-slate="clear">Clear</button>' +
-      "</div>";
-    if (draftCfg.sundayEligible) {
-      html += '<div class="slate-group"><span class="slate-label">Sunday times</span><div class="slate-chips">';
-      hours.forEach(function (h) {
-        var on = (saved.sundayHours || []).indexOf(h) !== -1;
-        html += '<label class="chip' + (on ? ' on' : '') + '"><input type="checkbox" data-sunday-hour="' + esc(h) + '"' + (on ? ' checked' : '') + ' />' + esc(pretty12(h)) + '</label>';
+    html += '</div></div>';
+    days.forEach(function (day) {
+      var on = saved.days.indexOf(day.iso) !== -1;
+      var selected = saved.availability[day.iso] || [];
+      // Retain a valid previously selected non-hourly time (e.g. an old 12:30
+      // Sunday draft) alongside the complete normal hourly list.
+      var hours = OFFER_HOURS.concat(selected.filter(function (hour) { return OFFER_HOURS.indexOf(hour) === -1; })).sort();
+      html += '<fieldset class="slate-date" data-date-card="' + esc(day.iso) + '"' + (on ? '' : ' hidden') + '><legend>' + esc(appointmentDateLabel(day.iso)) + '</legend><div class="slate-chips">';
+      hours.forEach(function (hour) {
+        var checked = selected.indexOf(hour) !== -1;
+        html += '<label class="chip' + (checked ? ' on' : '') + '"><input type="checkbox" data-date-hour="' + esc(day.iso) + '" data-hour="' + esc(hour) + '"' + (checked ? ' checked' : '') + ' />' + esc(pretty12(hour)) + '</label>';
       });
-      html += '</div></div><p class="field-hint">For a Sunday date, choose from these times. All selected dates and times go into the same proposal; the customer chooses one appointment.</p>';
-    } else {
-      html += '<p class="field-hint">Sunday requires a private-sale vehicle at a confirmed private residence with inspection permission. Confirm Inspection location &amp; Sunday eligibility below.</p>';
-    }
+      html += '</div><div class="slate-actions"><span class="field-hint">For this date:</span>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-slate="workday">10 AM–6 PM</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-slate="afternoons" title="1 PM–6 PM">Afternoon</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-slate="clear">Clear</button></div></fieldset>';
+    });
+    if (!draftCfg.sundayEligible) html += '<p class="field-hint">Sunday requires a private-sale vehicle at a confirmed private residence with inspection permission. Confirm Inspection location &amp; Sunday eligibility below.</p>';
     html += '</div><p class="field-hint" id="slateSummary" role="status" aria-live="polite"></p>' +
       '<p class="form-status" id="slotHint" role="status" aria-live="polite"></p>';
-
     return html;
   }
 
   function proposalCard(d) {
     var draftCfg = d.proposalDraft || {};
-    var saved = readDraft() || {};
+    var saved = migrateProposalDraft(readDraft() || {});
     var tier = saved.tier || draftCfg.tier || "standard";
     var proposal = d.proposal;
 
@@ -779,7 +853,7 @@
       '<input id="pInternal" value="' + esc(saved.internal || "") + '" /></div></details>';
 
     // ---- times ----
-    // Pick the days, pick the hours, and every combination is offered. The
+    // Each selected date has its own exact start times. The
     // customer chooses one and the rest are released the moment they pay.
     html += '<div id="proposalAvailability">' + appointmentChoices(draftCfg, saved) + '</div>';
 
@@ -1323,17 +1397,13 @@
       var previewSequence = 0;
       var draftCfg = (detailCache && detailCache.proposalDraft) || {};
       function currentForm() {
-        var days = [].slice.call(proposalSection.querySelectorAll("[data-day]"))
-          .filter(function (b) { return b.checked; })
-          .map(function (b) { return b.getAttribute("data-day"); });
-        var hours = [].slice.call(proposalSection.querySelectorAll("[data-hour]"))
-          .filter(function (b) { return b.checked; })
-          .map(function (b) { return b.getAttribute("data-hour"); });
+        var days = selectedDates(proposalSection);
+        var availability = readAvailability(proposalSection, migrateProposalDraft(readDraft() || {}).availability);
         var selected = proposalSection.querySelector('input[name="pTier"]:checked');
         return {
           days: days,
-          hours: hours,
-          sundayHours: [].slice.call(proposalSection.querySelectorAll("[data-sunday-hour]")).filter(function (b) { return b.checked; }).map(function (b) { return b.getAttribute("data-sunday-hour"); }),
+          availability: availability,
+          availabilityVersion: 2,
           tier: selected ? selected.value : draftCfg.tier,
           base: document.getElementById("pBase").value,
           travel: document.getElementById("pTravel").value,
@@ -1402,21 +1472,17 @@
         proposalSection.querySelectorAll(".chip").forEach(function (chip) {
           chip.classList.toggle("on", chip.querySelector("input").checked);
         });
-        var summary = document.getElementById("slateSummary");
-        if (instants.length === 0) {
-          summary.textContent = "No times selected yet — tick at least one day and one time.";
-        } else {
-          var first = whenLong(instants[0]);
-          var last = whenLong(instants[instants.length - 1]);
-          summary.textContent = instants.length + " time" + (instants.length === 1 ? "" : "s")
-            + " will be offered, from " + first + " to " + last
-            + (instants.length > MAX_OFFERED_PROPOSAL ? " — only the first " + MAX_OFFERED_PROPOSAL + " will be sent" : "");
-        }
+        var days = selectedDates(proposalSection);
+        proposalSection.querySelectorAll("[data-date-card]").forEach(function (row) {
+          row.hidden = days.indexOf(row.getAttribute("data-date-card")) === -1;
+        });
+        document.getElementById("slateSummary").innerHTML = proposalSummary(instants);
         persist();
         return instants;
       }
 
       proposalSection.addEventListener("input", function () {
+        persist();
         clearTimeout(previewTimer);
         previewTimer = setTimeout(refreshPrice, 250);
       });
@@ -1429,7 +1495,7 @@
           previewTimer = setTimeout(refreshPrice, 0);
           return;
         }
-        if (event.target && (event.target.hasAttribute("data-day") || event.target.hasAttribute("data-hour") || event.target.hasAttribute("data-sunday-hour"))) {
+        if (event.target && (event.target.hasAttribute("data-day") || event.target.hasAttribute("data-hour"))) {
           refreshSlate();
         }
       });
@@ -1437,25 +1503,13 @@
       proposalSection.addEventListener("click", function (event) {
         var btn = event.target.closest("[data-slate]");
         if (!btn || !proposalSection.contains(btn)) return;
-        var preset = btn.getAttribute("data-slate");
-        var hourSets = {
-          workday: ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"],
-          afternoons: ["13:00", "14:00", "15:00", "16:00", "17:00", "18:00"],
-          clear: []
-        };
-        var want = hourSets[preset] || [];
-        proposalSection.querySelectorAll("[data-hour]").forEach(function (b) {
-          b.checked = want.indexOf(b.getAttribute("data-hour")) !== -1;
-        });
-        proposalSection.querySelectorAll("[data-sunday-hour]").forEach(function (b) {
-          var hour = b.getAttribute("data-sunday-hour");
-          b.checked = preset === "afternoons" ? hour >= "12:00" : preset === "workday" ? hour >= "10:00" && hour <= "18:00" : false;
-        });
-        if (preset === "clear") {
-          proposalSection.querySelectorAll("[data-day]").forEach(function (b) { b.checked = false; });
-        }
+        var row = btn.closest("[data-date-card]");
+        if (!row || row.hidden) return;
+        applyDatePreset(row, btn.getAttribute("data-slate"));
         document.getElementById("slotHint").textContent = "";
         refreshSlate();
+        clearTimeout(previewTimer);
+        refreshPrice();
       });
       refreshSlate();
       refreshPrice();
@@ -1482,7 +1536,7 @@
         var form = currentForm();
         var slots = slateInstants(proposalSection, draftCfg).slice(0, MAX_OFFERED_PROPOSAL);
         if (!slots.length) {
-          statusEl.textContent = "Tick at least one day and one time — a proposal without times leaves the customer unable to book.";
+          statusEl.textContent = "Choose a date and at least one start time for that date — a proposal without times leaves the customer unable to book.";
           var firstDay = proposalSection.querySelector("[data-day]");
           if (firstDay) firstDay.focus();
           return;

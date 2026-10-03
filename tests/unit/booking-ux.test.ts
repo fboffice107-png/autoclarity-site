@@ -93,7 +93,7 @@ describe('admin — one primary action before booking', () => {
 
   it('refuses to send without times and retains an unsent draft', () => {
     expect(adminScript).toContain('a proposal without times leaves the customer unable to book');
-    expect(adminScript).toContain('Tick at least one day and one time');
+    expect(adminScript).toContain('Choose a date and at least one start time for that date');
     expect(adminScript).toContain('Your unsent booking proposal draft was kept');
     expect(adminScript).toContain('function proposalKeyFor(form, slots)');
   });
@@ -149,7 +149,7 @@ describe('admin — one primary action before booking', () => {
   });
 
   it('tells the owner exactly how many times will go out', () => {
-    expect(adminScript).toContain('will be offered, from');
+    expect(adminScript).toContain(' will be offered.');
     expect(adminScript).toContain('No times selected yet');
   });
 });

@@ -10,105 +10,184 @@ const read = (name: string) => readFileSync(new URL('../../' + name, import.meta
 const admin = read('assets/js/ppi-admin.js');
 const form = read('assets/js/ppi-form.js');
 const portal = read('assets/js/ppi-portal.js');
-function calendar() {
+function calendar(saved: any = {}) {
   const start = admin.indexOf('  function vegasOffsetMinutes(');
   const end = admin.indexOf('  function priceTable(', start);
   const RealDate = Date;
   class FixedDate extends RealDate {
     static now() { return RealDate.parse('2026-10-02T23:00:00Z'); }
   }
-  return vm.runInNewContext(admin.slice(start, end) + '\n({ offerableDays, vegasInstant, slateInstants, appointmentChoices, proposalCard })', { Date: FixedDate, Intl, esc: String, readDraft: () => ({}), money: (n: number) => '$' + (n / 100).toFixed(2), priceTable: () => '', tierLabel: String, reviewNoteHtml: () => '' });
+  return vm.runInNewContext(admin.slice(start, end) + '\n({ offerableDays, vegasInstant, slateInstants, appointmentChoices, proposalCard, migrateProposalDraft, readAvailability, selectedDates, applyDatePreset, proposalSummary })', { Date: FixedDate, Intl, esc: String, readDraft: () => saved, money: (n: number) => '$' + (n / 100).toFixed(2), priceTable: () => '', tierLabel: String, reviewNoteHtml: () => '' });
 }
-const cfg = { minLeadHours: 0, maxAdvanceDays: 21, daysOfOperation: [0, 1, 3, 4, 5, 6], blackoutDates: [] };
+const cfg = { minLeadHours: 0, maxAdvanceDays: 21, daysOfOperation: [0, 1, 2, 3, 4, 5, 6], blackoutDates: [] };
+const normalHours = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
+const example = {
+  days: ['2026-10-04', '2026-10-05', '2026-10-06'],
+  availability: { '2026-10-04': ['10:00', '13:00', '16:00'], '2026-10-05': ['18:00'], '2026-10-06': ['09:00', '12:00', '15:00', '18:00'] },
+};
+const expectedInstants = ['2026-10-04T17:00:00.000Z', '2026-10-04T20:00:00.000Z', '2026-10-04T23:00:00.000Z', '2026-10-06T01:00:00.000Z', '2026-10-06T16:00:00.000Z', '2026-10-06T19:00:00.000Z', '2026-10-06T22:00:00.000Z', '2026-10-07T01:00:00.000Z'];
+function controls(html: string) {
+  const inputs = [...html.matchAll(/<input type="checkbox" ([^>]+)>/g)].map(m => {
+    const attrs = Object.fromEntries([...m[1]!.matchAll(/(data-[\w-]+)="([^"]+)"/g)].map(a => [a[1], a[2]]));
+    return { checked: /\bchecked\b/.test(m[1]!), getAttribute: (name: string) => attrs[name] ?? null };
+  });
+  return {
+    inputs,
+    querySelectorAll: (selector: string) => inputs.filter(i => [...selector.matchAll(/\[([\w-]+)\]/g)].every(m => i.getAttribute(m[1]!) !== null)),
+    row: (date: string) => ({ hidden: false, querySelectorAll: () => inputs.filter(i => i.getAttribute('data-date-hour') === date) }),
+  };
+}
 
-describe('Sunday owner controls execute with business-local dates', () => {
-  it('shows eligible Sunday dates, preserves Tuesday closure, and removes blackouts', () => {
+describe('per-date owner proposal choices', () => {
+  it('preserves configured weekdays, Tuesday availability, blackouts, and Sunday eligibility', () => {
     const c = calendar();
     const days = c.offerableDays(cfg).map((d: { iso: string }) => d.iso);
     expect(days).toContain('2026-10-04');
-    expect(days).not.toContain('2026-10-06');
-    expect(c.offerableDays({ ...cfg, daysOfOperation: [1, 3, 4, 5, 6] }).map((d: { iso: string }) => d.iso)).not.toContain('2026-10-04');
+    expect(days).toContain('2026-10-06');
+    expect(c.offerableDays({ ...cfg, daysOfOperation: [1, 2, 3, 4, 5, 6] }).map((d: { iso: string }) => d.iso)).not.toContain('2026-10-04');
     expect(c.offerableDays({ ...cfg, blackoutDates: ['2026-10-04'] }).map((d: { iso: string }) => d.iso)).not.toContain('2026-10-04');
+    expect(c.offerableDays({ ...cfg, daysOfOperation: [1, 3, 4, 5, 6] }).map((d: { iso: string }) => d.iso)).not.toContain('2026-10-06');
   });
-  it('converts Sunday afternoon correctly on either side of daylight saving', () => {
+  it('converts evening and Sunday times correctly on either side of daylight saving', () => {
     const c = calendar();
     expect(c.vegasInstant('2026-10-04', '13:00')).toBe('2026-10-04T20:00:00.000Z');
-    expect(c.vegasInstant('2026-10-04', '17:00')).toBe('2026-10-05T00:00:00.000Z');
-    expect(c.vegasInstant('2026-11-01', '16:00')).toBe('2026-11-02T00:00:00.000Z');
+    expect(c.vegasInstant('2026-10-04', '18:00')).toBe('2026-10-05T01:00:00.000Z');
+    expect(c.vegasInstant('2026-11-01', '18:00')).toBe('2026-11-02T02:00:00.000Z');
   });
-  it('offers only admin-ticked Sunday hours, without inheriting weekday defaults', () => {
-    const box = (attrs: Record<string, string>, checked = true) => ({ checked, getAttribute: (k: string) => attrs[k] });
-    const controls: Record<string, any[]> = {
-      '[data-day]': [box({ 'data-day': '2026-10-04' })],
-      '[data-hour]': [box({ 'data-hour': '13:00' })],
-      '[data-sunday-hour]': [],
-    };
-    const section = { querySelectorAll: (selector: string) => controls[selector] || [] };
-    expect(calendar().slateInstants(section, cfg)).toEqual([]);
-    controls['[data-sunday-hour]'] = [box({ 'data-sunday-hour': '16:00' }), box({ 'data-sunday-hour': '12:00' }, false)];
-    expect(calendar().slateInstants(section, cfg)).toEqual(['2026-10-04T23:00:00.000Z']);
-  });
-});
-
-describe('one owner proposal workflow', () => {
-  it('puts Sunday days and familiar time chips inside the main proposal, with optional presets', () => {
-    const c = calendar();
+  it('renders the same complete 9 AM–6 PM selector per date, showing only selected dates', () => {
+    const c = calendar(example);
     const html = c.proposalCard({ proposalDraft: { ...cfg, sundayEligible: true, slotTemplates: ['09:00', '12:30', '16:00'] } });
+    const section = controls(html);
     expect(html).toContain('id="bookingProposal"');
-    expect(html).toContain('data-day="2026-10-04"');
-    const normalHours = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
-    expect([...html.matchAll(/data-sunday-hour="([^"]+)"/g)].map(m => m[1])).toEqual(normalHours);
-    expect([...html.matchAll(/data-hour="([^"]+)"/g)].map(m => m[1])).toEqual(normalHours);
-    expect(html).not.toContain('data-sunday-hour="12:30"');
-    for (const label of ['1:00 PM', '2:00 PM', '3:00 PM', '6:00 PM']) expect(html).toContain(label);
-    expect(html).toContain('Select hourly start times: 10 AM–6 PM');
-    expect(html).toContain('Start-time presets (optional)');
-    expect(html).not.toContain('10\\u201317');
-    expect(html).not.toContain('scheduling.slotTemplates');
+    for (const date of example.days) {
+      expect(section.row(date).querySelectorAll().map(b => b.getAttribute('data-hour'))).toEqual(normalHours);
+      expect(html).toContain(`data-date-card="${date}"><legend>`);
+    }
+    expect(html).toContain('data-date-card="2026-10-07" hidden');
+    expect(html).toContain('>10 AM–6 PM</button>');
+    expect(html).toContain('>Afternoon</button>');
+    expect(html).toContain('>Clear</button>');
+    expect(html).not.toContain('Sunday times');
+    expect(html).not.toContain('Monday–Saturday times');
+    expect(html).not.toContain('data-sunday-hour');
+    expect(html).not.toContain('data-hour="12:30"');
     expect(html).toContain('Send booking proposal');
-    const ordinary = c.proposalCard({ proposalDraft: { ...cfg, daysOfOperation: [1, 2, 3, 4, 5, 6] } });
+    const ordinary = c.appointmentChoices({ ...cfg, daysOfOperation: [1, 2, 3, 4, 5, 6] }, example);
     expect(ordinary).not.toContain('data-day="2026-10-04"');
-    expect(ordinary).not.toContain('data-sunday-hour=');
+    expect(ordinary).not.toContain('data-date-card="2026-10-04"');
     expect(ordinary).toContain('data-day="2026-10-06"');
-    expect(ordinary).toContain('data-hour="18:00"');
   });
-  it('turns the main proposal’s checked Sunday 1, 2, and 3 PM choices into offered instants', () => {
+  it('offers only exact selected pairs: Monday 6 PM, different Tuesday times, and no Wednesday', () => {
     const c = calendar();
-    const saved = { days: ['2026-10-04'], hours: ['09:00'], sundayHours: ['13:00', '14:00', '15:00'] };
-    const html = c.appointmentChoices({ ...cfg, sundayEligible: true, slotTemplates: ['09:00', '12:30', '16:00'] }, saved);
-    // Read the rendered checkbox choices rather than substituting a separate time list.
-    const inputs = [...html.matchAll(/<input type="checkbox" (data-(?:day|hour|sunday-hour))="([^"]+)"( checked)?/g)]
-      .map(m => ({ checked: Boolean(m[3]), attr: m[1], getAttribute: (name: string) => name === m[1] ? m[2] : null }));
-    const section = { querySelectorAll: (selector: string) => inputs.filter(i => selector === `[${i.attr}]`) };
-    expect(c.slateInstants(section, cfg)).toEqual([
-      '2026-10-04T20:00:00.000Z', '2026-10-04T21:00:00.000Z', '2026-10-04T22:00:00.000Z',
-    ]);
+    const section = controls(c.appointmentChoices({ ...cfg, sundayEligible: true }, example));
+    expect(c.slateInstants(section, cfg)).toEqual(expectedInstants);
+    const summary = c.proposalSummary(c.slateInstants(section, cfg));
+    expect(summary).toContain('Sunday, Oct 4:</strong> 10:00 AM, 1:00 PM, 4:00 PM');
+    expect(summary).toContain('Monday, Oct 5:</strong> 6:00 PM<br');
+    expect(summary).toContain('Tuesday, Oct 6:</strong> 9:00 AM, 12:00 PM, 3:00 PM, 6:00 PM');
+    expect(summary).toContain('8 appointment options will be offered.');
+    expect(summary).not.toContain('Wednesday');
   });
-  it('includes weekday and eligible Sunday 6 PM starts in the same proposal slate', () => {
+  it('a per-date preset or Clear changes only its date and preserves the other dates', () => {
     const c = calendar();
-    const html = c.appointmentChoices({ ...cfg, sundayEligible: true }, { days: ['2026-10-04', '2026-10-05'], hours: ['18:00'], sundayHours: ['18:00'] });
-    const inputs = [...html.matchAll(/<input type="checkbox" (data-(?:day|hour|sunday-hour))="([^"]+)"( checked)?/g)]
-      .map(m => ({ checked: Boolean(m[3]), attr: m[1], getAttribute: (name: string) => name === m[1] ? m[2] : null }));
-    expect(c.slateInstants({ querySelectorAll: (selector: string) => inputs.filter(i => selector === `[${i.attr}]`) }, cfg))
-      .toEqual(['2026-10-05T01:00:00.000Z', '2026-10-06T01:00:00.000Z']);
+    const section = controls(c.appointmentChoices({ ...cfg, sundayEligible: true }, example));
+    const selected = (date: string) => section.row(date).querySelectorAll().filter(b => b.checked).map(b => b.getAttribute('data-hour'));
+    c.applyDatePreset(section.row('2026-10-06'), 'workday');
+    expect(selected('2026-10-06')).toEqual(normalHours.slice(1));
+    expect(selected('2026-10-05')).toEqual(['18:00']);
+    expect(selected('2026-10-04')).toEqual(example.availability['2026-10-04']);
+    c.applyDatePreset(section.row('2026-10-06'), 'clear');
+    expect(selected('2026-10-06')).toEqual([]);
+    expect(c.selectedDates(section)).toEqual(example.days);
+    expect(selected('2026-10-05')).toEqual(['18:00']);
+    expect(selected('2026-10-04')).toEqual(example.availability['2026-10-04']);
+    c.applyDatePreset(section.row('2026-10-05'), 'afternoons');
+    expect(selected('2026-10-05')).toEqual(normalHours.slice(4));
+    expect(selected('2026-10-06')).toEqual([]);
   });
-  it('the hourly preset selects every 10 AM–6 PM start for weekdays and Sunday', () => {
-    const hours = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
-    const controls: Record<string, any[]> = Object.fromEntries(['data-hour', 'data-sunday-hour'].map(attr => [
-      `[${attr}]`, hours.map(hour => ({ checked: false, getAttribute: () => hour })),
-    ]));
+  it('binds each preset to its enclosing date instead of the whole proposal', () => {
+    const c = calendar();
+    const section = controls(c.appointmentChoices({ ...cfg, sundayEligible: true }, example));
     let click: (event: any) => void = () => {};
     let refreshed = 0;
     const start = admin.indexOf('      proposalSection.addEventListener("click", function (event) {');
     const end = admin.indexOf('      refreshSlate();\n      refreshPrice();', start);
     vm.runInNewContext(admin.slice(start, end), {
-      proposalSection: { addEventListener: (_: string, fn: (event: any) => void) => { click = fn; }, contains: () => true, querySelectorAll: (selector: string) => controls[selector] || [] },
+      proposalSection: { addEventListener: (_: string, fn: (event: any) => void) => { click = fn; }, contains: () => true },
       document: { getElementById: () => ({ textContent: '' }) }, refreshSlate: () => { refreshed++; },
+      refreshPrice: () => {}, clearTimeout: () => {}, previewTimer: null, applyDatePreset: c.applyDatePreset,
     });
-    click({ target: { closest: () => ({ getAttribute: () => 'workday' }) } });
-    for (const boxes of Object.values(controls)) expect(boxes.filter(b => b.checked).map(b => b.getAttribute())).toEqual(hours.slice(1));
+    click({ target: { closest: () => ({ getAttribute: () => 'workday', closest: () => section.row('2026-10-06') }) } });
+    expect(c.readAvailability(section)['2026-10-06']).toEqual(normalHours.slice(1));
+    expect(c.readAvailability(section)['2026-10-05']).toEqual(['18:00']);
     expect(refreshed).toBe(1);
   });
+  it('keeps deselected-date choices in the draft but excludes them from the outgoing slots', () => {
+    const c = calendar();
+    const section = controls(c.appointmentChoices({ ...cfg, sundayEligible: true }, example));
+    const monday = section.inputs.find(i => i.getAttribute('data-day') === '2026-10-05')!;
+    monday.checked = false;
+    expect(c.slateInstants(section, cfg)).toEqual(expectedInstants.filter(s => s !== '2026-10-06T01:00:00.000Z'));
+    expect(c.readAvailability(section)['2026-10-05']).toEqual(['18:00']);
+    monday.checked = true;
+    expect(c.slateInstants(section, cfg)).toEqual(expectedInstants);
+    expect(c.slateInstants(section, { ...cfg, minLeadHours: 96 })).toEqual(expectedInstants.slice(7));
+  });
+  it('sends only the exact rendered pairs through the real combined-proposal handler', () => {
+    const c = calendar();
+    const section = controls(c.appointmentChoices({ ...cfg, sundayEligible: true }, example));
+    let click: () => void = () => {};
+    const sent: any[] = [];
+    const start = admin.indexOf('      sendBtn.addEventListener("click", function () {');
+    const end = admin.indexOf('      content.querySelectorAll("[data-retry-proposal]")', start);
+    vm.runInNewContext(admin.slice(start, end), {
+      sendBtn: { addEventListener: (_: string, fn: () => void) => { click = fn; }, getAttribute: () => '22400' },
+      currentForm: () => ({ message: 'Keep this message', internal: 'Private note', expires: '48' }),
+      slateInstants: c.slateInstants, proposalSection: section, draftCfg: cfg, MAX_OFFERED_PROPOSAL: 40,
+      pricePayload: () => ({ tier: 'standard', basePriceCents: 19900, travelCents: 2500 }),
+      detailCache: { request: { year: '2016', make: 'Toyota', model: 'Corolla' } },
+      proposalKeyFor: () => 'synthetic-key', statusEl: {}, act: (payload: any) => sent.push(payload),
+    });
+    click();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ action: 'send_booking_proposal', slots: expectedInstants, basePriceCents: 19900, travelCents: 2500, customerNote: 'Keep this message', adminNote: 'Private note', expiresHours: 48 });
+  });
+  it('summarizes only the existing 40-option send limit and clearly flags excess selections', () => {
+    const c = calendar();
+    const slots = Array.from({ length: 41 }, (_, i) => new Date(Date.parse('2026-10-04T16:00:00Z') + i * 3600000).toISOString());
+    expect(c.proposalSummary(slots)).toContain('40 appointment options will be offered.');
+    expect(c.proposalSummary(slots)).toContain('only the first 40 shown above will be sent');
+  });
+});
+
+describe('safe browser draft migration', () => {
+  it('copies legacy shared times to their selected dates and retains price/message fields exactly', () => {
+    const c = calendar();
+    const legacy = { days: example.days, hours: ['12:00', '15:00', '18:00'], sundayHours: ['10:00', '12:30', '16:00'], tier: 'standard', base: '199', travel: '25', message: 'My saved draft', internal: 'Keep note', custom: 'preserve' };
+    const upgraded = c.migrateProposalDraft(legacy);
+    expect(upgraded).toMatchObject({ availabilityVersion: 2, tier: 'standard', base: '199', travel: '25', message: legacy.message, internal: legacy.internal, custom: legacy.custom });
+    expect(upgraded.availability).toEqual({ '2026-10-04': legacy.sundayHours, '2026-10-05': legacy.hours, '2026-10-06': legacy.hours });
+    expect(upgraded.hours).toBeUndefined();
+    expect(upgraded.sundayHours).toBeUndefined();
+    expect(upgraded.availability['2026-10-05']).not.toBe(upgraded.availability['2026-10-06']);
+    expect(c.migrateProposalDraft(upgraded)).toEqual(upgraded);
+    expect(legacy.hours).toEqual(['12:00', '15:00', '18:00']);
+    const section = controls(c.appointmentChoices({ ...cfg, sundayEligible: true }, legacy));
+    expect(section.row('2026-10-04').querySelectorAll().filter(b => b.checked).map(b => b.getAttribute('data-hour'))).toEqual(legacy.sundayHours);
+  });
+  it('preserves cleared and empty drafts, never automatically choosing new dates or times', () => {
+    const c = calendar();
+    expect(c.migrateProposalDraft({ days: example.days, hours: [], sundayHours: [] }).availability).toEqual({ '2026-10-04': [], '2026-10-05': [], '2026-10-06': [] });
+    expect(c.migrateProposalDraft({}).days).toEqual([]);
+    const section = controls(c.appointmentChoices({ ...cfg, sundayEligible: true }, {}));
+    expect(section.inputs.some(i => i.checked)).toBe(false);
+    expect(c.slateInstants(section, cfg)).toEqual([]);
+    const perDate = c.migrateProposalDraft(example);
+    expect(perDate.availability).toEqual(example.availability);
+  });
+});
+
+describe('one owner proposal workflow', () => {
   it('clearly distinguishes private location, dealership Sunday limits, and the collapsed manual email tool', () => {
     expect(admin).toContain('Dealership inspections are fully supported. Sunday appointments are available only for eligible private-sale inspections at a confirmed private residence.');
     expect(admin).not.toContain('A dealership vehicle is never eligible');

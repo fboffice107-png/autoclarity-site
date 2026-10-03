@@ -1091,7 +1091,7 @@ details.portal-secondary[open] > summary { margin-bottom: 14px; }
    from a slate grouped by day. Same tokens, same card language.
    =========================================================================== */
 
-/* ---- admin: the day x hour slate ---- */
+/* ---- admin: exact start times for each selected date ---- */
 .slate {
   border: 1px solid var(--line-soft);
   border-radius: 12px;
@@ -1135,6 +1135,12 @@ details.portal-secondary[open] > summary { margin-bottom: 14px; }
 }
 .chip:focus-within { outline: 2px solid var(--blue-bright); outline-offset: 2px; }
 .slate-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+
+/* A selected date owns its time controls and presets. */
+.slate-date { min-width: 0; margin: 18px 0 0; padding: 14px 0 0; border: 0; border-top: 1px solid var(--line-soft); }
+.slate-date[hidden] { display: none; }
+.slate-date legend { padding: 0 8px 0 0; font-size: 15px; font-weight: 700; color: var(--text); }
+.slate-date .slate-actions { border-top: 0; padding-top: 0; }
 
 /* ---- customer: the slate, grouped by day ---- */
 .slot-day-group { margin: 14px 0 4px; }

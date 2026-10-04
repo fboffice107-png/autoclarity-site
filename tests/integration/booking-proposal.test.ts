@@ -324,7 +324,7 @@ describe('booking proposal — one owner action, one customer decision', () => {
     });
     expect(sent.status, JSON.stringify(sent.body)).toBe(200);
 
-    const retry = await adminPost(requestId, { action: 'retry_proposal_notification', proposalId: sent.body.proposalId });
+    const retry = await adminPost(requestId, { action: 'retry_proposal_notification', proposalId: sent.body.proposalId, deliveryId: sent.body.notification.delivery.id });
     expect(retry.status).toBe(200);
 
     const after = await get(`/api/admin/requests/${requestId}`, admin);

@@ -68,6 +68,8 @@ export interface RetryPortalContext {
   publicBaseUrl: string;
   config: PpiConfig;
   confirmFreshAfterWindow?: boolean;
+  /** Owner audit copies must retain the exact historical customer link. */
+  preserveSnapshotLinks?: boolean;
 }
 
 const RESEND_IDEMPOTENCY_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -161,7 +163,7 @@ async function updateMessageStatus(
       .bind(status, providerId, error, id)
       .run();
   } catch (e) {
-    console.error('email_status_update_failed', id, String(e).slice(0, 240));
+    console.error('email_status_update_failed', id);
   }
 }
 
@@ -196,15 +198,17 @@ async function deliverRecordedEmail(env: Env, db: D1Database, msg: RecordedEmail
     });
     if (res.ok) {
       const body = (await res.json()) as { id?: string };
-      await updateMessageStatus(db, msg.id, 'sent', body.id ?? null, null);
+      await updateMessageStatus(db, msg.id, 'sent', typeof body.id === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(body.id) ? body.id : null, null);
       return { id: msg.id, status: 'sent' };
     }
-    const error = `http ${res.status}: ${(await res.text()).slice(0, 500)}`;
+    // Provider response bodies can contain recipient data or credentials.
+    const error = `Email provider rejected the request (HTTP ${res.status}).`;
     await updateMessageStatus(db, msg.id, 'failed', null, error);
     return { id: msg.id, status: 'failed', failure: 'provider_failed' };
   } catch (e) {
-    await updateMessageStatus(db, msg.id, 'failed', null, String(e).slice(0, 500));
-    console.error(JSON.stringify({ event: 'email_delivery_failed', messageId: msg.id, error: String(e).slice(0, 240) }));
+    const error = 'Email provider response unavailable; acceptance is unconfirmed. Retry only with the recorded idempotency key.';
+    await updateMessageStatus(db, msg.id, 'failed', null, error);
+    console.error(JSON.stringify({ event: 'email_delivery_failed', messageId: msg.id }));
     return { id: msg.id, status: 'failed', failure: 'provider_failed' };
   }
 }
@@ -272,7 +276,7 @@ async function recordEmail(
       event: 'email_record_failed',
       requestId,
       template,
-      error: String(e).slice(0, 240),
+      error: 'Outbox write failed.',
     }));
     await persistNotificationIssue(db, {
       actor: 'system:email',
@@ -282,7 +286,7 @@ async function recordEmail(
       sourceAction: template,
       template,
       dedupeKey: msg.dedupeKey,
-      error: String(e),
+      error: 'Outbox write failed.',
     });
     return { message: null, issueKey, issueDedupeKey: msg.dedupeKey };
   }
@@ -311,6 +315,13 @@ export async function sendEmail(
   }
   if (recorded.currentStatus === 'sent') return { id: recorded.id, status: 'sent' };
   return deliverRecordedEmail(env, db, recorded);
+}
+
+/** Persist a rendered proposal snapshot before any delivery is attempted. */
+export async function storeEmail(db: D1Database, requestId: string, template: string, msg: OutboundEmail): Promise<EmailResult> {
+  const result = await recordEmail(db, requestId, template, msg);
+  return result.message ? { id: result.message.id, status: result.message.currentStatus }
+    : { id: null, status: 'failed', failure: 'outbox_record_failed' };
 }
 
 /**
@@ -350,7 +361,9 @@ interface PortalLinkInText {
 }
 
 function findPortalLink(text: string): PortalLinkInText | null {
-  const candidates = text.matchAll(/https?:\/\/[^\s<>]+/g);
+  // Template CTA follows editable customer notes; never refresh a pasted
+  // earlier link while leaving the real booking CTA expired.
+  const candidates = [...text.matchAll(/https?:\/\/[^\s<>]+/g)].reverse();
   for (const match of candidates) {
     if (match.index === undefined) continue;
     const rawUrl = match[0];
@@ -425,7 +438,7 @@ async function createRetrySuccessor(
       console.error(JSON.stringify({
         event: 'email_link_refresh_magic_failed',
         messageId: message.id,
-        error: String(e).slice(0, 240),
+        error: 'Email operation failed.',
       }));
       return { id: message.id, status: 'failed', failure: 'link_refresh_failed' };
     }
@@ -457,7 +470,7 @@ async function createRetrySuccessor(
         event: 'email_link_refresh_cleanup_failed',
         messageId: message.id,
         linkId: fresh.id,
-        error: String(e).slice(0, 240),
+        error: 'Email operation failed.',
       }));
     }
   }
@@ -485,7 +498,7 @@ async function retryStoredEmailInternal(
     return { id: message.id, status: 'failed', failure: 'idempotency_window_expired' };
   }
 
-  const embeddedLink = findPortalLink(message.body_text);
+  const embeddedLink = portalContext?.preserveSnapshotLinks ? null : findPortalLink(message.body_text);
   let linkNeedsRefresh = false;
   if (embeddedLink && portalContext) {
     if (!message.request_id) {
@@ -498,7 +511,7 @@ async function retryStoredEmailInternal(
       console.error(JSON.stringify({
         event: 'email_link_validation_failed',
         messageId: message.id,
-        error: String(e).slice(0, 240),
+        error: 'Email operation failed.',
       }));
       return { id: message.id, status: 'failed', failure: 'link_refresh_failed' };
     }
@@ -779,7 +792,7 @@ export async function sendTemplate(
     const effectiveReplyTo = replyTo ?? (template.startsWith('owner_') ? undefined : ctx.supportEmail);
     return await sendEmail(env, db, requestId, template, { to, subject, text, replyTo: effectiveReplyTo, dedupeKey });
   } catch (e) {
-    console.error('email_template_failed', requestId ?? 'none', template, String(e).slice(0, 240));
+    console.error('email_template_failed', requestId ?? 'none', template);
     return { id: null, status: 'failed', failure: 'template_failed' };
   }
 }
@@ -800,7 +813,7 @@ export async function queueTemplate(
     const effectiveReplyTo = replyTo ?? (template.startsWith('owner_') ? undefined : ctx.supportEmail);
     return await queueEmail(env, db, requestId, template, { to, subject, text, replyTo: effectiveReplyTo, dedupeKey }, waitUntil);
   } catch (e) {
-    console.error('email_queue_failed', requestId ?? 'none', template, String(e).slice(0, 240));
+    console.error('email_queue_failed', requestId ?? 'none', template);
     return { id: null, status: 'failed', failure: 'template_failed' };
   }
 }

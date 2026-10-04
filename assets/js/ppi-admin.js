@@ -758,9 +758,22 @@
     return html;
   }
 
+  function proposalDeliveryText(delivery) {
+    if (!delivery) return "Delivery history is not available for this earlier proposal.";
+    var email = delivery.customerEmail || {};
+    var sms = delivery.customerSms || {};
+    var owner = delivery.adminNotification || {};
+    var lines = [delivery.state === "complete" ? "Booking proposal delivery results" : "Delivery needs review — " + delivery.state];
+    lines.push("Email: " + (email.status === "accepted" ? "sent (provider accepted; mailbox delivery unconfirmed)" : email.status) + " · " + (email.destination || "") + (email.reason ? " — " + email.reason : ""));
+    lines.push("Text: " + (sms.status === "queued" ? "queued; not confirmed sent" : sms.status) + " · " + (sms.destination || "") + (sms.reason ? " — " + sms.reason : ""));
+    lines.push("Owner confirmation: " + (owner.status === "accepted" ? "sent (provider accepted)" : owner.status) + (owner.reason ? " — " + owner.reason : ""));
+    if (delivery.attemptedAt) lines.push("Attempted: " + when(delivery.attemptedAt));
+    return lines.join("\n");
+  }
+
   function sentProposalEmailHtml(snapshot) {
     if (!snapshot) return '';
-    return '<details class="sent-proposal-email"><summary>View sent proposal email</summary>' +
+    return '<details class="sent-proposal-email"><summary>' + (snapshot.status === 'sent' ? 'View sent proposal email' : 'View stored proposal email') + '</summary>' +
       '<p class="field-hint">Stored email text from this proposal. The secure booking link is hidden in this view.</p>' +
       '<p><strong>Subject:</strong> ' + esc(snapshot.subject || '') + '<br />' +
       '<strong>Recipient:</strong> ' + esc(snapshot.recipient || '') + '<br />' +
@@ -779,7 +792,7 @@
 
     // ---- what was already sent, and whether it actually went out ----
     if (proposal) {
-      var noteKind = proposal.notificationStatus === "sent" ? "good"
+      var noteKind = proposal.delivery ? "info" : proposal.notificationStatus === "sent" ? "good"
         : proposal.notificationStatus === "failed" ? "warn" : "info";
       var noteText = proposal.notificationStatus === "sent"
         ? "Proposal sent to customer " + when(proposal.sentAt)
@@ -792,19 +805,28 @@
         esc(money(proposal.totalCents)) + '</strong><br />' + esc(noteText) + '<br />' +
         esc("Times offered: " + (proposal.slots.length ? proposal.slots.map(function (s) { return s.label; }).join(" · ") : "none")) +
         '<br />' + esc(proposal.slots.length + " appointment choice" + (proposal.slots.length === 1 ? "" : "s")) +
-        (proposal.emailSnapshot ? '<br />Recipient: ' + esc(proposal.emailSnapshot.recipient || '') : '') +
+        (proposal.emailSnapshot ? '<br />Recipient: ' + esc(proposal.delivery ? proposal.delivery.customerEmail.destination : proposal.emailSnapshot.recipient || '') : '') +
         '<br /><span class="msg-meta">Saved ' + esc(when(proposal.createdAt)) + '</span>';
+      if (proposal.delivery) {
+        html += '<pre class="notice info" style="white-space:pre-wrap;font:inherit;">' + esc(proposalDeliveryText(proposal.delivery)) + '</pre>';
+        if (proposal.delivery.customerSms && proposal.delivery.customerSms.body) html += '<details><summary>View text snapshot</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;">' + esc(proposal.delivery.customerSms.body) + '</pre></details>';
+      }
       var ownerStatus = proposal.ownerCopy && proposal.ownerCopy.status;
       var ownerText = ownerStatus === "sent" ? "Owner copy sent — accepted by the email provider."
-        : ownerStatus === "recorded" ? "Owner copy queued. Refresh job status to check the send result."
-        : ownerStatus === "failed" ? "Owner copy failed. The customer proposal remains sent; do not resend it to retry the owner copy."
+        : ownerStatus === "recorded" ? "Owner copy stored; provider acceptance is not confirmed. Refresh job status to check."
+        : ownerStatus === "failed" ? "Owner copy failed. Customer channel results are unchanged; retry only the owner email in message history."
         : "No owner copy recorded. Earlier proposals are not copied automatically.";
       html += '<p class="field-hint' + (ownerStatus === "failed" ? ' notice warn' : '') + '">' + esc(ownerText) + '</p>' +
         sentProposalEmailHtml(proposal.emailSnapshot) + '</div>';
-      if (proposal.notificationStatus !== "sent") {
-        html += '<button class="btn btn-ghost btn-sm" data-retry-proposal="' + esc(proposal.id) + '">Retry sending this proposal</button> ' +
-          '<span class="field-hint">Reuses the same proposal — it cannot create a second one.</span>';
+      if (proposal.notificationStatus !== "sent" && (!proposal.delivery || proposal.delivery.state !== "processing")) {
+        html += '<button class="btn btn-ghost btn-sm" data-retry-proposal="' + esc(proposal.id) + '">Retry unconfirmed email</button> ' +
+          '<span class="field-hint">Reuses the same proposal — it cannot create a second one. Preserves any prior text handoff.</span>';
       }
+    }
+
+    if (proposal && (!proposal.delivery || proposal.delivery.state !== "processing") && ["quote_sent", "awaiting_time_selection"].indexOf(d.request.status) !== -1) {
+      html += '<details><summary>Advanced delivery actions</summary><p class="field-hint">An intentional resend sends another copy of this saved proposal. Review channel history first.</p>' +
+        '<button class="btn btn-ghost btn-sm" data-resend-proposal="' + esc(proposal.id) + '">Resend saved proposal…</button></details>';
     }
 
     // ---- package ----
@@ -1552,6 +1574,7 @@
       });
 
       sendBtn.addEventListener("click", function () {
+        if (sendBtn.disabled) return;
         var form = currentForm();
         var slots = slateInstants(proposalSection, draftCfg).slice(0, MAX_OFFERED_PROPOSAL);
         if (!slots.length) {
@@ -1579,15 +1602,11 @@
         sendBtn.disabled = true;
         statusEl.textContent = "Sending…";
         act(payload, function (r) {
-          sendBtn.disabled = false;
+          sendBtn.disabled = r.ok;
           if (r.ok) {
             clearDraft();
             var n = r.body.notification || {};
-            statusEl.textContent = r.body.duplicate
-              ? "Already sent — nothing was duplicated."
-              : n.deliveryConfirmed
-                ? "Proposal sent to customer. Accepted by the email provider."
-                : "Saved and queued. Provider acceptance is not confirmed yet — check the status above.";
+            statusEl.textContent = (r.body.duplicate ? "Already recorded — nothing was duplicated. " : "") + proposalDeliveryText(n.delivery || (r.body.proposal && r.body.proposal.delivery));
             if (r.body.sameDayFeeDropped) {
               statusEl.textContent += " The same-day fee was not charged, because none of the times offered are today.";
             }
@@ -1605,17 +1624,27 @@
         });
       });
 
+      content.querySelectorAll("[data-resend-proposal]").forEach(function (btn) {
+        // Stable for this displayed operation, including a network retry.
+        var key = "resend_" + crypto.randomUUID().replace(/-/g, "");
+        btn.addEventListener("click", function () {
+          if (btn.disabled || !confirm("Send another copy of this saved proposal to the customer?\n\nThis intentionally repeats customer email and, if enabled and permitted, text. Review existing delivery results first.")) return;
+          btn.disabled = true;
+          act({ action: "resend_booking_proposal", proposalId: btn.getAttribute("data-resend-proposal"), deliveryId: detailCache.proposal.delivery ? detailCache.proposal.delivery.id : "legacy", deliveryKey: key, confirmResend: true }, function (r) {
+            btn.disabled = r.ok;
+            statusEl.textContent = r.ok ? proposalDeliveryText(r.body.notification && r.body.notification.delivery) : ((r.body.error && r.body.error.message) || "Resend failed.");
+            return true;
+          });
+        });
+      });
+
       content.querySelectorAll("[data-retry-proposal]").forEach(function (btn) {
         btn.addEventListener("click", function () {
           btn.disabled = true;
-          act({ action: "retry_proposal_notification", proposalId: btn.getAttribute("data-retry-proposal") }, function (r) {
+          act({ action: "retry_proposal_notification", proposalId: btn.getAttribute("data-retry-proposal"), deliveryId: detailCache.proposal.delivery && detailCache.proposal.delivery.id }, function (r) {
             btn.disabled = false;
             if (!r.ok) { statusEl.textContent = (r.body.error && r.body.error.message) || "Retry failed."; return true; }
-            statusEl.textContent = r.body.alreadySent
-              ? "Already sent — nothing was re-sent."
-              : (r.body.notification && r.body.notification.deliveryConfirmed)
-                ? "Proposal sent to customer."
-                : "Queued again; provider acceptance is still unconfirmed.";
+            statusEl.textContent = r.body.alreadySent ? "Already sent — nothing was re-sent." : proposalDeliveryText(r.body.notification && r.body.notification.delivery);
             return true;
           });
         });
@@ -1751,7 +1780,7 @@
         function runRetry(confirmFresh) {
           btn.disabled = true;
           btn.textContent = confirmFresh ? "Preparing fresh copy…" : "Retrying…";
-          act({ action: "retry_email", messageId: messageId, confirmFresh: confirmFresh === true }, function (r) {
+          act({ action: "retry_email", messageId: messageId, deliveryId: detailCache.proposal && detailCache.proposal.delivery && detailCache.proposal.delivery.id, confirmFresh: confirmFresh === true }, function (r) {
             var error = r.body && r.body.error;
             if (!r.ok && error && error.code === "email_retry_window_expired" && error.requiresFreshConfirmation && !confirmFresh) {
               var approved = window.confirm(

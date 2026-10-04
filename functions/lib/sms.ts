@@ -5,7 +5,7 @@
 import type { Env } from './types.ts';
 import { newId, nowIso } from './util.ts';
 
-export type TransactionalSmsTemplate = 'request_received' | 'appointment_confirmed' | 'report_ready';
+export type TransactionalSmsTemplate = 'request_received' | 'appointment_confirmed' | 'report_ready' | 'booking_proposal';
 
 export interface TransactionalSmsJob {
   version: 1;
@@ -26,6 +26,8 @@ export interface TransactionalSmsInput {
   body: string;
   transactionalConsent: boolean;
   requestedByCustomer: boolean;
+  /** Stable delivery-ledger ID for consumers to deduplicate. */
+  jobId?: string;
 }
 
 /** Consent and preference checks always run before the feature/config checks. */
@@ -35,23 +37,33 @@ export async function queueTransactionalSms(env: Env, input: TransactionalSmsInp
   if (env.SMS_ENABLED !== 'true') return 'disabled';
   if (!env.SMS_QUEUE) return 'unavailable';
 
-  const compliance = 'Reply STOP to opt out; HELP for help. Msg/data rates may apply.';
-  const branded = /AutoClarity/i.test(input.body) ? input.body : `AutoClarity: ${input.body}`;
-  const room = Math.max(0, 480 - compliance.length - 1);
   const job: TransactionalSmsJob = {
     version: 1,
-    id: newId('sms'),
+    id: input.jobId ?? newId('sms'),
     requestId: input.requestId,
     template: input.template,
     to: input.to,
-    body: `${branded.slice(0, room).trim()} ${compliance}`.trim(),
+    body: renderTransactionalSms(input.body),
     queuedAt: nowIso(),
   };
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await env.SMS_QUEUE.send(job);
+    await Promise.race([
+      env.SMS_QUEUE.send(job),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('queue_timeout')), 10000); }),
+    ]);
     return 'queued';
   } catch (e) {
-    console.error('sms_queue_failed', input.requestId, input.template, String(e).slice(0, 240));
+    console.error('sms_queue_failed', input.requestId, input.template);
     return 'failed';
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
+}
+
+export function renderTransactionalSms(body: string): string {
+  const compliance = 'Reply STOP to opt out; HELP for help. Msg/data rates may apply.';
+  const branded = /AutoClarity/i.test(body) ? body : `AutoClarity: ${body}`;
+  const room = Math.max(0, 480 - compliance.length - 1);
+  return `${branded.slice(0, room).trim()} ${compliance}`.trim();
 }

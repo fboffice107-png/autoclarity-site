@@ -58,14 +58,14 @@ function inventory(dir) {
 }
 inventory(publicDir);
 const migrations = [];
-// Uses existing outbox records; no database migration required.
-const migrationPaths = [];
+// Apply this additive ledger before deploying the compiled application.
+const migrationPaths = ['migrations/0019_proposal_delivery.sql'];
 for (const path of migrationPaths) {
   const bytes = git('show', `${expected}:${path}`);
   mkdirSync(join(output, 'migrations'), { recursive: true });
   writeFileSync(join(output, path), bytes);
   migrations.push({ path, sha256: hash(bytes) });
 }
-const manifest = { commit: expected, tree: git('rev-parse', `${expected}^{tree}`).toString().trim(), build: 'ac-ownercopy-20261003-r1', compilerVersions, publicDirectory: publicDir, files, staticSources: sources, functionSources: sourceFiles.filter(p => p.startsWith('functions/')).map(path => ({ path, sha256: hash(git('show', `${expected}:${path}`)) })), migrations, warning: 'LOCAL ARTIFACT ONLY. No deployment or production migration has occurred.' };
+const manifest = { commit: expected, tree: git('rev-parse', `${expected}^{tree}`).toString().trim(), build: 'ac-delivery-20261003-r1', compilerVersions, publicDirectory: publicDir, files, staticSources: sources, functionSources: sourceFiles.filter(p => p.startsWith('functions/')).map(path => ({ path, sha256: hash(git('show', `${expected}:${path}`)) })), migrations, warning: 'LOCAL ARTIFACT ONLY. No deployment or production migration has occurred.' };
 writeFileSync(join(output, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 console.log(JSON.stringify({ commit: expected, publicFiles: files.length, migrations: migrations.length, manifest: join(output, 'manifest.json'), manifestSha256: hash(readFileSync(join(output, 'manifest.json'))) }, null, 2));

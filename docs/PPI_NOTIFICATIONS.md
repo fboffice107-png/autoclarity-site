@@ -67,3 +67,50 @@ Do not enable or bind `SMS_QUEUE` until all of the following are complete:
 
 The producer refuses to queue unless transactional consent is true, the
 customer selected text contact, `SMS_ENABLED=true`, and `SMS_QUEUE` exists.
+
+## Booking proposal delivery ledger (0019)
+
+`sendBookingProposalDelivery` is the single proposal communication path for
+initial sends, retrying the current stored email, and explicitly confirmed
+resends. It reads contacts, vehicle, quote and offered slots from D1. Quote,
+appointment, agreement, checkout and payment logic are unchanged. The existing
+branded customer email template is rendered once into the existing outbox;
+text uses that exact persisted canonical portal URL. Safe email-link refreshes
+are read back from their successor outbox record before any first text handoff.
+
+The additive `proposal_deliveries` table holds operation/channel status, message
+references, timestamps, exact text snapshot and the text destination/job ID.
+Email content and destination stay in `messages`. The authenticated dashboard
+masks summary destinations and hides bearer URLs in snapshots. Owner email
+includes the full canonical URL, original customer email body and exact text
+body, plus customer/vehicle/request/proposal details and channel outcomes.
+The owner email is separate (one per delivery operation), never a duplicate
+customer recipient. Owner failure cannot undo customer acceptance. Owner-only
+retries preserve historical links and never send to the customer.
+
+Email `accepted` means Resend accepted the API call, not mailbox delivery.
+`recorded` means no provider acceptance is confirmed. Text `queued` means only
+Cloudflare Queue acceptance; this repository still has no SMS provider,
+consumer or delivery webhook. `unknown` means queue handoff threw or timed out
+and may have succeeded. Neither state is described as a sent text. Missing
+contact data, disabled SMS, missing binding, and consent/preference gates have
+separate safe reasons. No new credentials are needed for email.
+
+Each operation is claimed in D1 before sending. Initial sends retain the
+existing proposal and outbox idempotency keys. Retry/resend requests carry the
+latest delivery ID. A unique parent-operation constraint prevents two browser
+tabs from starting different operations from the same observed state. Resend
+also requires an explicit confirmation and operation key, reuses the saved
+quote/email content, and rejects expired, superseded or no-longer-open offers.
+Retries preserve any queued or ambiguous prior text instead of enqueuing again.
+After an ambiguous text handoff, review the queue/provider before explicitly
+resending. A `processing` operation is not automatically reclaimed after a
+crash: inspect its outbox/queue before operational reconciliation. A failed
+tracking write is shown as interrupted, never blanket delivery success.
+
+No old proposal is backfilled or sent by GET. Existing sent proposals continue
+to show their original outbox snapshot; an intentional resend is available
+under Advanced delivery actions. Generic failed-email retry routes proposal
+mail through this service. Retry after Resend's 24-hour key window still needs
+explicit fresh-copy confirmation. Provider error bodies and exception strings
+are not persisted in the new delivery ledger or logged from its error paths.

@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import adminScript from '../../assets/js/ppi-admin.js?raw';
 import portalScript from '../../assets/js/ppi-portal.js?raw';
 import formScript from '../../assets/js/ppi-form.js?raw';
+// @ts-expect-error Node builtins are supplied by the test runtime.
 import { readFileSync } from 'node:fs';
 
 // Vite transforms `.css?raw`, so read the stylesheet from disk instead.

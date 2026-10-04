@@ -12,24 +12,23 @@ import { completeWithPublishedReport, type PublishedReportVersion } from '../../
 import { basePriceForTier, computeQuoteTotals, quoteExpiry, travelFeeForMiles, type QuoteLineInput, type Tier } from '../../../lib/pricing.ts';
 import { isTier, suggestTier, tierMismatch } from '../../../lib/vehicle-class.ts';
 import { isRecordKind, testRecordReason } from '../../../lib/record-kind.ts';
-import { buildPriceBreakdown, type PriceBreakdown } from '../../../lib/quote-math.ts';
+import { buildPriceBreakdown } from '../../../lib/quote-math.ts';
 import {
   defaultProposalMessage,
   findProposalByKey,
   latestProposal,
   newProposalId,
-  recordProposalNotification,
   travelSentence,
   validateSlotTimes,
   hasSameDaySlot,
   MAX_OFFERED_SLOTS,
   manualSlotOfferError,
   type BookingProposalRow,
-  type SlotCandidate,
 } from '../../../lib/booking-proposal.ts';
-import { proposalEmailDetails, queueProposalOwnerCopy } from '../../../lib/proposal-email.ts';
+import { proposalEmailDetails } from '../../../lib/proposal-email.ts';
+import { sendBookingProposalDelivery, proposalDeliveryDetails, ProposalDeliveryError } from '../../../lib/proposal-delivery.ts';
 import { issueMagicLink, portalUrl } from '../../../lib/magic.ts';
-import { retryStoredEmail, sendTemplate, type EmailResult, type EmailStatus, type EmailTemplateKey, type StoredEmailMessage } from '../../../lib/email.ts';
+import { resendIdempotencyWindowOpen, retryStoredEmail, sendTemplate, type EmailResult, type EmailStatus, type EmailTemplateKey, type StoredEmailMessage } from '../../../lib/email.ts';
 import { persistNotificationIssue, resolveNotificationActionIssues } from '../../../lib/notification-issues.ts';
 import { classifyStripeRefundStatus, createRefund, StripeConfigError, type StripeRefundProviderStatus } from '../../../lib/stripe.ts';
 import { releaseExpiredHolds } from '../../../lib/portal.ts';
@@ -130,19 +129,6 @@ function fmtSlot(startsAt: string, timezone: string): string {
 }
 
 
-/** A slate of times reads as a wall of timestamps unless it is grouped. */
-function groupSlotsByDay(startsAt: string[], timezone: string): string {
-  const days = new Map<string, string[]>();
-  for (const iso of startsAt) {
-    const when = new Date(iso);
-    const day = when.toLocaleDateString('en-US', { timeZone: timezone, weekday: 'long', month: 'long', day: 'numeric' });
-    const time = when.toLocaleTimeString('en-US', { timeZone: timezone, hour: 'numeric', minute: '2-digit', hour12: true });
-    if (!days.has(day)) days.set(day, []);
-    days.get(day)!.push(time);
-  }
-  return [...days.entries()].map(([day, times]) => `  ${day}: ${times.join(', ')}`).join('\n');
-}
-
 async function notificationFailureResponse(
   db: D1Database,
   actor: string,
@@ -237,78 +223,6 @@ async function notificationLinkFailureResponse(
 
 // --------------------------------------------------------- proposal helpers
 
-/** One place that renders the proposal email, used by send and by retry. */
-async function deliverProposalEmail(
-  env: Env,
-  db: D1Database,
-  input: {
-    requestId: string;
-    proposalId: string;
-    customerFirstName: string;
-    waitUntil: (promise: Promise<unknown>) => void;
-    ref: string;
-    email: string;
-    config: Awaited<ReturnType<typeof getConfig>>;
-    base: string;
-    breakdown?: PriceBreakdown;
-    priceLines?: string[];
-    totals: { totalCents: number };
-    slots?: SlotCandidate[];
-    slotStarts?: string[];
-    expiresAt: string;
-    customerMessage: string;
-  },
-): Promise<EmailResult> {
-  const { config } = input;
-  let token: string;
-  try {
-    // rotate = false: every link AutoClarity has already given this customer
-    // keeps working, so an older email is never silently broken.
-    ({ token } = await issueMagicLink(db, input.requestId, config, false));
-  } catch (e) {
-    await recordProposalNotification(db, input.proposalId, 'failed', null, `secure link unavailable: ${String(e).slice(0, 200)}`);
-    return { id: null, status: 'failed', failure: 'template_failed' };
-  }
-
-  const priceLines = input.priceLines
-    ?? (input.breakdown?.lines ?? []).map((line) => `  ${line.label}: ${line.display}`);
-  const slotStarts = input.slotStarts ?? (input.slots ?? []).map((s) => s.startsAt);
-
-  const emailResult = await sendTemplate(env, db, input.requestId, 'booking_proposal', input.email, {
-    ref: input.ref,
-    portalUrl: portalUrl(input.base, token),
-    supportEmail: config.supportEmail,
-    extra: {
-      message: input.customerMessage,
-      priceLines: priceLines.join('\n'),
-      total: formatCents(input.totals.totalCents),
-      slots: groupSlotsByDay(slotStarts, config.scheduling.timezone),
-      expires: fmtSlot(input.expiresAt, config.scheduling.timezone),
-    },
-  }, undefined, `booking_proposal:${input.proposalId}`);
-
-  // Only the provider's acceptance earns the word "sent".
-  const status = emailResult.status === 'sent'
-    ? 'sent'
-    : emailResult.status === 'recorded'
-      ? 'queued'
-      : 'failed';
-  await recordProposalNotification(
-    db,
-    input.proposalId,
-    status,
-    emailResult.id,
-    status === 'failed' ? (emailResult.failure ?? 'delivery_failed') : null,
-  );
-  // Optional owner delivery is isolated from the already completed customer
-  // send. Provider work continues after the response, using its own outbox key.
-  await queueProposalOwnerCopy(env, db, {
-    requestId: input.requestId, proposalId: input.proposalId,
-    customerFirstName: input.customerFirstName, customerEmail: emailResult,
-  }, input.waitUntil);
-  return emailResult;
-}
-
 /** Proposal shape returned to the dashboard, including its offered windows. */
 async function describeProposal(
   db: D1Database,
@@ -332,6 +246,7 @@ async function describeProposal(
         .all<{ id: string; starts_at: string; status: string }>()
     : { results: [] as Array<{ id: string; starts_at: string; status: string }> };
   return {
+    delivery: await proposalDeliveryDetails(db, proposal.id),
     ...await proposalEmailDetails(db, {
       requestId: proposal.request_id, proposalId: proposal.id,
       messageId: proposal.notification_message_id, sentAt: proposal.sent_at,
@@ -540,6 +455,9 @@ interface AdminActionBody {
   refundOperationId?: string;
   proposalKey?: string;
   proposalId?: string;
+  deliveryId?: string;
+  deliveryKey?: string;
+  confirmResend?: boolean;
   vehicleLabel?: string;
   recordKind?: string;
   sameDayPriority?: boolean;
@@ -1174,7 +1092,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           ok: true,
           duplicate: true,
           proposal: await describeProposal(db, existingProposal, config),
-          note: 'This proposal was already sent. Nothing was duplicated.',
+          note: 'This proposal is already saved. Review its recorded delivery status; nothing was duplicated.',
         });
       }
 
@@ -1360,11 +1278,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
       // The proposal is saved and durable from here. Whatever the email does
       // next is recorded against it truthfully rather than assumed.
-      const emailResult = await deliverProposalEmail(env, db, {
-        requestId: id, proposalId, ref: req.ref, email: req.email, config, base,
-        customerFirstName: req.full_name, waitUntil: task => context.waitUntil(task),
-        breakdown, totals, slots: slotCheck.valid, expiresAt, customerMessage,
-      });
+      let deliveryResult;
+      try { deliveryResult = await sendBookingProposalDelivery(env, db, { requestId: id, proposalId, config, base }); }
+      catch { return errorJson('delivery_unavailable', 'The proposal was saved, but delivery results could not be confirmed. Refresh and review the outbox before retrying.', 503, { actionApplied: true, proposalId }); }
+      const emailResult = deliveryResult.email;
 
       return json({
         ok: true,
@@ -1379,7 +1296,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         notification: {
           messageId: emailResult.id,
           emailStatus: emailResult.status,
-          deliveryConfirmed: emailResult.status === 'sent',
+          deliveryConfirmed: false,
+          providerAccepted: emailResult.status === 'sent',
+          delivery: deliveryResult.delivery,
         },
       }, emailResult.status === 'failed' ? 207 : 200);
     }
@@ -1387,50 +1306,29 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     // ------------------------------------------ retry_proposal_notification
     //
     // Safe retry: reuses the SAME stored proposal and the SAME outbox dedupe
-    // key, so it can never create a second proposal, a second quote, a second
-    // set of times, or a second email.
-    case 'retry_proposal_notification': {
+    // key within the provider retention window. An explicit resend uses a new
+    // delivery operation but never creates a new quote or appointment slate.
+    case 'retry_proposal_notification':
+    case 'resend_booking_proposal': {
       const proposalId = clampStr(body.proposalId, 60);
-      const proposal = await db
-        .prepare(`SELECT * FROM booking_proposals WHERE id = ? AND request_id = ?`)
-        .bind(proposalId, id)
-        .first<BookingProposalRow>();
-      if (!proposal) return errorJson('not_found', 'That booking proposal was not found for this request.', 404);
-      if (proposal.notification_status === 'sent') {
-        return json({ ok: true, alreadySent: true, note: 'This proposal was already sent. Nothing was re-sent.' });
+      if (body.action === 'retry_proposal_notification' && !body.deliveryId) {
+        const sent = await db.prepare("SELECT id FROM booking_proposals WHERE id = ? AND request_id = ? AND notification_status = 'sent'").bind(proposalId, id).first();
+        if (sent) return json({ ok: true, alreadySent: true });
       }
-
-      const quote = await db
-        .prepare(`SELECT id, total_cents, expires_at, status FROM quotes WHERE id = ? AND request_id = ?`)
-        .bind(proposal.quote_id, id)
-        .first<{ id: string; total_cents: number; expires_at: string; status: string }>();
-      if (!quote || quote.status === 'superseded') {
-        return errorJson('stale_proposal', 'A newer proposal has replaced this one. Send the current proposal instead.', 409);
+      try {
+        const result = await sendBookingProposalDelivery(env, db, {
+          requestId: id, proposalId, config, base,
+          mode: body.action === 'resend_booking_proposal' ? 'resend' : 'retry',
+          expectedDeliveryId: body.deliveryId, operationKey: body.deliveryKey,
+          confirmResend: body.confirmResend, confirmFresh: body.confirmFresh,
+        });
+        await auditLog(db, actor, body.action, 'ppi_request', id, { proposalId, emailStatus: result.email.status });
+        return json({ ok: true, duplicate: result.duplicate, notification: { messageId: result.email.id,
+          emailStatus: result.email.status, deliveryConfirmed: false, providerAccepted: result.email.status === 'sent', delivery: result.delivery } }, result.email.status === 'failed' ? 207 : 200);
+      } catch (error) {
+        if (error instanceof ProposalDeliveryError) return errorJson(error.code, error.message, 409);
+        return errorJson('delivery_unavailable', 'Delivery results could not be confirmed. Refresh and review the outbox before retrying.', 503);
       }
-
-      const lines = await db
-        .prepare(`SELECT kind, label, amount_cents FROM quote_line_items WHERE quote_id = ? ORDER BY sort`)
-        .bind(proposal.quote_id)
-        .all<{ kind: string; label: string; amount_cents: number }>();
-      const slots = await db
-        .prepare(`SELECT starts_at FROM appointment_slots WHERE request_id = ? AND status IN ('offered','held','confirmed') ORDER BY starts_at`)
-        .bind(id)
-        .all<{ starts_at: string }>();
-
-      const emailResult = await deliverProposalEmail(env, db, {
-        requestId: id, proposalId: proposal.id, ref: req.ref, email: req.email, config, base,
-        customerFirstName: req.full_name, waitUntil: task => context.waitUntil(task),
-        priceLines: (lines.results ?? []).map((l) => `  ${l.label}: ${l.kind === 'discount' ? '−' : ''}${formatCents(Math.abs(l.amount_cents))}`),
-        totals: { totalCents: quote.total_cents },
-        slotStarts: (slots.results ?? []).map((s) => s.starts_at),
-        expiresAt: quote.expires_at,
-        customerMessage: proposal.customer_message ?? '',
-      });
-      await auditLog(db, actor, 'retry_proposal_notification', 'ppi_request', id, { proposalId: proposal.id, emailStatus: emailResult.status });
-      return json({
-        ok: true,
-        notification: { messageId: emailResult.id, emailStatus: emailResult.status, deliveryConfirmed: emailResult.status === 'sent' },
-      }, emailResult.status === 'failed' ? 207 : 200);
     }
 
     // ------------------------------------------------------------- send_quote
@@ -1729,22 +1627,37 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         return errorJson('already_sent', 'This email is already marked sent; it was not sent again.', 409);
       }
 
+      if (message.template === 'booking_proposal') {
+        if (!resendIdempotencyWindowOpen(message.created_at) && !body.confirmFresh) return errorJson('email_retry_window_expired',
+          'Review provider delivery history before explicitly confirming a fresh copy.', 409, { requiresFreshConfirmation: true });
+        const proposal = await db.prepare(`SELECT id FROM booking_proposals WHERE request_id = ? AND notification_message_id = ?`)
+          .bind(id, message.id).first<{ id: string }>();
+        if (!proposal) return errorJson('stale_proposal', 'This is not the current proposal email. Review the latest delivery status.', 409);
+        try {
+          const delivery = await sendBookingProposalDelivery(env, db, { requestId: id, proposalId: proposal.id, config, base,
+            mode: 'retry', expectedDeliveryId: body.deliveryId, operationKey: 'email_' + message.id + (body.confirmFresh ? '_fresh' : ''), confirmFresh: body.confirmFresh });
+          await auditLog(db, actor, 'retry_email', 'message', message.id, { emailStatus: delivery.email.status });
+          if (delivery.email.failure === 'idempotency_window_expired') return errorJson('email_retry_window_expired',
+            'Review delivery history before explicitly confirming a fresh copy.', 409, { requiresFreshConfirmation: true });
+          return json({ ok: true, duplicate: delivery.duplicate, messageId: delivery.email.id, emailStatus: delivery.email.status,
+            notification: { delivery: delivery.delivery } }, delivery.email.status === 'failed' ? 207 : 200);
+        } catch (error) {
+          if (error instanceof ProposalDeliveryError) return errorJson(error.code, error.message, 409);
+          return errorJson('delivery_unavailable', 'Delivery tracking is unavailable. Refresh and review the stored results.', 503);
+        }
+      }
+
       const recordedSupport = message.body_text?.match(/^Questions\?\s+([^\s]+@[^\s]+)$/m)?.[1];
       const replyTo = message.template?.startsWith('owner_') ? req.email : (recordedSupport ?? config.supportEmail);
       const result = await retryStoredEmail(env, db, message, replyTo, {
         publicBaseUrl: base,
         config,
         confirmFreshAfterWindow: body.confirmFresh === true,
+        preserveSnapshotLinks: message.template?.startsWith('owner_'),
       });
-      if (message.template === 'booking_proposal' && result.status === 'sent') {
-        const proposal = await db.prepare(`SELECT id FROM booking_proposals WHERE request_id = ? AND notification_message_id = ?`)
-          .bind(id, message.id).first<{ id: string }>();
-        if (proposal) {
-          await recordProposalNotification(db, proposal.id, 'sent', result.id, null);
-          await queueProposalOwnerCopy(env, db, {
-            requestId: id, proposalId: proposal.id, customerFirstName: req.full_name, customerEmail: result,
-          }, task => context.waitUntil(task));
-        }
+      if (message.template === 'owner_booking_proposal' && result.id) {
+        await db.prepare('UPDATE proposal_deliveries SET owner_message_id = ?, owner_status = ?, owner_reason = ? WHERE request_id = ? AND owner_message_id = ?')
+          .bind(result.id, result.status === 'sent' ? 'accepted' : result.status, result.status === 'sent' ? null : 'Owner email acceptance remains unconfirmed.', id, message.id).run();
       }
       await auditLog(db, actor, 'retry_email', 'message', message.id, {
         from: message.status,

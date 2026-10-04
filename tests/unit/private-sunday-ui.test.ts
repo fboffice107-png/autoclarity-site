@@ -139,7 +139,7 @@ describe('per-date owner proposal choices', () => {
     let click: () => void = () => {};
     const sent: any[] = [];
     const start = admin.indexOf('      sendBtn.addEventListener("click", function () {');
-    const end = admin.indexOf('      content.querySelectorAll("[data-retry-proposal]")', start);
+    const end = admin.indexOf('      content.querySelectorAll("[data-resend-proposal]")', start);
     vm.runInNewContext(admin.slice(start, end), {
       sendBtn: { addEventListener: (_: string, fn: () => void) => { click = fn; }, getAttribute: () => '22400' },
       currentForm: () => ({ message: 'Keep this message', internal: 'Private note', expires: '48' }),

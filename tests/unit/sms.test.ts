@@ -47,3 +47,19 @@ describe('transactional SMS queue seam', () => {
     expect(String(job['body'])).toContain('Reply STOP to opt out');
   });
 });
+
+describe('bounded SMS queue handoff', () => {
+  it('reports a timeout without treating it as sent or enqueueing a duplicate', async () => {
+    vi.useFakeTimers();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const send = vi.fn((_job: unknown) => new Promise<void>(() => {}));
+      const pending = queueTransactionalSms({ SMS_ENABLED: 'true', SMS_QUEUE: { send } } as unknown as Env, { ...input, jobId: 'stable_operation_id' });
+      await vi.advanceTimersByTimeAsync(10001);
+      expect(await pending).toBe('failed');
+      expect(send).toHaveBeenCalledOnce();
+      expect(send.mock.calls[0]?.[0]).toMatchObject({ id: 'stable_operation_id' });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); log.mockRestore(); }
+  });
+});

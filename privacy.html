@@ -29,7 +29,7 @@
 <div class="doc-card">
 
 <h1>Privacy Policy</h1>
-<p><strong>Last updated:</strong> August 15, 2026</p>
+<p><strong>Last updated:</strong> October 6, 2026</p>
 
 <p>
 AutoClarity is an informational vehicle-guidance application designed to help users better understand
@@ -37,22 +37,49 @@ possible vehicle issues using structured diagnostic logic inspired by real-world
 </p>
 
 <p>
-This Privacy Policy explains how we collect, use, and share information when you use AutoClarity.
+This Privacy Policy covers the AutoClarity iPhone app. It describes the currently available
+version 2.0.1 separately from planned cloud report features for version 2.1.0. Those planned features
+are not available in version 2.0.1; the descriptions below apply only if they are released and enabled
+in a later version you use.
 </p>
 
 <h2>1. Information We Collect</h2>
 <p>
-We may collect limited information necessary to operate the app, including:
+<strong>Diagnostic answers and reports in version 2.0.1.</strong> The app processes your symptom
+selections and generates and saves reports on your device. Its normal diagnostic flow does not upload
+your full answers or report content to an AutoClarity report server. If you choose to export or share
+a report, the app or service you select receives that report and handles it under its own policies.
+</p>
+<p>
+<strong>Information collected by the app and its service providers.</strong> Firebase Analytics and
+RevenueCat receive information used for analytics and purchase services, including:
 </p>
 <ul>
-  <li>Symptom selections and diagnostic inputs</li>
-  <li>Generated report data</li>
-  <li>App usage data (e.g., screens viewed, actions taken)</li>
-  <li>Purchase, subscription, and entitlement status</li>
-  <li>Device and technical information (e.g., device type, OS version)</li>
+  <li>App interactions, such as app opens, diagnostic-flow events, paywall views, and purchase or restore actions</li>
+  <li>Purchase history, product identifiers, prices and currencies, subscription and entitlement status</li>
+  <li>App-instance, installation, device, and app-specific customer identifiers that distinguish an installation or customer over time</li>
+  <li>Approximate location derived from your network IP address for analytics, rather than precise GPS location</li>
+  <li>Technical information, such as device model, operating system, app and SDK versions, and purchase-error information</li>
 </ul>
 <p>
-We do <strong>not</strong> collect sensitive personal information such as full payment card numbers.
+Network services also process IP addresses and request information to deliver and secure their services.
+If you email support, we receive your email address and the information you choose to include.
+Apple processes payments; we do not receive your full payment card details.
+</p>
+<h3>Planned cloud report features (not active in version 2.0.1)</h3>
+<p>
+If cloud report access is enabled in a later version, AutoClarity will use a verified App Store
+transaction to establish an app-specific account identifier. This does not require you to give
+AutoClarity your Apple account email or password. That identifier will link your report access and
+purchase records across devices and will also be used with Firebase Authentication and RevenueCat.
+</p>
+<p>
+The cloud service will store completed report content, including your diagnostic answers, results,
+report identifiers and dates, and vehicle details you provide, such as year, make, model, engine,
+mileage, and fuel type. It will also store purchase-verification records, report-credit and free-report
+usage, recovery status, and account-deletion requests. This supports access, recovery, purchase
+fulfillment, and abuse prevention. Firebase Authentication, App Check, and backend services will process
+authentication, app/device verification, and technical request data to protect that access.
 </p>
 
 <h2>2. Analytics and Tracking</h2>
@@ -61,17 +88,25 @@ We use <strong>Firebase Analytics</strong> (a Google service) to understand how 
 including events such as app opens, diagnostic flows, paywall views, and purchases.
 </p>
 <p>
-This information is used to improve performance, usability, and conversion flow. Analytics data may be
-aggregated and does not directly identify you.
+This information is used to understand usage and purchases and improve the app and its purchase flow.
+Analytics records can be linked to a particular app installation or device, even when we do not know
+your name. Technical information also helps providers
+understand the use and operation of their SDKs.
 </p>
 <p>
-AutoClarity does not request Apple's App Tracking Transparency permission, use Apple's advertising
-identifier (IDFA), or use Firebase Analytics to track you across other companies' apps or websites.
+The app sends usage and purchase events to Firebase Analytics. It does not send full diagnostic
+answers or report content as Firebase Analytics event parameters.
+</p>
+<p>
+We have disabled Google signals and advertising personalization for this Analytics property and have
+not linked it to Google Ads. Optional account-level sharing with Google products and services,
+modeling, technical support, and recommendations is disabled. These settings describe the current
+configuration; they do not mean previously collected data has been erased.
 </p>
 
 <h2>3. Purchases and Subscriptions</h2>
 <p>
-AutoClarity provides one successfully completed diagnostic report at no charge. Additional new reports
+In version 2.0.1, AutoClarity provides one successfully completed diagnostic report at no charge. Additional new reports
 are available through an auto-renewing annual subscription. Apple determines introductory-offer
 eligibility and displays the price that applies before purchase. During the August 15 through December 31,
 2026 introductory-offer period, eligible U.S. customers may pay $9.99 upfront for the first year; the
@@ -96,6 +131,11 @@ Existing monthly subscribers continue to be validated under their existing subsc
 active. Records needed to honor legitimate legacy single-report purchases are also retained and validated
 so the purchased fulfillment is not removed. AutoClarity 2.0.1 does not offer a new single-report purchase.
 </p>
+<p>
+If one-report credits become available in a later version, purchase and fulfillment records will also
+be used to verify those credits and the reports they unlock. The App Store purchase screen will show
+the available product and applicable price before you buy.
+</p>
 
 <h2>4. How We Use Information</h2>
 <p>
@@ -113,35 +153,66 @@ We use collected information to:
 
 <h2>5. How Information Is Shared</h2>
 <p>
-We do not sell your personal information. We may share limited information with trusted third-party
-providers strictly for operating the app, including:
+We do not sell your personal information. We use the following providers to operate and improve the app:
 </p>
 <ul>
-  <li>Analytics providers (e.g., Firebase/Google)</li>
-  <li>Subscription infrastructure (e.g., RevenueCat)</li>
-  <li>Hosting and backend services</li>
+  <li>Google/Firebase for app analytics and the related technical information described above</li>
+  <li>RevenueCat for purchase validation, subscription and entitlement management, and purchase analytics</li>
+  <li>For planned cloud features, Firebase authentication and app-verification services and Google Cloud/Firestore backend services for account, report, and purchase-access records</li>
 </ul>
 <p>
 We may also disclose information if required by law or to protect users, property, or safety.
 </p>
+<p>
+Provider information is available in
+<a href="https://firebase.google.com/support/privacy">Firebase's privacy and security information</a>,
+<a href="https://www.revenuecat.com/privacy">RevenueCat's Privacy Policy</a>, and
+<a href="https://www.apple.com/legal/privacy/">Apple's Privacy Policy</a>.
+</p>
 
 <h2>6. Data Retention</h2>
 <p>
-We retain information only as long as necessary to operate the service, resolve disputes,
-and comply with legal obligations.
+Report history in version 2.0.1 is stored on your device. Copies you export, share, or include in a
+device backup may remain separately. Removing the app or local reports does not delete analytics or
+purchase records already held by service providers.
+</p>
+<p>
+Our Google Analytics settings retain event data for 2 months and user data for 14 months. New activity
+restarts the retention period for the user identifier, so an active user's identifier may be retained
+longer. These settings do not limit standard aggregated reports. Purchase, technical, and support
+records have separate retention needs and provider policies. Purchase records may remain necessary
+to validate access, handle refunds or disputes, and meet legal obligations.
+</p>
+<p>
+For planned cloud features, account and report records will be held to provide access and recovery
+until deleted through the account-deletion process. Limited records of fulfilled purchases,
+free-report usage, and deletion handling may remain where necessary to prevent duplicate fulfillment,
+resolve disputes, or comply with law. Provider logs and backups may have separate retention periods.
 </p>
 
 <h2>7. Data Deletion Requests</h2>
 <p>
 You may request deletion of data associated with your use of AutoClarity by emailing
-<a href="mailto:support@getautoclarity.com">support@getautoclarity.com</a> from the device or with details
-that help us locate your records. Upon a verified request, we will delete or de-identify the information
+<a href="mailto:support@getautoclarity.com">support@getautoclarity.com</a> with your app version and details
+that help us locate the records concerned. Do not send your Apple account password or payment card details.
+Upon a verified request, we will delete or de-identify the information
 we and our service providers (such as RevenueCat and Firebase) hold about your app usage, where deletion
 is technically feasible and not required to be retained by law.
 </p>
 <p>
 Please note that purchase and billing records are held by Apple and are subject to Apple's own policies;
 we cannot delete records held by Apple.
+</p>
+<p>
+If the planned cloud account features become available, the app's Account &amp; Privacy screen will
+also let you submit and check a deletion request. A received or pending request is not confirmation
+that deletion has finished. Unused paid credits and unresolved purchases require review before
+erasure so paid value is not silently discarded. Contact support to check progress.
+</p>
+<p>
+Deleting app data or a cloud account does not cancel an Apple subscription. Manage or cancel your
+subscription separately through Apple to stop future renewal charges. Copies you previously exported
+or shared may remain with their recipients.
 </p>
 
 <h2>8. Your Privacy Rights</h2>
